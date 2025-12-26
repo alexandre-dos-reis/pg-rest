@@ -1,0 +1,6 @@
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - cpu-features
+  - msgpackr-extract
+  - protobufjs
+  - ssh2
