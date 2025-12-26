@@ -4,8 +4,8 @@ import { Settings } from "./settings";
 
 NodeRuntime.runMain(
   Effect.gen(function* () {
-    const settings = yield* Settings;
-    const some = yield* settings.initInStandaloneMode;
-    yield* Console.log(settings.db);
+    const settings = yield* Settings.initWithStandaloneMode;
+
+    yield* Console.log(settings);
   }).pipe(Effect.provide([Settings.Default])),
 );

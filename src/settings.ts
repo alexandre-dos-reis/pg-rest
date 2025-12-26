@@ -79,50 +79,67 @@ export const postgresUriSchema = Schema.transform(
 );
 
 export class Settings extends Effect.Service<Settings>()("pg-rest/Settings", {
-  effect: Effect.gen(function* () {
-    const {
-      raw,
-      scheme: _,
-      ...dbUriStruct
-    } = yield* Schema.Config(withPrefix("DB_URI"), postgresUriSchema);
+  accessors: true,
+  sync: () => ({
+    initWithLibraryMode: ({
+      dbUri,
+      dbSchemas = ["public"],
+      dbAnonRole = "anon",
+    }: {
+      dbUri: string;
+      dbSchemas?: Array<string>;
+      dbAnonRole?: string;
+    }) =>
+      Effect.gen(function* () {
+        const { raw, ...dbUriStruct } =
+          yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
 
-    const schemas = yield* Schema.Config(
-      withPrefix("DB_SCHEMAS"),
-      arraySchema,
-    ).pipe(Config.withDefault(["public"]));
-
-    const anonymousRole = yield* Schema.Config(
-      withPrefix("DB_ANON_ROLE"),
-      Schema.String,
-    ).pipe(Config.withDefault("anon"));
-
-    const props = {
-      db: {
-        uri: raw,
-        ...dbUriStruct,
-        schemas,
-      },
-      anonymousRole,
-    };
-
-    return {
-      initInLibraryMode: () => {
-        return {
-          ...props,
-          __mode__: "library" as const,
-        };
-      },
-      initInStandaloneMode: Effect.gen(function* () {
-        const port = yield* Schema.Config(withPrefix("PORT"), portSchema).pipe(
-          Config.withDefault(4900),
+        const schemas = yield* Schema.decodeUnknown(arraySchema)(dbSchemas);
+        const anonymousRole = yield* Schema.decodeUnknown(Schema.String)(
+          dbAnonRole,
         );
 
         return {
-          port,
-          ...props,
-          __mode__: "standalone" as const,
+          __mode__: "library" as const,
+          db: {
+            uri: raw,
+            ...dbUriStruct,
+            schemas,
+            anonymousRole,
+          },
         };
       }),
-    };
+    initWithStandaloneMode: Effect.gen(function* () {
+      const {
+        raw,
+        scheme: _,
+        ...dbUriStruct
+      } = yield* Schema.Config(withPrefix("DB_URI"), postgresUriSchema);
+
+      const schemas = yield* Schema.Config(
+        withPrefix("DB_SCHEMAS"),
+        arraySchema,
+      ).pipe(Config.withDefault(["public"]));
+
+      const anonymousRole = yield* Schema.Config(
+        withPrefix("DB_ANON_ROLE"),
+        Schema.String,
+      ).pipe(Config.withDefault("anon"));
+
+      const port = yield* Schema.Config(withPrefix("PORT"), portSchema).pipe(
+        Config.withDefault(4900),
+      );
+
+      return {
+        port,
+        db: {
+          uri: raw,
+          ...dbUriStruct,
+          schemas,
+          anonymousRole,
+        },
+        __mode__: "standalone" as const,
+      };
+    }),
   }),
 }) {}
