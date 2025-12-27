@@ -1,16 +1,26 @@
 import { Effect } from "effect";
-import { Settings, type LibSettingsArgs } from "./settings";
+import {
+  LibrarySettingsLive,
+  Settings,
+  type LibSettingsArgs,
+} from "./settings";
 
-const program = (args: LibSettingsArgs) =>
+const initProgram = (args: LibSettingsArgs) =>
   Effect.gen(function* () {
-    const settings = (yield* Settings)(args);
+    const settings = yield* (yield* Settings)(args);
+
+    return {
+      handler: (request: Request): Response | Promise<Response> => {
+        return new Response();
+      },
+    };
   });
 
-export const pgRest = (args: LibSettingsArgs) => {
-  // const some = Effect.runPromiseExit(program(args));
+export const pgRest = async (args: LibSettingsArgs) => {
+  const { handler } = await Effect.runPromise(
+    initProgram(args).pipe(Effect.provide([LibrarySettingsLive])),
+  );
   return {
-    handler: (request: Request): Response | Promise<Response> => {
-      return new Response();
-    },
+    handler,
   };
 };

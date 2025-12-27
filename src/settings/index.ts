@@ -103,12 +103,13 @@ const CommonSchema = Schema.Struct({
 
 const StandaloneSettingsSchema = Schema.Struct({
   mode: Schema.Literal("standalone"),
-  port: Schema.UndefinedOr(portSchema),
+  port: portSchema,
   db: Schema.Struct(CommonSchema.fields),
 });
 
 const LibrarySettingsSchema = Schema.Struct({
   mode: Schema.Literal("library"),
+  port: Schema.Undefined,
   db: Schema.Struct(CommonSchema.fields),
 });
 
@@ -116,6 +117,8 @@ const SettingsSchema = Schema.Union(
   StandaloneSettingsSchema,
   LibrarySettingsSchema,
 );
+
+export type SettingsType = typeof SettingsSchema.Type;
 
 export class Settings extends Context.Tag("pg-rest/Settings")<
   Settings,
@@ -167,6 +170,7 @@ export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
 
     return {
       mode: "library",
+      port: undefined,
       db: {
         ...dbUriStruct,
         schemas: dbSchemas,

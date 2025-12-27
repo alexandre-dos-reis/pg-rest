@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@effect/language-service": "^0.62.5",
+    "@effect/platform": "^0.94.0",
     "@effect/platform-node": "^0.104.0",
     "@effect/sql-pg": "^0.50.0",
     "effect": "^3.19.13",
