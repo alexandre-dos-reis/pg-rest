@@ -30,7 +30,7 @@ const ServerLive = Layer.scoped(
     const settings = yield* Settings.get();
 
     if (settings.mode !== "standalone") {
-      throw new Error("Invalid mode");
+      return yield* Effect.dieMessage("Settings mode is not Standalone !");
     }
 
     return yield* NodeHttpServer.make(() => createServer(), {

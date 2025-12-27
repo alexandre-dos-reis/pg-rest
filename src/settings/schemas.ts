@@ -110,7 +110,6 @@ const StandaloneSettingsSchema = Schema.Struct({
 
 const LibrarySettingsSchema = Schema.Struct({
   mode: Schema.Literal("library"),
-  port: Schema.Undefined,
   db: Schema.Struct(CommonSchema.fields),
 });
 

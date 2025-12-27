@@ -67,7 +67,6 @@ export class Settings extends Context.Tag("pg-rest/Settings")<
 
         return {
           mode: "library" as const,
-          port: undefined,
           db: {
             ...dbUriStruct,
             schemas: dbSchemas,
