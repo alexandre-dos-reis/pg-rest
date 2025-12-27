@@ -26,7 +26,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "start": "tsx ./src/index.ts",
+    "start": "tsx ./src/standalone.ts",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"

@@ -48,7 +48,7 @@ export const postgresUriSchema = Schema.transform(
 
       if (!match) {
         throw new Error(
-          "Invalid Postgres URI: expected format postgres://user:pass@host:port/db",
+          "Invalid Postgres URI, expected format: postgres://user:pass@host:5432/database",
         );
       }
 
@@ -78,38 +78,40 @@ export const postgresUriSchema = Schema.transform(
   },
 );
 
+const libSettingsArgsSchema = Schema.Struct({
+  dbUri: Schema.String,
+  dbSchemas: Schema.UndefinedOr(Schema.Array(Schema.String)).pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => ["public"] as const),
+  ),
+  dbAnonymousRole: Schema.UndefinedOr(Schema.String).pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => "anon"),
+  ),
+});
+
 export class Settings extends Effect.Service<Settings>()("pg-rest/Settings", {
   accessors: true,
   sync: () => ({
-    initWithLibraryMode: ({
-      dbUri,
-      dbSchemas = ["public"],
-      dbAnonRole = "anon",
-    }: {
-      dbUri: string;
-      dbSchemas?: Array<string>;
-      dbAnonRole?: string;
-    }) =>
+    initInLibraryMode: (args: typeof libSettingsArgsSchema.Type) =>
       Effect.gen(function* () {
+        const { dbUri, dbAnonymousRole, dbSchemas } =
+          yield* Schema.decodeUnknown(libSettingsArgsSchema)(args);
+
         const { raw, ...dbUriStruct } =
           yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
-
-        const schemas = yield* Schema.decodeUnknown(arraySchema)(dbSchemas);
-        const anonymousRole = yield* Schema.decodeUnknown(Schema.String)(
-          dbAnonRole,
-        );
 
         return {
           __mode__: "library" as const,
           db: {
             uri: raw,
             ...dbUriStruct,
-            schemas,
-            anonymousRole,
+            schemas: dbSchemas,
+            anonymousRole: dbAnonymousRole,
           },
         };
       }),
-    initWithStandaloneMode: Effect.gen(function* () {
+    initInStandaloneMode: Effect.gen(function* () {
       const {
         raw,
         scheme: _,
