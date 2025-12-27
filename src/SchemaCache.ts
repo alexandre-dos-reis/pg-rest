@@ -1,14 +1,15 @@
 import { Effect } from "effect";
-import { Settings } from "./settings";
+import { PgClient } from "@effect/sql-pg";
 
 export class SchemaCache extends Effect.Service<SchemaCache>()(
   "pg-rest/SchemaCache",
   {
-    dependencies: [Settings.Default],
     effect: Effect.gen(function* () {
-      const settings = yield Settings.
+      const sql = yield* PgClient.PgClient;
 
-      return {};
+      return {
+        loadCache: () => sql`Select * from users`,
+      };
     }),
   },
 ) {}
