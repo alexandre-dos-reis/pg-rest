@@ -32,53 +32,48 @@ const pgUriStructSchema = Schema.Struct({
   uri: Schema.String,
 });
 
-export const postgresUriSchema = Schema.transform(
-  Schema.String,
-  pgUriStructSchema,
-  {
-    strict: true,
-    decode: (s) => {
-      // check scheme
-      const schemeMatch = s.match(PG_URI_SCHEME);
-      if (!schemeMatch) {
-        throw new Error(
-          "Invalid scheme: must be 'postgres://' or 'postgresql://'",
-        );
-      }
+const postgresUriSchema = Schema.transform(Schema.String, pgUriStructSchema, {
+  strict: true,
+  decode: (s) => {
+    // check scheme
+    const schemeMatch = s.match(PG_URI_SCHEME);
+    if (!schemeMatch) {
+      throw new Error(
+        "Invalid scheme: must be 'postgres://' or 'postgresql://'",
+      );
+    }
 
-      const rest = schemeMatch[2]; // everything after scheme
-      const match = rest?.match(PG_AUTH_HOST_DB);
+    const rest = schemeMatch[2]; // everything after scheme
+    const match = rest?.match(PG_AUTH_HOST_DB);
 
-      if (!match) {
-        throw new Error(
-          "Invalid Postgres URI, expected format: postgres://user:pass@host:5432/database",
-        );
-      }
+    if (!match) {
+      throw new Error(
+        "Invalid Postgres URI, expected format: postgres://user:pass@host:5432/database",
+      );
+    }
 
-      const [, user, password, host, port, database] = match;
+    const [, user, password, host, port, database] = match;
 
-      if (!host) throw new Error("Host is required in Postgres URI");
-      if (!database)
-        throw new Error("Database name is required in Postgres URI");
-      if (
-        port &&
-        (!/^\d+$/.test(port) || Number(port) <= 0 || Number(port) > 65535)
-      ) {
-        throw new Error("Port must be a valid number between 1 and 65535");
-      }
+    if (!host) throw new Error("Host is required in Postgres URI");
+    if (!database) throw new Error("Database name is required in Postgres URI");
+    if (
+      port &&
+      (!/^\d+$/.test(port) || Number(port) <= 0 || Number(port) > 65535)
+    ) {
+      throw new Error("Port must be a valid number between 1 and 65535");
+    }
 
-      return {
-        user: user || undefined,
-        password: password || undefined,
-        host,
-        port: port ? Number(port) : 5432,
-        database,
-        uri: s,
-      };
-    },
-    encode: (struct) => struct.uri,
+    return {
+      user: user || undefined,
+      password: password || undefined,
+      host,
+      port: port ? Number(port) : 5432,
+      database,
+      uri: s,
+    };
   },
-);
+  encode: (struct) => struct.uri,
+});
 
 const libSettingsArgsSchema = Schema.Struct({
   dbUri: Schema.String,
@@ -91,6 +86,8 @@ const libSettingsArgsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => "anon"),
   ),
 });
+
+export type LibSettingsArgs = typeof libSettingsArgsSchema.Type;
 
 const CommonSchema = Schema.Struct({
   ...pgUriStructSchema.fields,
@@ -122,63 +119,59 @@ const SettingsSchema = Schema.Union(
 
 export class Settings extends Context.Tag("pg-rest/Settings")<
   Settings,
-  {
-    readonly init: (
-      args?: typeof libSettingsArgsSchema.Type,
-    ) => Effect.Effect<typeof SettingsSchema.Type, ConfigError | ParseError>;
-  }
+  (
+    args?: typeof libSettingsArgsSchema.Type,
+  ) => Effect.Effect<typeof SettingsSchema.Type, ConfigError | ParseError>
 >() {}
 
-export const StandaloneSettingsLive = Layer.succeed(Settings, {
-  init: () =>
-    Effect.gen(function* () {
-      const dbUriStruct = yield* Schema.Config(
-        withPrefix("DB_URI"),
-        postgresUriSchema,
-      );
+export const StandaloneSettingsLive = Layer.succeed(Settings, () =>
+  Effect.gen(function* () {
+    const dbUriStruct = yield* Schema.Config(
+      withPrefix("DB_URI"),
+      postgresUriSchema,
+    );
 
-      const schemas = yield* Schema.Config(
-        withPrefix("DB_SCHEMAS"),
-        arraySchema,
-      ).pipe(Config.withDefault(["public"]));
+    const schemas = yield* Schema.Config(
+      withPrefix("DB_SCHEMAS"),
+      arraySchema,
+    ).pipe(Config.withDefault(["public"]));
 
-      const anonymousRole = yield* Schema.Config(
-        withPrefix("DB_ANON_ROLE"),
-        Schema.String,
-      ).pipe(Config.withDefault("anon"));
+    const anonymousRole = yield* Schema.Config(
+      withPrefix("DB_ANON_ROLE"),
+      Schema.String,
+    ).pipe(Config.withDefault("anon"));
 
-      const port = yield* Schema.Config(withPrefix("PORT"), portSchema).pipe(
-        Config.withDefault(4900),
-      );
+    const port = yield* Schema.Config(withPrefix("PORT"), portSchema).pipe(
+      Config.withDefault(4900),
+    );
 
-      return {
-        mode: "standalone",
-        port,
-        db: {
-          ...dbUriStruct,
-          schemas,
-          anonymousRole,
-        },
-      };
-    }),
-});
+    return {
+      mode: "standalone",
+      port,
+      db: {
+        ...dbUriStruct,
+        schemas,
+        anonymousRole,
+      },
+    };
+  }),
+);
 
-export const LibrarySettingsLive = Layer.succeed(Settings, {
-  init: (args) =>
-    Effect.gen(function* () {
-      const { dbUri, dbAnonymousRole, dbSchemas } = yield* Schema.decodeUnknown(
-        libSettingsArgsSchema,
-      )(args);
+export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
+  Effect.gen(function* () {
+    const { dbUri, dbAnonymousRole, dbSchemas } = yield* Schema.decodeUnknown(
+      libSettingsArgsSchema,
+    )(args);
 
-      const dbUriStruct = yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
+    const dbUriStruct = yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
 
-      return {
-        mode: "library",
-        db: {
-          ...dbUriStruct,
-          schemas: dbSchemas,
-          anonymousRole: dbAnonymousRole,
-        },
-      };
-    }),
-});
+    return {
+      mode: "library",
+      db: {
+        ...dbUriStruct,
+        schemas: dbSchemas,
+        anonymousRole: dbAnonymousRole,
+      },
+    };
+  }),
+);

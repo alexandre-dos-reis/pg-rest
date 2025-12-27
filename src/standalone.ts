@@ -1,10 +1,10 @@
 import { NodeRuntime } from "@effect/platform-node";
 import { Console, Effect } from "effect";
-import { Settings } from "./settings";
+import { Settings, StandaloneSettingsLive } from "./settings";
 
 const program = Effect.gen(function* () {
-  const settings = yield* Settings;
+  const settings = yield* (yield* Settings)();
   yield* Console.log(settings);
 });
 
-NodeRuntime.runMain(program.pipe(Effect.provide([Settings.Default])));
+NodeRuntime.runMain(program.pipe(Effect.provide(StandaloneSettingsLive)));

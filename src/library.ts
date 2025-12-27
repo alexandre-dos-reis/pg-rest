@@ -1,15 +1,13 @@
 import { Effect } from "effect";
-import { Settings } from "./settings";
+import { Settings, type LibSettingsArgs } from "./settings";
 
-type Args = Parameters<typeof Settings.initInLibraryMode>[number];
-
-const program = (args: Args) =>
+const program = (args: LibSettingsArgs) =>
   Effect.gen(function* () {
-    const settings = Settings.initInLibraryMode(args);
+    const settings = (yield* Settings)(args);
   });
 
-export const pgRest = (args: Args) => {
-  const some = Effect.runPromiseExit(program(args));
+export const pgRest = (args: LibSettingsArgs) => {
+  // const some = Effect.runPromiseExit(program(args));
   return {
     handler: (request: Request): Response | Promise<Response> => {
       return new Response();
