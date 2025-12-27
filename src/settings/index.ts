@@ -1,6 +1,4 @@
 import { Config, Context, Effect, Layer, Schema } from "effect";
-import type { ConfigError } from "effect/ConfigError";
-import type { ParseError } from "effect/ParseResult";
 
 const withPrefix = (name: string) => `PGREST_${name}`;
 
@@ -124,7 +122,7 @@ export class Settings extends Context.Tag("pg-rest/Settings")<
   Settings,
   (
     args?: typeof libSettingsArgsSchema.Type,
-  ) => Effect.Effect<typeof SettingsSchema.Type, ConfigError | ParseError>
+  ) => Effect.Effect<typeof SettingsSchema.Type>
 >() {}
 
 export const StandaloneSettingsLive = Layer.succeed(Settings, () =>
@@ -149,7 +147,7 @@ export const StandaloneSettingsLive = Layer.succeed(Settings, () =>
     );
 
     return {
-      mode: "standalone",
+      mode: "standalone" as const,
       port,
       db: {
         ...dbUriStruct,
@@ -157,7 +155,7 @@ export const StandaloneSettingsLive = Layer.succeed(Settings, () =>
         anonymousRole,
       },
     };
-  }),
+  }).pipe(Effect.orDieWith((configError) => configError.message)),
 );
 
 export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
@@ -169,7 +167,7 @@ export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
     const dbUriStruct = yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
 
     return {
-      mode: "library",
+      mode: "library" as const,
       port: undefined,
       db: {
         ...dbUriStruct,
@@ -177,5 +175,5 @@ export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
         anonymousRole: dbAnonymousRole,
       },
     };
-  }),
+  }).pipe(Effect.orDieWith((parseError) => parseError.message)),
 );
