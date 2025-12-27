@@ -3,7 +3,7 @@ import { Console, Effect } from "effect";
 import { Settings } from "./settings";
 
 const program = Effect.gen(function* () {
-  const settings = yield* Settings.initInStandaloneMode;
+  const settings = yield* Settings;
   yield* Console.log(settings);
 });
 
