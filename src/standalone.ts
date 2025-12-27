@@ -7,10 +7,12 @@ import {
   HttpServerResponse as Response,
 } from "@effect/platform";
 import { createServer } from "http";
+import { SchemaCache } from "./SchemaCache";
+import { PgClientLive } from "./PgClient";
 
 // Define the router with a single route for the root URL
 // https://github.com/Effect-TS/effect/tree/main/packages/platform
-const router = Router.empty.pipe(
+const app = Router.empty.pipe(
   Router.get("/", Response.text("Hello World")),
   Router.get(
     "/hello",
@@ -18,13 +20,12 @@ const router = Router.empty.pipe(
       return Response.text("Hello World");
     }),
   ),
+  Server.serve(),
+  Server.withLogAddress,
 );
 
-// Set up the application server with logging
-const app = router.pipe(Server.serve(), Server.withLogAddress);
-
 // Create a server layer with the specified port
-const ServerLive = Layer.scoped(
+const AppLive = Layer.scoped(
   Server.HttpServer,
   Effect.gen(function* () {
     const settings = yield* Settings.get();
@@ -33,14 +34,22 @@ const ServerLive = Layer.scoped(
       return yield* Effect.dieMessage("Settings mode is not Standalone !");
     }
 
+    // SchemaCache is initialized for side effects, but not used directly here
+    const schemaCache = yield* SchemaCache;
+
     return yield* NodeHttpServer.make(() => createServer(), {
       port: settings.port,
     });
   }),
 );
 
+const depsLive = Layer.mergeAll(Settings.StandaloneLive, SchemaCache.Default);
+
 NodeRuntime.runMain(
-  Layer.launch(Layer.provide(app, ServerLive)).pipe(
-    Effect.provide(Settings.StandaloneLive),
+  Layer.launch(Layer.provide(app, AppLive)).pipe(
+    Effect.provide([
+      Settings.StandaloneLive,
+      SchemaCache.Default.pipe(Layer.provide([Settings.StandaloneLive])),
+    ]),
   ),
 );

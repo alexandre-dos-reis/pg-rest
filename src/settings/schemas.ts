@@ -22,8 +22,8 @@ const PG_AUTH_HOST_DB =
   /^(?:([^:@]+)(?::([^@]+))?@)?([^:/?#]+)(?::(\d+))?\/(.+)$/;
 
 export const pgUriStructSchema = Schema.Struct({
-  user: Schema.UndefinedOr(Schema.String),
-  password: Schema.UndefinedOr(Schema.String),
+  username: Schema.UndefinedOr(Schema.String),
+  password: Schema.UndefinedOr(Schema.Redacted(Schema.String)),
   host: Schema.String,
   port: Schema.Number,
   database: Schema.String,
@@ -53,7 +53,7 @@ export const postgresUriSchema = Schema.transform(
         );
       }
 
-      const [, user, password, host, port, database] = match;
+      const [, username, password, host, port, database] = match;
 
       if (!host) throw new Error("Host is required in Postgres URI");
       if (!database)
@@ -66,7 +66,7 @@ export const postgresUriSchema = Schema.transform(
       }
 
       return {
-        user: user || undefined,
+        username: username || undefined,
         password: password || undefined,
         host,
         port: port ? Number(port) : 5432,
