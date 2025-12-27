@@ -1,13 +1,11 @@
 import { Effect } from "effect";
-import {
-  LibrarySettingsLive,
-  Settings,
-  type LibSettingsArgs,
-} from "./settings";
+import { Settings } from "./settings";
 
-const initProgram = (args: LibSettingsArgs) =>
+type Args = NonNullable<Parameters<typeof Settings.get>[0]>;
+
+const initProgram = (args: Args) =>
   Effect.gen(function* () {
-    const settings = yield* (yield* Settings)(args);
+    const settings = yield* Settings.get(args);
 
     return {
       handler: (request: Request): Response | Promise<Response> => {
@@ -16,9 +14,9 @@ const initProgram = (args: LibSettingsArgs) =>
     };
   });
 
-export const pgRest = async (args: LibSettingsArgs) => {
+export const pgRest = async (args: Args) => {
   const { handler } = await Effect.runPromise(
-    initProgram(args).pipe(Effect.provide([LibrarySettingsLive])),
+    initProgram(args).pipe(Effect.provide([Settings.LibraryLive])),
   );
   return {
     handler,

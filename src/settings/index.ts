@@ -1,179 +1,79 @@
 import { Config, Context, Effect, Layer, Schema } from "effect";
-
-const withPrefix = (name: string) => `PGREST_${name}`;
-
-const portSchema = Schema.NumberFromString.pipe(Schema.between(1000, 65_535));
-
-const arraySchema = Schema.transform(
-  Schema.String,
-  Schema.Array(Schema.String),
-  {
-    decode: (s) =>
-      s
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean),
-    encode: (arr) => arr.join(","),
-  },
-);
-
-const PG_URI_SCHEME = /^(postgres|postgresql):\/\/(.+)$/i;
-const PG_AUTH_HOST_DB =
-  /^(?:([^:@]+)(?::([^@]+))?@)?([^:/?#]+)(?::(\d+))?\/(.+)$/;
-
-const pgUriStructSchema = Schema.Struct({
-  user: Schema.UndefinedOr(Schema.String),
-  password: Schema.UndefinedOr(Schema.String),
-  host: Schema.String,
-  port: Schema.Number,
-  database: Schema.String,
-  uri: Schema.String,
-});
-
-const postgresUriSchema = Schema.transform(Schema.String, pgUriStructSchema, {
-  strict: true,
-  decode: (s) => {
-    // check scheme
-    const schemeMatch = s.match(PG_URI_SCHEME);
-    if (!schemeMatch) {
-      throw new Error(
-        "Invalid scheme: must be 'postgres://' or 'postgresql://'",
-      );
-    }
-
-    const rest = schemeMatch[2]; // everything after scheme
-    const match = rest?.match(PG_AUTH_HOST_DB);
-
-    if (!match) {
-      throw new Error(
-        "Invalid Postgres URI, expected format: postgres://user:pass@host:5432/database",
-      );
-    }
-
-    const [, user, password, host, port, database] = match;
-
-    if (!host) throw new Error("Host is required in Postgres URI");
-    if (!database) throw new Error("Database name is required in Postgres URI");
-    if (
-      port &&
-      (!/^\d+$/.test(port) || Number(port) <= 0 || Number(port) > 65535)
-    ) {
-      throw new Error("Port must be a valid number between 1 and 65535");
-    }
-
-    return {
-      user: user || undefined,
-      password: password || undefined,
-      host,
-      port: port ? Number(port) : 5432,
-      database,
-      uri: s,
-    };
-  },
-  encode: (struct) => struct.uri,
-});
-
-const libSettingsArgsSchema = Schema.Struct({
-  dbUri: Schema.String,
-  dbSchemas: Schema.UndefinedOr(Schema.Array(Schema.String)).pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => ["public"] as const),
-  ),
-  dbAnonymousRole: Schema.UndefinedOr(Schema.String).pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "anon"),
-  ),
-});
-
-export type LibSettingsArgs = typeof libSettingsArgsSchema.Type;
-
-const CommonSchema = Schema.Struct({
-  ...pgUriStructSchema.fields,
-  schemas: Schema.UndefinedOr(Schema.Array(Schema.String)).pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => ["public"] as const),
-  ),
-  anonymousRole: Schema.UndefinedOr(Schema.String).pipe(
-    Schema.propertySignature,
-    Schema.withConstructorDefault(() => "anon"),
-  ),
-});
-
-const StandaloneSettingsSchema = Schema.Struct({
-  mode: Schema.Literal("standalone"),
-  port: portSchema,
-  db: Schema.Struct(CommonSchema.fields),
-});
-
-const LibrarySettingsSchema = Schema.Struct({
-  mode: Schema.Literal("library"),
-  port: Schema.Undefined,
-  db: Schema.Struct(CommonSchema.fields),
-});
-
-const SettingsSchema = Schema.Union(
-  StandaloneSettingsSchema,
-  LibrarySettingsSchema,
-);
-
-export type SettingsType = typeof SettingsSchema.Type;
+import {
+  libSettingsArgsSchema,
+  SettingsSchema,
+  portSchema,
+  postgresUriSchema,
+  arraySchema,
+} from "./schemas";
 
 export class Settings extends Context.Tag("pg-rest/Settings")<
   Settings,
-  (
-    args?: typeof libSettingsArgsSchema.Type,
-  ) => Effect.Effect<typeof SettingsSchema.Type>
->() {}
+  {
+    get: (
+      args?: typeof libSettingsArgsSchema.Type,
+    ) => Effect.Effect<typeof SettingsSchema.Type>;
+  }
+>() {
+  static get(args?: typeof libSettingsArgsSchema.Type) {
+    return Effect.flatMap(this, (settings) => settings.get(args));
+  }
 
-export const StandaloneSettingsLive = Layer.succeed(Settings, () =>
-  Effect.gen(function* () {
-    const dbUriStruct = yield* Schema.Config(
-      withPrefix("DB_URI"),
-      postgresUriSchema,
-    );
+  static withPrefix = (name: string) => `PGREST_${name}`;
 
-    const schemas = yield* Schema.Config(
-      withPrefix("DB_SCHEMAS"),
-      arraySchema,
-    ).pipe(Config.withDefault(["public"]));
+  static StandaloneLive = Layer.sync(this, () => ({
+    get: () =>
+      Effect.gen(function* () {
+        const dbUriStruct = yield* Schema.Config(
+          Settings.withPrefix("DB_URI"),
+          postgresUriSchema,
+        );
 
-    const anonymousRole = yield* Schema.Config(
-      withPrefix("DB_ANON_ROLE"),
-      Schema.String,
-    ).pipe(Config.withDefault("anon"));
+        const schemas = yield* Schema.Config(
+          Settings.withPrefix("DB_SCHEMAS"),
+          arraySchema,
+        ).pipe(Config.withDefault(["public"]));
 
-    const port = yield* Schema.Config(withPrefix("PORT"), portSchema).pipe(
-      Config.withDefault(4900),
-    );
+        const anonymousRole = yield* Schema.Config(
+          Settings.withPrefix("DB_ANON_ROLE"),
+          Schema.String,
+        ).pipe(Config.withDefault("anon"));
 
-    return {
-      mode: "standalone" as const,
-      port,
-      db: {
-        ...dbUriStruct,
-        schemas,
-        anonymousRole,
-      },
-    };
-  }).pipe(Effect.orDieWith((configError) => configError.message)),
-);
+        const port = yield* Schema.Config(
+          Settings.withPrefix("PORT"),
+          portSchema,
+        ).pipe(Config.withDefault(4900));
 
-export const LibrarySettingsLive = Layer.succeed(Settings, (args) =>
-  Effect.gen(function* () {
-    const { dbUri, dbAnonymousRole, dbSchemas } = yield* Schema.decodeUnknown(
-      libSettingsArgsSchema,
-    )(args);
+        return {
+          mode: "standalone" as const,
+          port,
+          db: {
+            ...dbUriStruct,
+            schemas,
+            anonymousRole,
+          },
+        };
+      }).pipe(Effect.orDieWith((configError) => configError.message)),
+  }));
 
-    const dbUriStruct = yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
+  static LibraryLive = Layer.sync(this, () => ({
+    get: (args) =>
+      Effect.gen(function* () {
+        const { dbUri, dbAnonymousRole, dbSchemas } =
+          yield* Schema.decodeUnknown(libSettingsArgsSchema)(args);
 
-    return {
-      mode: "library" as const,
-      port: undefined,
-      db: {
-        ...dbUriStruct,
-        schemas: dbSchemas,
-        anonymousRole: dbAnonymousRole,
-      },
-    };
-  }).pipe(Effect.orDieWith((parseError) => parseError.message)),
-);
+        const dbUriStruct =
+          yield* Schema.decodeUnknown(postgresUriSchema)(dbUri);
+
+        return {
+          mode: "library" as const,
+          port: undefined,
+          db: {
+            ...dbUriStruct,
+            schemas: dbSchemas,
+            anonymousRole: dbAnonymousRole,
+          },
+        };
+      }).pipe(Effect.orDieWith((parseError) => parseError.message)),
+  }));
+}

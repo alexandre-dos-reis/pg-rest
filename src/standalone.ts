@@ -1,6 +1,6 @@
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { Settings, StandaloneSettingsLive } from "./settings";
+import { Settings } from "./settings";
 import {
   HttpRouter as Router,
   HttpServer as Server,
@@ -27,7 +27,7 @@ const app = router.pipe(Server.serve(), Server.withLogAddress);
 const ServerLive = Layer.scoped(
   Server.HttpServer,
   Effect.gen(function* () {
-    const settings = yield* (yield* Settings)();
+    const settings = yield* Settings.get();
 
     if (settings.mode !== "standalone") {
       throw new Error("Invalid mode");
@@ -41,6 +41,6 @@ const ServerLive = Layer.scoped(
 
 NodeRuntime.runMain(
   Layer.launch(Layer.provide(app, ServerLive)).pipe(
-    Effect.provide(StandaloneSettingsLive),
+    Effect.provide(Settings.StandaloneLive),
   ),
 );
