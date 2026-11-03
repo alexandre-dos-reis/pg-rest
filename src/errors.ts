@@ -67,6 +67,30 @@ export class DbQueryError extends Error implements DbErrorInfo {
   }
 }
 
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+
+/**
+ * Recognise a database error thrown by any driver and turn it into a {@link DbQueryError}.
+ * Drivers put the SQLSTATE in different places: `code` (node-postgres, postgres.js, PGlite),
+ * `errno` (Bun.sql) or `sqlState`. Anything else (connection errors, bugs) is returned unchanged.
+ */
+export const normalizeDbError = (e: unknown): unknown => {
+  if (e instanceof DbQueryError || !e || typeof e !== "object") return e;
+  const x = e as Record<string, unknown>;
+  for (const key of ["sqlState", "code", "errno"] as const) {
+    const v = x[key];
+    if (typeof v === "string" && SQLSTATE.test(v)) {
+      return new DbQueryError(
+        v,
+        String(x["message"] ?? ""),
+        typeof x["detail"] === "string" ? x["detail"] : undefined,
+        typeof x["hint"] === "string" ? x["hint"] : undefined,
+      );
+    }
+  }
+  return e;
+};
+
 /** Infrastructure failure (connection lost, adapter bug...). */
 export class DbUnavailable extends Data.TaggedError("DbUnavailable")<{
   readonly cause: unknown;

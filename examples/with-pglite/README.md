@@ -1,14 +1,18 @@
-# Example
+# pg-rest + PGlite
 
-A tiny todo API with Row Level Security.
+A tiny todo API with Row Level Security on **Node.js**, using PGlite (Postgres in WebAssembly, no database server).
+This folder is self-contained: copy it anywhere.
 
 ```sh
-cd example && docker compose up -d && cd ..     # Postgres 16 with schema.sql loaded
-bun install
-bun run example/server.ts                       # http://localhost:3000
+# no database to start: the schema is loaded in memory when the server starts
+npm install
+node server.ts      # Node >= 22.18 runs TypeScript natively
 ```
 
-(No Docker? Create a database, then `psql "$DATABASE_URL" -f example/schema.sql` and export `DATABASE_URL`.)
+The `pg-rest` dependency points at the repository root (`file:../..`), so build it once first: `bun run build` in the repository root. In your own project install it from npm instead.
+
+`server.ts` is the whole integration: create the driver, wrap it in the adapter from `pg-rest/adapters/...`, give `createPgRest` a way to resolve the caller
+(`resolveContext`), and hand `pgRest.handle` to any server that speaks `Request`/`Response`.
 
 Try it — the caller is whoever `X-User` says (see `resolveContext` in `server.ts`):
 

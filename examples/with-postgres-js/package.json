@@ -1,0 +1,13 @@
+{
+  "name": "pg-rest-example-postgres-js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.ts"
+  },
+  "dependencies": {
+    "pg-rest": "file:../..",
+    "@hono/node-server": "^1.13.0",
+    "postgres": "^4.0.0"
+  }
+}
