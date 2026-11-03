@@ -50,6 +50,7 @@ Self-contained projects in [`examples/`](examples) (a todo API with Row Level Se
 | [`with-node-postgres`](examples/with-node-postgres) | Node.js ≥ 22.18 | `pg` | yes (docker-compose included) |
 | [`with-postgres-js`](examples/with-postgres-js) | Node.js ≥ 22.18 | `postgres` | yes (docker-compose included) |
 | [`with-pglite`](examples/with-pglite) | Node.js ≥ 22.18 | `@electric-sql/pglite` | no (Postgres in WebAssembly) |
+| [`with-better-auth`](examples/with-better-auth) | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) sessions | yes (docker-compose included) |
 
 ## Database adapters
 

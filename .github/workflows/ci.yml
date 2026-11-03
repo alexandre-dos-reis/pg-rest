@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        example: [with-bun, with-node-postgres, with-postgres-js, with-pglite]
+        example: [with-bun, with-node-postgres, with-postgres-js, with-pglite, with-better-auth]
     services:
       postgres:
         image: postgres:16
