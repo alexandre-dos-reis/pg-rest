@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+  POSTGREST_VERSION: v16.0
+
+jobs:
+  test:
+    name: Typecheck, build, test (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run build
+      - name: Unit and integration tests
+        run: bun test  # tests/compare skips itself without POSTGREST_BIN
+
+  compare:
+    name: Differential test against PostgREST 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/postgrest"
+          curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP/postgrest"
+          "$RUNNER_TEMP/postgrest/postgrest" --version
+      - name: Compare pg-rest with PostgREST
+        run: bun test tests/compare
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
