@@ -1,13 +1,11 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type { DbAdapter } from "./adapter";
-import { bunSqlAdapter } from "./adapters/bun";
 import type { CoreConfig, RequestContext } from "./core";
-import { ApiError, PgRestError } from "./errors";
+import { ApiError, PgRestError, normalizeDbError } from "./errors";
 import type { SchemaCache } from "./schema";
 import { Config, Db, PgRest, SchemaStore, errorResponse, toApiError } from "./service";
 
 export type { DbAdapter, DbSession, Row } from "./adapter";
-export { bunSqlAdapter } from "./adapters/bun";
 export type { PreRequestInfo, RequestContext } from "./core";
 export { ApiError, DbQueryError, PgRestError } from "./errors";
 export type { ErrorBody } from "./errors";
@@ -16,10 +14,11 @@ export { SchemaLoadError } from "./service";
 
 export interface PgRestOptions {
   /**
-   * The database: a {@link DbAdapter}, or a connection string (uses `Bun.SQL`,
-   * and is closed by `close()`).
+   * The database, as a {@link DbAdapter} you create from your driver
+   * (Bun.sql, node-postgres, postgres.js, PGlite...). See `example/adapters`.
+   * pg-rest never closes it: you own its lifecycle.
    */
-  readonly db: DbAdapter | string;
+  readonly db: DbAdapter;
   /** Schemas to expose. The first one is the default. Default `["public"]`. */
   readonly schemas?: ReadonlyArray<string>;
   /** Role used when the request context has none. Default `"anon"`. */
@@ -61,7 +60,7 @@ export interface PgRestInstance {
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
   schemaCache(): Promise<SchemaCache>;
-  /** Release the connection (only if pg-rest created it) and stop. */
+  /** Stop the handler. The database adapter is left open: close it yourself. */
   close(): Promise<void>;
 }
 
@@ -75,8 +74,24 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
       throw new Error(`pg-rest: the schema "${s}" cannot be exposed`);
     }
   }
-  const ownsDb = typeof options.db === "string";
-  const adapter = typeof options.db === "string" ? bunSqlAdapter(options.db) : options.db;
+  const user = options.db;
+  // Driver errors are recognised by their SQLSTATE, whatever the driver, so adapters stay trivial.
+  const adapter: DbAdapter = {
+    async query(text, params) {
+      try {
+        return await user.query(text, params);
+      } catch (e) {
+        throw normalizeDbError(e);
+      }
+    },
+    async transaction(fn) {
+      try {
+        return await user.transaction(fn);
+      } catch (e) {
+        throw normalizeDbError(e);
+      }
+    },
+  };
 
   const config: CoreConfig = {
     schemas,
@@ -93,9 +108,7 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
 
   const DbLive = Layer.effect(
     Db,
-    Effect.acquireRelease(Effect.succeed(adapter), (a) =>
-      ownsDb ? Effect.promise(async () => void (await a.close?.())) : Effect.void,
-    ),
+    Effect.succeed(adapter),
   );
   const base = Layer.mergeAll(DbLive, Layer.succeed(Config, config));
   const storeLayer = SchemaStore.layer.pipe(Layer.provideMerge(base));

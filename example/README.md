@@ -1,6 +1,10 @@
 # Example
 
-A tiny todo API with Row Level Security.
+A tiny todo API with Row Level Security, run with Bun.
+
+pg-rest has no driver of its own: `server.ts` builds a `DbAdapter` from Bun's built-in Postgres client
+(`adapters/bun-sql.ts`). `adapters/node-postgres.ts` and `adapters/postgres-js.ts` are the Node equivalents —
+copy the one you need.
 
 ```sh
 cd example && docker compose up -d && cd ..     # Postgres 16 with schema.sql loaded

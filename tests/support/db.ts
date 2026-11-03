@@ -1,5 +1,5 @@
 import { SQL } from "bun";
-import { bunSqlAdapter } from "../../src/adapters/bun";
+import { bunSqlAdapter } from "../../example/adapters/bun-sql";
 import type { DbAdapter } from "../../src/adapter";
 
 /** Superuser URL of a throwaway Postgres server. Integration tests are skipped without it. */

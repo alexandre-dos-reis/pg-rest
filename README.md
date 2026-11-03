@@ -1,18 +1,24 @@
 # pg-rest
 
-A [PostgREST](https://postgrest.org) (v16 behaviour) reimplementation for **Bun**, shipped as a **library**:
-a web-standard `handle(Request) => Promise<Response>` on top of a driver-agnostic database adapter.
+A [PostgREST](https://postgrest.org) (v16 behaviour) reimplementation as a **library**: a web-standard
+`handle(Request) => Promise<Response>` on top of a tiny database-adapter interface.
 
-There is **no JWT handling and no server**. You decide who the caller is (cookie, API key, session, mTLS…)
-and hand pg-rest a role, claims and settings; they are applied per request with `set_config`, so
-Postgres Row Level Security sees them exactly as it would behind PostgREST.
+- **Runtime-agnostic.** The library uses only web standards (`Request`/`Response`/`Headers`) and has no driver and no runtime API
+  of its own: it is tested on Bun and Node.js 22, and should run anywhere your Postgres driver does.
+  You pass the driver in as an adapter (Bun.sql, node-postgres, postgres.js ready-made in [`example/adapters`](example/adapters); about 30 lines each).
+- **No JWT and no server.** You decide who the caller is (cookie, API key, session, mTLS…) and hand pg-rest a role, claims and
+  settings; they are applied per request with `set_config`, so Postgres Row Level Security sees them exactly as it would behind PostgREST.
 
 ```ts
+import pg from "pg";
 import { createPgRest } from "pg-rest";
+import { nodePostgresAdapter } from "./adapters/node-postgres"; // copy from example/adapters
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
 const api = await createPgRest({
-  db: process.env.DATABASE_URL!,          // connection string (Bun.sql) or a DbAdapter
-  schemas: ["api"],                       // first one is the default schema
+  db: nodePostgresAdapter(pool),           // you create and close the driver
+  schemas: ["api"],                        // first one is the default schema
   anonymousRole: "anon",
   resolveContext: async (req) => {
     const user = await mySessionLookup(req);
@@ -20,8 +26,27 @@ const api = await createPgRest({
   },
 });
 
-Bun.serve({ fetch: (req) => api.handle(req) });
+// any host that speaks Request/Response:
+//   Bun:     Bun.serve({ fetch: (req) => api.handle(req) })
+//   Node:    use your framework's Request/Response bridge, or `srvx`/`@hono/node-server`
+//   Hono:    app.all("/api/*", (c) => api.handle(c.req.raw))
 ```
+
+## Database adapters
+
+`db` is a `DbAdapter` — the only thing pg-rest needs from a driver:
+
+```ts
+interface DbAdapter {
+  query(text: string, params?: (string | null)[]): Promise<Record<string, unknown>[]>;
+  transaction<A>(fn: (session: { query: DbAdapter["query"] }) => Promise<A>): Promise<A>; // one connection, BEGIN/COMMIT/ROLLBACK
+  close?(): Promise<void>;
+}
+```
+
+Parameters are always text with an explicit `$n::text` cast in the SQL, so no type inference is needed. Database errors are recognised
+by SQLSTATE (`code`, `errno` or `sqlState` on the thrown error), so adapters don't have to translate them. pg-rest never closes your
+driver; `api.close()` only stops the handler.
 
 In SQL, policies read the same GUCs as with PostgREST:
 
@@ -33,7 +58,7 @@ CREATE POLICY own ON api.notes USING (owner = (current_setting('request.jwt.clai
 
 | option | meaning |
 | --- | --- |
-| `db` | connection string, `Bun.SQL` client or any `DbAdapter` (`query`, `transaction`, optional `close`) |
+| `db` | a `DbAdapter` built from your driver (see above) |
 | `schemas` | exposed schemas; selected with `Accept-Profile` / `Content-Profile` |
 | `anonymousRole` | role when no context is resolved (`PGRST302` if unset and none given) |
 | `resolveContext(req)` | return `{ role, claims, settings }`; throw `PgRestError` to reject (e.g. 401) |

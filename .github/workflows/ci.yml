@@ -40,6 +40,34 @@ jobs:
       - name: Unit and integration tests
         run: bun test  # tests/compare skips itself without POSTGREST_BIN
 
+  node:
+    name: Built package on Node.js (node-postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Run the built library on Node
+        run: node scripts/node-smoke.ts
+
   compare:
     name: Differential test against PostgREST 16
     runs-on: ubuntu-latest
