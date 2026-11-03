@@ -1,49 +1,47 @@
-import { Context, Data, Effect, Layer, Ref, Semaphore } from "effect";
 import type { DbAdapter } from "./adapter";
 import { type CoreConfig, type RequestContext, handleRequest } from "./core";
 import { ApiError, DbQueryError, PgRestError, dbErrorToApiError } from "./errors";
 import { type SchemaCache, introspect } from "./schema";
 
-/** The Postgres connection. */
-export class Db extends Context.Service<Db, DbAdapter>()("pg-rest/Db") {}
-
-/** Resolved library configuration. */
-export class Config extends Context.Service<Config, CoreConfig>()("pg-rest/Config") {}
-
-export class SchemaLoadError extends Data.TaggedError("SchemaLoadError")<{
-  readonly cause: unknown;
-}> {}
+/** The schema could not be read from the database catalog. */
+export class SchemaLoadError extends Error {
+  readonly _tag = "SchemaLoadError";
+  constructor(override readonly cause: unknown) {
+    super(`pg-rest: could not load the database schema: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "SchemaLoadError";
+  }
+}
 
 /** Holds the schema cache; reloads are serialized and never discard a good cache on failure. */
-export class SchemaStore extends Context.Service<
-  SchemaStore,
-  {
-    readonly current: Effect.Effect<SchemaCache>;
-    readonly reload: Effect.Effect<SchemaCache, SchemaLoadError>;
-  }
->()("pg-rest/SchemaStore") {
-  static readonly layer = Layer.effect(
-    SchemaStore,
-    Effect.gen(function* () {
-      const db = yield* Db;
-      const config = yield* Config;
-      const load = Effect.tryPromise({
-        try: () => introspect(db, config.schemas),
-        catch: (cause) => new SchemaLoadError({ cause }),
-      }).pipe(Effect.withSpan("pg-rest.schema.load"));
-
-      const ref = yield* Ref.make(yield* load);
-      const lock = yield* Semaphore.make(1);
-      const reload = lock.withPermit(
-        load.pipe(
-          Effect.tap((cache) => Ref.set(ref, cache)),
-          Effect.tapError((e) => Effect.logWarning("pg-rest: schema cache reload failed, keeping the previous cache", e.cause)),
-        ),
-      );
-      return SchemaStore.of({ current: Ref.get(ref), reload });
-    }),
-  );
+export interface SchemaStore {
+  current(): SchemaCache;
+  reload(): Promise<SchemaCache>;
 }
+
+export const createSchemaStore = async (db: DbAdapter, schemas: ReadonlyArray<string>): Promise<SchemaStore> => {
+  const load = () =>
+    introspect(db, schemas).catch((cause: unknown) => {
+      throw new SchemaLoadError(cause);
+    });
+  let cache = await load();
+  let queue: Promise<unknown> = Promise.resolve();
+  return {
+    current: () => cache,
+    reload() {
+      const run = queue.then(async () => {
+        try {
+          cache = await load();
+          return cache;
+        } catch (e) {
+          console.warn("pg-rest: schema cache reload failed, keeping the previous cache", (e as SchemaLoadError).cause);
+          throw e;
+        }
+      });
+      queue = run.catch(() => undefined);
+      return run;
+    },
+  };
+};
 
 const CONNECTION_ERROR = /^(ERR_POSTGRES_(CONNECTION|AUTH|TLS|IDLE|LIFETIME)|ECONN|ETIMEDOUT|EPIPE|ENOTFOUND)/;
 
@@ -73,46 +71,19 @@ export const errorResponse = (err: ApiError): Response =>
     headers: { "Content-Type": "application/json; charset=utf-8", ...err.headers },
   });
 
-export class PgRest extends Context.Service<
-  PgRest,
-  {
-    /** Handle a request. Never fails: errors become PostgREST-style JSON responses. */
-    readonly handle: (request: Request, ctx?: RequestContext) => Effect.Effect<Response>;
-    readonly reloadSchema: Effect.Effect<void, SchemaLoadError>;
-    readonly schemaCache: Effect.Effect<SchemaCache>;
+/** Handle a request. Never rejects: errors become PostgREST-style JSON responses. */
+export const handleSafely = async (
+  env: { readonly db: DbAdapter; readonly config: CoreConfig; readonly cache: SchemaCache },
+  request: Request,
+  ctx: RequestContext,
+): Promise<Response> => {
+  try {
+    return await handleRequest(env, request, ctx);
+  } catch (e) {
+    const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
+    if (api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof DbQueryError)) {
+      console.error("pg-rest: unexpected error while handling a request", e);
+    }
+    return errorResponse(api);
   }
->()("pg-rest/PgRest") {
-  static readonly layer = Layer.effect(
-    PgRest,
-    Effect.gen(function* () {
-      const db = yield* Db;
-      const config = yield* Config;
-      const store = yield* SchemaStore;
-
-      const handle = Effect.fn("PgRest.handle")(function* (request: Request, ctx: RequestContext = {}) {
-        const cache = yield* store.current;
-        const role = ctx.role ?? config.anonymousRole;
-        return yield* Effect.tryPromise({
-          try: () => handleRequest({ db, config, cache }, request, ctx),
-          catch: (e) => e,
-        }).pipe(
-          Effect.catch((e) =>
-            Effect.gen(function* () {
-              const api = toApiError(e, role, config.anonymousRole);
-              if (api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof DbQueryError)) {
-                yield* Effect.logError("pg-rest: unexpected error while handling a request", e);
-              }
-              return errorResponse(api);
-            }),
-          ),
-        );
-      });
-
-      return PgRest.of({
-        handle,
-        reloadSchema: store.reload.pipe(Effect.asVoid),
-        schemaCache: store.current,
-      });
-    }),
-  );
-}
+};

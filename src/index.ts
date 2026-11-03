@@ -1,9 +1,8 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, PgRestError, normalizeDbError } from "./errors";
 import type { SchemaCache } from "./schema";
-import { Config, Db, PgRest, SchemaStore, errorResponse, toApiError } from "./service";
+import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
 export type { DbAdapter, DbSession, Row } from "./adapter";
 export type { PreRequestInfo, RequestContext } from "./core";
@@ -106,22 +105,8 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
     serverUrl: options.serverUrl,
   };
 
-  const DbLive = Layer.effect(
-    Db,
-    Effect.succeed(adapter),
-  );
-  const base = Layer.mergeAll(DbLive, Layer.succeed(Config, config));
-  const storeLayer = SchemaStore.layer.pipe(Layer.provideMerge(base));
-  const mainLayer = PgRest.layer.pipe(Layer.provide(storeLayer));
-
-  const runtime = ManagedRuntime.make(mainLayer);
-  try {
-    // Build the layers now so connection or catalog problems surface at startup.
-    await runtime.runPromise(PgRest.use((s) => s.schemaCache));
-  } catch (e) {
-    await runtime.dispose();
-    throw e;
-  }
+  // Read the catalog now so connection or catalog problems surface at startup.
+  const store = await createSchemaStore(adapter, schemas);
 
   const handle = async (request: Request, ctx?: RequestContext): Promise<Response> => {
     let context = ctx;
@@ -133,13 +118,13 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
         return errorResponse(api);
       }
     }
-    return runtime.runPromise(PgRest.use((s) => s.handle(request, context ?? {})));
+    return handleSafely({ db: adapter, config, cache: store.current() }, request, context ?? {});
   };
 
   return {
     handle,
-    reloadSchema: () => runtime.runPromise(PgRest.use((s) => s.reloadSchema)),
-    schemaCache: () => runtime.runPromise(PgRest.use((s) => s.schemaCache)),
-    close: () => runtime.dispose(),
+    reloadSchema: async () => void (await store.reload()),
+    schemaCache: async () => store.current(),
+    close: async () => {},
   };
 };

@@ -87,8 +87,21 @@ CREATE POLICY own ON api.notes USING (owner = (current_setting('request.jwt.clai
 ## Performance
 
 [`bench/`](bench) load-tests pg-rest against the real PostgREST 16 on the same database, data and pool size, after checking that both return identical
-results. In a small 2-vCPU sandbox pg-rest on Bun was on par with or faster than PostgREST for most queries, and slower on a few of the cheapest ones
-when run on Node; see [`bench/README.md`](bench/README.md) for the numbers, the caveats and how to run it on your own hardware.
+results. In a small 2-vCPU sandbox pg-rest on Bun was on par with or faster than PostgREST in every scenario, and slower on a few of the cheapest ones
+when run on Node (it also uses more memory); the benchmark includes `bun build --compile`, `--bytecode` and `bun compile` variants; see [`bench/README.md`](bench/README.md) for the numbers, the caveats and how to run it on your own hardware.
+
+### Which runtime?
+
+Numbers from one run on a small 2-vCPU sandbox (indicative only; see the benchmark README). Throughput is relative to PostgREST 16.
+
+| | Bun (`bun run`) | Bun, compiled (`bun compile`, experimental) | Node + `pg` |
+| --- | --- | --- | --- |
+| Throughput | 1.2–1.5× on most reads, ~2× on writes | same as plain Bun (within noise) | 0.7–0.9× on the cheapest queries, ahead on heavier ones |
+| Peak memory | ~80 MB | ~50 MB | ~125 MB |
+| Setup | nothing extra | single executable; needs a recent (canary) Bun | Node (tested on 22) |
+| Pick it when | you can run Bun (default choice) | memory or deployment size matters and you accept an experimental feature | Bun is not an option |
+
+`bun build --compile` and `--bytecode` performed like plain Bun, so they are only worth it if you want a single binary. PostgREST itself uses the least memory (about 40–47 MB).
 
 ## Options
 
