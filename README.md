@@ -87,8 +87,8 @@ CREATE POLICY own ON api.notes USING (owner = (current_setting('request.jwt.clai
 ## Performance
 
 [`bench/`](bench) load-tests pg-rest against the real PostgREST 16 on the same database, data and pool size, after checking that both return identical
-results. In a small 2-vCPU sandbox pg-rest on Bun was on par with or faster than PostgREST for most queries, and slower on a few of the cheapest ones
-when run on Node; see [`bench/README.md`](bench/README.md) for the numbers, the caveats and how to run it on your own hardware.
+results. In a small 2-vCPU sandbox pg-rest on Bun was on par with or faster than PostgREST in every scenario, and slower on a few of the cheapest ones
+when run on Node (it also uses more memory); the benchmark includes `bun build --compile`, `--bytecode` and `bun compile` variants; see [`bench/README.md`](bench/README.md) for the numbers, the caveats and how to run it on your own hardware.
 
 ## Options
 
