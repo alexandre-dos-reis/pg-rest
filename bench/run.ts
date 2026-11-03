@@ -5,7 +5,7 @@
  *   POSTGREST_BIN=/path/to/postgrest BENCH_ADMIN_URL=postgres://user@host:5432/postgres bun bench/run.ts
  *
  * Knobs (env): DURATION=8 WARMUP=2 CONNECTIONS=32 POOL=10 CLIENTS=20000 ORDERS=100000 PRODUCTS=1000
- *              TARGETS=postgrest,pg-rest-bun,pg-rest-bun-compiled,pg-rest-bun-bytecode,pg-rest-bun-aot,pg-rest-node,baseline
+ *              TARGETS=postgrest,pg-rest-bun,pg-rest-bun-compiled,pg-rest-bun-bytecode,pg-rest-bun-aot,pg-rest-bun-aot-src,pg-rest-node,baseline
  *              ONLY=pk-lookup,list-50  KEEP=1  BASELINE_DIR=/path/to/older/checkout  AOT_BUN=/path/to/bun-with-`compile`
  */
 import { SQL } from "bun";
@@ -30,7 +30,7 @@ const cfg = {
   orders: num("ORDERS", 100000),
   products: num("PRODUCTS", 1000),
 };
-const wanted = env("TARGETS", `postgrest,pg-rest-bun,pg-rest-bun-compiled,pg-rest-bun-bytecode,pg-rest-bun-aot,pg-rest-node${process.env["BASELINE_DIR"] ? ",baseline" : ""}`).split(",");
+const wanted = env("TARGETS", `postgrest,pg-rest-bun,pg-rest-bun-compiled,pg-rest-bun-bytecode,pg-rest-bun-aot,pg-rest-bun-aot-src,pg-rest-node${process.env["BASELINE_DIR"] ? ",baseline" : ""}`).split(",");
 const only = process.env["ONLY"]?.split(",");
 const root = new URL("..", import.meta.url).pathname;
 const basePort = 3300 + Math.floor(Math.random() * 500);
@@ -99,12 +99,13 @@ const exes: [string, string, string, string[]][] = [
   ["pg-rest-bun-compiled", "pg-rest (bun build --compile)", bunBin, ["build", "--compile"]],
   ["pg-rest-bun-bytecode", "pg-rest (bun build --compile --bytecode)", bunBin, ["build", "--compile", "--bytecode", "--format=esm"]],
   ["pg-rest-bun-aot", "pg-rest (bun compile, AOT)", process.env["AOT_BUN"] ?? bunBin, ["compile"]],
+  ["pg-rest-bun-aot-src", "pg-rest (bun compile, AOT, from src)", process.env["AOT_BUN"] ?? bunBin, ["compile"]],
 ];
 for (const [id, label, bin, args] of exes) {
   if (!wanted.includes(id)) continue;
   mkdirSync(`${root}bench/results`, { recursive: true });
   const exe = `${root}bench/results/${id}`;
-  const build = Bun.spawnSync([bin, ...args, "bench/servers/bun.ts", "--outfile", exe], { cwd: root, stdout: "ignore", stderr: "inherit" });
+  const build = Bun.spawnSync([bin, ...args, id.endsWith("-src") ? "bench/servers/bun-src.ts" : "bench/servers/bun.ts", "--outfile", exe], { cwd: root, stdout: "ignore", stderr: "inherit" });
   if (build.exitCode !== 0) throw new Error(`${bin} ${args.join(" ")} failed`);
   targets.push(await spawnServer(id, label, [exe], port++));
 }
