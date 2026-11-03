@@ -1,6 +1,8 @@
--- Run once against an empty database:  psql "$DATABASE_URL" -f example/schema.sql
-CREATE ROLE anon NOLOGIN;
-CREATE ROLE authenticated NOLOGIN;
+-- Run once against an empty database:  psql "$DATABASE_URL" -f schema.sql
+DO $$ BEGIN  -- roles are cluster-wide: create them only once
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+END $$;
 GRANT anon, authenticated TO CURRENT_USER;  -- lets the connecting user SET ROLE to them
 
 CREATE SCHEMA api;

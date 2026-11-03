@@ -12,7 +12,7 @@ bun run server.ts
 The `pg-rest` dependency points at the repository root (`file:../..`), so build it once first: `bun run build` in the repository root. In your own project install it from npm instead.
 
 `server.ts` is the whole integration: create the driver, wrap it in the adapter from `pg-rest/adapters/...`, give `createPgRest` a way to resolve the caller
-(`resolveContext`), and hand `api.handle` to any server that speaks `Request`/`Response`.
+(`resolveContext`), and hand `pgRest.handle` to any server that speaks `Request`/`Response`.
 
 Try it — the caller is whoever `X-User` says (see `resolveContext` in `server.ts`):
 

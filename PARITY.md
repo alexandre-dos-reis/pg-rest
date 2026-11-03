@@ -25,7 +25,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Connection pool tuning, `db-uri`, `db-channel` (NOTIFY reload), `SIGUSR1/2` | 🟡 | Bring your own pool via the adapter; reload with `reloadSchema()` (no LISTEN) |
 | Admin server (`/live`, `/ready`, `/metrics`) | ➖ | |
 | Automatic schema cache reload with retry on connection loss | 🟡 | Manual `reloadSchema()`; old cache is kept if a reload fails; DB outages → `503 PGRST001` |
-| Database driver | 🟡 | Driver-agnostic `DbAdapter`; ready-made adapters for Bun.sql, node-postgres and postgres.js live in `example/adapters` (the library itself contains no driver). Verified on Bun (full suite) and Node 22 (smoke test) |
+| Database driver | 🟡 | Driver-agnostic `DbAdapter`; adapters for Bun.sql, node-postgres, postgres.js and PGlite ship as `pg-rest/adapters/*` (drivers are optional peer dependencies; the core contains none). Verified on Bun (full suite) and Node 22 (smoke test); each adapter is exercised by an example in CI |
 
 ## Reading
 

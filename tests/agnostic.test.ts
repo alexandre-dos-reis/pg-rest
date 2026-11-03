@@ -13,4 +13,12 @@ describe("runtime-agnostic library", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  test("every example ships the same schema.sql (they are independent copies)", async () => {
+    const files: string[] = [];
+    for await (const f of new Glob("examples/*/schema.sql").scan(".")) files.push(f);
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    const texts = await Promise.all(files.map((f) => Bun.file(f).text()));
+    expect(new Set(texts).size).toBe(1);
+  });
 });
