@@ -38,7 +38,7 @@ jobs:
       - run: bun run typecheck
       - run: bun run build
       - name: Unit and integration tests
-        run: bun test --exclude 'tests/compare/**'
+        run: bun test  # tests/compare skips itself without POSTGREST_BIN
 
   compare:
     name: Differential test against PostgREST 16
