@@ -2,7 +2,7 @@
   "name": "pg-rest",
   "type": "module",
   "version": "0.0.0",
-  "description": "A PostgREST-compatible REST layer for PostgreSQL, built for Bun and consumed as a library. You decide who the user is (RLS) — no JWT required.",
+  "description": "A PostgREST-compatible REST layer for PostgreSQL, built for Bun and consumed as a library. You decide who the user is (RLS) \u2014 no JWT required.",
   "author": "Alexandre Dos Reis",
   "license": "MIT",
   "repository": {
@@ -27,7 +27,8 @@
     "dev": "tsdown --watch",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "test:compare": "bun test tests/compare"
   },
   "dependencies": {
     "effect": "^4.1.2"

@@ -41,7 +41,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `limit`, `offset`, `Range` / `Range-Unit` headers | ✅ | `206` / `416` |
 | `Prefer: count=exact` | ✅ | `Content-Range` |
 | `count=planned` / `estimated` | ✅ | Via `EXPLAIN` |
-| Aggregate functions (`count() sum() avg() min() max()`) with implicit `GROUP BY` | ✅ | |
+| Aggregate functions (`count() sum() avg() min() max()`) with implicit `GROUP BY` | ✅ | Always on; PostgREST needs `db-aggregates-enabled` |
 | Aggregates combined with embeds / inside embeds | ❌ | `PGRST127` |
 | Views | ✅ | Read/write per `pg_relation_is_updatable` |
 | Materialized views, foreign tables, partitioned tables | 🟡 | Introspected as relations; not specifically tested |
@@ -130,6 +130,43 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 
 ## Verification status
 
-Behaviour is checked against a real PostgreSQL 16 (177 tests: schema, parsing, reads, writes, RPC, request context, security).
-There is **no differential test against a running PostgREST**; parity is based on the PostgREST v16 documentation, changelog
-and error tables, so edge cases may still differ. Reports of differences are welcome.
+Two layers:
+
+1. **Own suites** – 177+ tests against a real PostgreSQL 16 (schema, parsing, reads, writes, RPC, request context, security).
+2. **Differential test against PostgREST 16.0** – `tests/compare` starts the real `postgrest` binary and pg-rest on the *same* database
+   and replays ~175 requests against both (reads, filters, embedding, writes rolled back with `Prefer: tx=rollback`, RPC, errors, headers),
+   diffing status, `Content-Type`, `Content-Range`, `Location`, `Preference-Applied`, `Allow` and the JSON body (error bodies included).
+   164 cases are byte-for-byte equivalent; 11 are known differences listed below.
+
+```sh
+# get a binary: https://github.com/PostgREST/postgrest/releases/tag/v16.0
+POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=postgres://user@host/postgres bun run test:compare
+```
+
+The comparison only covers what the cases exercise; it is not exhaustive. Anything not in `tests/compare/cases.ts` is unverified against PostgREST.
+
+### Known differences (asserted by the comparison test)
+
+| Case | PostgREST 16 | pg-rest |
+| --- | --- | --- |
+| CSV output of array columns | PostgreSQL text syntax `{a,b}` | JSON text `["a","b"]` |
+| `limit=abc` | ignored (200) | `400 PGRST100` |
+| Query-string parse error texts (`id=bogus.1`, `select=id,,name`) | parsec output in `message`/`details` | different wording, same `PGRST100` code and status |
+| Invalid cast target (`select=id::int4 from x`) | forwarded to PostgreSQL → `42601` | rejected up front: `400 PGRST100` (SQL-injection hardening) |
+| `order=rel(col)` | supported for embedded to-one; `PGRST108` when not embedded | `PGRST127` not implemented |
+| `merge-duplicates` upsert that only updates rows | `200` | `201` |
+| Invalid JSON body | parser-specific `details` | different `details` |
+| Single unnamed `json` parameter given an array body with differing keys | `400 PGRST102` | passes the array through |
+| `Accept: text/csv` on a scalar function result | CSV | not supported |
+| Unsupported HTTP method (`TRACE`) | empty body | `PGRST117` JSON error |
+
+### Differences found by the comparison and fixed
+
+Content-Range on RPC / PATCH responses, `Cannot coerce the result to a single JSON object` text, `406` for unsupported `Accept`,
+`nulls=stripped` media types, `416` carrying `Content-Range` and `Preference-Applied`, `PGRST102` for bulk inserts with differing keys,
+PUT error texts, PGRST202/203 texts, fewer "did you mean" hints, real table names in PostgreSQL error messages, `HEAD` content type,
+embedding by foreign-key column (`c:client_id(*)`), self-reference resolution (table name → children, column name → parent).
+
+### Configuration differences used by the comparison
+
+PostgREST runs with `db-aggregates-enabled=true` (off by default in v16; pg-rest always allows aggregates) and `db-tx-end=commit-allow-override`.

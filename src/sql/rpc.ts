@@ -29,8 +29,10 @@ const SINGLE_BODY_TYPES = new Set(["json", "jsonb", "text", "bytea"]);
 const isSingleUnnamedParam = (fn: FunctionDef): boolean =>
   fn.args.length === 1 && fn.args[0]!.name === "" && SINGLE_BODY_TYPES.has(fn.args[0]!.type);
 
-const signature = (fn: FunctionDef): string =>
-  `${fn.schema}.${fn.name}(${fn.args.map((a) => `${a.name} ${a.type}`).join(", ")})`;
+
+/** PostgREST's spelling used in PGRST203: `schema.fn(a => integer, b => text)`. */
+const arrowSignature = (fn: FunctionDef): string =>
+  `${fn.schema}.${fn.name}(${fn.args.map((a) => `${a.name} => ${a.type}`).join(", ")})`;
 
 /**
  * Pick the function to call from the argument names the client supplied.
@@ -44,18 +46,17 @@ export const resolveFunction = (
   hasBody: boolean,
 ): FunctionDef => {
   const candidates = cache.functions.get(relKey(schema, name)) ?? [];
-  const sig = `${schema}.${name}(${[...provided].sort().join(", ")})`;
+  const names = [...provided].sort();
+  const params = names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
   const notFound = () =>
     new PgRestError(
       404,
       "PGRST202",
-      `Could not find the function ${sig} in the schema cache`,
-      candidates.length
-        ? `Searched for the function ${schema}.${name} with parameter${provided.size === 1 ? "" : "s"} ${[...provided].sort().join(", ") || "(none)"}, but no matches were found in the schema cache.`
-        : null,
-      candidates.length
-        ? `Perhaps you meant to call the function ${signature(candidates[0]!)}`
-        : "If a new function was created in the database with this name and parameters, try reloading the schema cache.",
+      names.length === 0
+        ? `Could not find the function ${schema}.${name} without parameters in the schema cache`
+        : `Could not find the function ${schema}.${name}(${names.join(", ")}) in the schema cache`,
+      `Searched for the function ${schema}.${name} ${params}${" or with a single unnamed json/jsonb parameter"}, but no matches were found in the schema cache.`,
+      candidates.length ? `Perhaps you meant to call the function ${schema}.${name}(${candidates[0]!.args.map((a) => a.name).join(", ")})` : null,
     );
 
   if (candidates.length === 0) throw notFound();
@@ -76,7 +77,7 @@ export const resolveFunction = (
   throw new PgRestError(
     300,
     "PGRST203",
-    `Could not choose the best candidate function between: ${matches.map(signature).join(", ")}`,
+    `Could not choose the best candidate function between: ${matches.map(arrowSignature).sort().join(", ")}`,
     null,
     "Try renaming the parameters or the function itself in the database so function overloading can be resolved",
   );

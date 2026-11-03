@@ -58,6 +58,9 @@ export const buildInsert = (o: InsertOptions): string => {
   const target = `${table} AS ${quoteIdent(ROOT_ALIAS)}`;
   const returning = returningSql(rel, o.returning);
   const cols = o.columns ? [...o.columns] : unionKeys(o.rows);
+  if (!o.columns && o.rows.some((r) => Object.keys(r).length !== cols.length)) {
+    throw new PgRestError(400, "PGRST102", "All object keys must match");
+  }
   checkColumns(rel, cols);
 
   if (cols.length === 0) {

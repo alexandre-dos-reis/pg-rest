@@ -339,8 +339,14 @@ export const findRelationships = (
   const rel = (schema: string, name: string) => cache.relations.get(relKey(schema, name));
 
   for (const fk of cache.foreignKeys) {
-    // many-to-one: from → target
-    if (fk.schema === from.schema && fk.table === from.name && fk.ftable === target) {
+    const selfReference = fk.schema === fk.fschema && fk.table === fk.ftable;
+    // many-to-one: from → target (a self-reference is only reachable through its column name)
+    if (fk.schema === from.schema && fk.table === from.name && fk.ftable === target && !selfReference) {
+      const to = rel(fk.fschema, fk.ftable);
+      if (to) out.push({ kind: "m2o", from, to, fromCols: fk.cols, toCols: fk.fcols, fk });
+    }
+    // many-to-one addressed by the foreign key column, e.g. `parent:parent_id(*)`
+    if (fk.schema === from.schema && fk.table === from.name && fk.cols.length === 1 && fk.cols[0] === target) {
       const to = rel(fk.fschema, fk.ftable);
       if (to) out.push({ kind: "m2o", from, to, fromCols: fk.cols, toCols: fk.fcols, fk });
     }
@@ -448,7 +454,7 @@ const suggest = (cache: SchemaCache, schema: string, name: string): string | nul
   for (const r of cache.relations.values()) {
     if (r.schema !== schema) continue;
     const d = levenshtein(name.toLowerCase(), r.name.toLowerCase());
-    if (d <= Math.max(2, Math.floor(name.length / 3)) && (!best || d < best.d)) {
+    if (d <= Math.max(1, Math.floor(name.length / 4)) && (!best || d < best.d)) {
       best = { name: r.name, d };
     }
   }

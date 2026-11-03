@@ -66,18 +66,11 @@ describe.skipIf(!hasDb)("schema introspection", () => {
     expect(rel.junction?.relation.name).toBe("order_items");
   });
 
-  test("self references stay ambiguous, like PostgREST (needs computed relationships)", () => {
+  test("self references: the table name means the children, the fk column means the parent", () => {
     const emp = getRelation(cache, "api", "employees");
-    expect(findRelationships(cache, emp, "employees")).toHaveLength(2);
-    for (const hint of [undefined, "manager_id"]) {
-      try {
-        resolveRelationship(cache, emp, "employees", hint);
-        throw new Error("should have thrown");
-      } catch (e) {
-        expect((e as PgRestError).code).toBe("PGRST201");
-        expect((e as PgRestError).status).toBe(300);
-      }
-    }
+    expect(findRelationships(cache, emp, "employees").map((r) => r.kind)).toEqual(["o2m"]);
+    expect(findRelationships(cache, emp, "manager_id").map((r) => r.kind)).toEqual(["m2o"]);
+    expect(resolveRelationship(cache, emp, "employees", "manager_id").kind).toBe("o2m");
   });
 
   test("a hint picks one of several foreign keys", () => {

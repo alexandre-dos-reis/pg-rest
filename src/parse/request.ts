@@ -173,7 +173,7 @@ export const parseAccept = (accept: string | null, isRoot: boolean): OutputForma
     }
   }
   throw new PgRestError(
-    415,
+    406,
     "PGRST107",
     "None of these media types are available: " + entries.map((e) => e.type).join(", "),
   );

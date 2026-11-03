@@ -76,4 +76,7 @@ bun install
 TEST_DATABASE_URL=postgres://user@host:5432/postgres bun test   # needs a Postgres 16 you can create databases on
 bun run typecheck
 bun run build
+
+# differential test against a real PostgREST 16 binary (see PARITY.md)
+POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=... bun run test:compare
 ```

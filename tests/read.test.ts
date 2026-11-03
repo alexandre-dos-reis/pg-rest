@@ -238,10 +238,17 @@ describe.skipIf(!hasDb)("reads", () => {
       const s = (await t.get("/clients?select=name,...profiles(bio)&id=eq.1")).json();
       expect(s).toEqual([{ name: "Ada", bio: "First programmer" }]);
     });
-    test("ambiguous embedding is PGRST201, unknown is PGRST200", async () => {
-      const amb = await t.get("/employees?select=name,employees(name)");
-      expect(amb.status).toBe(300);
-      expect(amb.json().code).toBe("PGRST201");
+    test("self references: by table name they are the children, by foreign key column the parent (as PostgREST)", async () => {
+      const children = await t.get("/employees?select=name,employees(name)&id=eq.1");
+      expect(children.json()).toEqual([{ name: "Boss", employees: [{ name: "Alice" }, { name: "Bob" }] }]);
+      const parent = await t.get("/employees?select=name,boss:manager_id(name)&id=eq.2");
+      expect(parent.json()).toEqual([{ name: "Alice", boss: { name: "Boss" } }]);
+    });
+    test("an embed addressed by its foreign key column", async () => {
+      const r = await t.get("/orders?select=id,who:client_id(name)&id=eq.1");
+      expect(r.json()).toEqual([{ id: 1, who: { name: "Ada" } }]);
+    });
+    test("unknown relationships are PGRST200", async () => {
       const none = await t.get("/clients?select=name,products(name)");
       // clients → orders → products is not a direct relationship
       expect(none.status).toBe(400);
@@ -282,9 +289,9 @@ describe.skipIf(!hasDb)("reads", () => {
       expect(r.headers.get("content-type")).toBe("text/csv; charset=utf-8");
       expect(r.text).toBe("id,name\n1,Ada\n2,Linus\n3,Grace");
     });
-    test("unsupported Accept is 415 PGRST107", async () => {
+    test("unsupported Accept is 406 PGRST107", async () => {
       const r = await t.get("/clients", { headers: { Accept: "image/png" } });
-      expect(r.status).toBe(415);
+      expect(r.status).toBe(406);
       expect(r.json().code).toBe("PGRST107");
     });
     test("HEAD returns headers only", async () => {

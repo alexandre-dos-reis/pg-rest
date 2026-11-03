@@ -455,26 +455,26 @@ const planTable = (
     throw new PgRestError(400, "PGRST102", "Empty or invalid json", "The payload of a PUT request must be a JSON object");
   }
   if (query.root.limit !== undefined || query.root.offset !== undefined) {
-    throw new PgRestError(400, "PGRST114", "Limits and offsets are not allowed on PUT upserts");
+    throw new PgRestError(400, "PGRST114", "limit/offset querystring parameters are not allowed for PUT");
   }
   if (rel.pk.length === 0) {
-    throw new PgRestError(405, "PGRST105", "Invalid PUT request", `"${rel.name}" has no primary key`);
+    throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
   }
   const keyValues = new Map<string, string>();
   for (const f of query.root.filters) {
     if (f.kind === "filter" && f.op === "eq" && !f.negate && !f.quantifier && f.field.json.length === 0 && typeof f.value === "string" && rel.pk.includes(f.field.name)) {
       keyValues.set(f.field.name, f.value);
     } else {
-      throw new PgRestError(405, "PGRST105", "Invalid PUT request", "Filters on a PUT must be eq.<value> on every primary key column, and nothing else");
+      throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
     }
   }
   if (!rel.pk.every((c) => keyValues.has(c))) {
-    throw new PgRestError(405, "PGRST105", "Invalid PUT request", `PUT requires an equality filter on every primary key column: ${rel.pk.join(", ")}`);
+    throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
   }
   const obj = row as JsonObject;
   for (const c of rel.pk) {
     if (c in obj && String(obj[c]) !== keyValues.get(c)) {
-      throw new PgRestError(400, "PGRST115", "Embedded and query-string primary key values differ", `Specify the same value for ${c} in the body and in the query string`);
+      throw new PgRestError(400, "PGRST115", "Payload values do not match URL in primary key column(s)");
     }
   }
   const full: JsonObject = { ...Object.fromEntries(rel.pk.map((c) => [c, keyValues.get(c)])), ...obj };
@@ -506,7 +506,7 @@ const planRpc = (
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
   if (method !== "GET" && method !== "HEAD" && method !== "POST") {
-    throw new PgRestError(405, "PGRST101", "Only GET and POST verbs are allowed on functions", `Verb ${method} was used`);
+    throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
   }
   const candidates = env.cache.functions.get(`${schema}.${name}`) ?? [];
   const allArgNames = new Set(candidates.flatMap((f) => f.args.map((a) => a.name)));
@@ -633,7 +633,7 @@ const execute = async (
           throw new PgRestError(
             406,
             "PGRST116",
-            "JSON object requested, multiple (or no) rows returned",
+            "Cannot coerce the result to a single JSON object",
             `The result contains ${pageTotal} rows`,
           );
         }
@@ -655,6 +655,11 @@ const execute = async (
       });
     } catch (e) {
       if (e instanceof RollbackWith) return e.value as RawResult;
+      // The root table is aliased internally; PostgreSQL error texts should name the real table.
+      if (e instanceof DbQueryError && plan.kind !== "rpc" && plan.rel) {
+        const fix = (t: string | undefined) => t?.replace(/"pgrst_root"/g, `"${plan.rel!.name}"`).replace(/pgrst_root\./g, `${plan.rel!.name}.`);
+        throw new DbQueryError(e.sqlState, fix(e.message) ?? e.message, fix(e.detail), fix(e.hint));
+      }
       throw e;
     }
   };
@@ -711,14 +716,23 @@ const buildResponse = (
     const last = plan.offset + r.pageTotal - 1;
     headers["Content-Range"] = r.pageTotal > 0 ? `${first}-${last}/${totalStr}` : `*/${totalStr}`;
     if (total !== undefined && plan.offset > 0 && r.pageTotal === 0 && plan.offset >= total && prefer.count !== "planned") {
-      throw new PgRestError(416, "PGRST103", "Requested range not satisfiable", `An offset of ${plan.offset} was requested, but there are only ${total} rows.`);
+      throw new PgRestError(416, "PGRST103", "Requested range not satisfiable", `An offset of ${plan.offset} was requested, but there are only ${total} rows.`, null, {
+        "Content-Range": `*/${total}`,
+        ...(applied ? { "Preference-Applied": applied } : {}),
+      });
     }
     if (total !== undefined && r.pageTotal > 0 && r.pageTotal < total) status = 206;
     if (total !== undefined && r.pageTotal === total && plan.offset > 0) status = 206;
   } else if (plan.kind === "rpc") {
     status = plan.shape === "none" ? 204 : 200;
+    headers["Content-Range"] = r.pageTotal > 0 ? `0-${r.pageTotal - 1}/${totalStr}` : `*/${totalStr}`;
   } else {
-    headers["Content-Range"] = `*/${prefer.count === "exact" ? String(r.pageTotal) : "*"}`;
+    if (plan.kind === "update") {
+      const n = r.pageTotal;
+      headers["Content-Range"] = n > 0 ? `0-${n - 1}/${prefer.count === "exact" ? String(n) : "*"}` : `*/${prefer.count === "exact" ? "0" : "*"}`;
+    } else if (plan.kind !== "put") {
+      headers["Content-Range"] = `*/${prefer.count === "exact" ? String(r.pageTotal) : "*"}`;
+    }
     const ret = plan.returning ?? "minimal";
     if (plan.kind === "insert") {
       status = 201;
@@ -745,14 +759,16 @@ const buildResponse = (
     text = toCsv(text);
     contentType = "text/csv; charset=utf-8";
   } else if (format.kind === "object") {
-    contentType = "application/vnd.pgrst.object+json; charset=utf-8";
+    contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;
+  } else if (format.kind === "json" && format.stripNulls) {
+    contentType = "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8";
   }
 
   Object.assign(headers, r.responseHeaders);
   if (r.responseStatus !== undefined) status = r.responseStatus;
 
   const noBody = status === 204 || status === 304 || text === "" || method === "HEAD";
-  if (!noBody) headers["Content-Type"] = contentType;
+  if (!(status === 204 || status === 304 || (text === "" && method !== "HEAD"))) headers["Content-Type"] = contentType;
   return new Response(noBody ? null : text, { status, headers });
 };
 

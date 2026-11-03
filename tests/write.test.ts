@@ -60,10 +60,13 @@ describe.skipIf(!hasDb)("writes", () => {
     });
     test("missing keys are NULL by default and DEFAULT with missing=default", async () => {
       const rows = [{ client_id: 1, status: "paid" }, { client_id: 1 }];
-      const nulls = await t.post("/orders", rows, { ctx });
+      const mismatch = await t.post("/orders", rows, { ctx });
+      expect(mismatch.status).toBe(400);
+      expect(mismatch.json().code).toBe("PGRST102");
+      const nulls = await t.post("/orders?columns=client_id,status", rows, { ctx });
       expect(nulls.status).toBe(400);
       expect(nulls.json().code).toBe("23502");
-      const ok = await t.post("/orders?select=status&order=id", rows, { ctx, headers: { Prefer: "return=representation, missing=default" } });
+      const ok = await t.post("/orders?columns=client_id,status&select=status&order=id", rows, { ctx, headers: { Prefer: "return=representation, missing=default" } });
       expect(ok.status).toBe(201);
       expect(ok.json()).toEqual([{ status: "paid" }, { status: "new" }]);
     });
@@ -112,7 +115,7 @@ describe.skipIf(!hasDb)("writes", () => {
       expect((await t.post("/clients", { name: "x" }, { ctx })).status).toBe(403);
     });
     test("a failing statement rolls back the whole request", async () => {
-      const r = await t.post("/clients", [{ name: "Fine" }, { name: "Dup", email: "ada@example.com" }], { ctx });
+      const r = await t.post("/clients", [{ name: "Fine", email: "fine@example.com" }, { name: "Dup", email: "ada@example.com" }], { ctx });
       expect(r.status).toBe(409);
       expect(await count("clients")).toBe(3);
     });
@@ -157,7 +160,7 @@ describe.skipIf(!hasDb)("writes", () => {
       const r = await t.patch("/orders?status=eq.paid&select=id,status", { status: "shipped" }, { ctx, headers: REP });
       expect(r.status).toBe(200);
       expect(r.json()).toEqual([{ id: 1, status: "shipped" }, { id: 3, status: "shipped" }]);
-      expect(r.headers.get("content-range")).toBe("*/*");
+      expect(r.headers.get("content-range")).toBe("0-1/*");
     });
     test("minimal is 204 and only the named columns change", async () => {
       const r = await t.patch("/clients?id=eq.1", { email: "new@example.com" }, { ctx });
@@ -171,7 +174,7 @@ describe.skipIf(!hasDb)("writes", () => {
     });
     test("count=exact reports the affected rows", async () => {
       const r = await t.patch("/orders?status=eq.paid", { status: "x" }, { ctx, headers: { Prefer: "count=exact" } });
-      expect(r.headers.get("content-range")).toBe("*/2");
+      expect(r.headers.get("content-range")).toBe("0-1/2");
     });
     test("logic filters and embedded select on the result", async () => {
       const r = await t.patch("/orders?or=(id.eq.1,id.eq.2)&select=id,clients(name)&order=id", { status: "x" }, { ctx, headers: REP });
