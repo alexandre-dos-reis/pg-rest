@@ -1,5 +1,3 @@
-import { Data } from "effect";
-
 /**
  * Error body, in the exact shape PostgREST returns:
  * `{ code, message, details, hint }`.
@@ -13,7 +11,7 @@ export interface ErrorBody {
 
 /**
  * Thrown by the pure parts of the library (parsers, SQL builders). It is
- * converted into an {@link ApiError} at the Effect boundary.
+ * converted into an {@link ApiError} at the request boundary.
  */
 export class PgRestError extends Error {
   constructor(
@@ -39,11 +37,19 @@ export class PgRestError extends Error {
 }
 
 /** An error that has already been mapped to an HTTP response. */
-export class ApiError extends Data.TaggedError("ApiError")<{
+export class ApiError extends Error {
+  readonly _tag = "ApiError";
   readonly status: number;
   readonly body: ErrorBody;
   readonly headers: Readonly<Record<string, string>>;
-}> {}
+  constructor(fields: { readonly status: number; readonly body: ErrorBody; readonly headers: Readonly<Record<string, string>> }) {
+    super(fields.body.message);
+    this.name = "ApiError";
+    this.status = fields.status;
+    this.body = fields.body;
+    this.headers = fields.headers;
+  }
+}
 
 /** Failure talking to the database, carrying Postgres error fields. */
 export interface DbErrorInfo {
@@ -90,11 +96,6 @@ export const normalizeDbError = (e: unknown): unknown => {
   }
   return e;
 };
-
-/** Infrastructure failure (connection lost, adapter bug...). */
-export class DbUnavailable extends Data.TaggedError("DbUnavailable")<{
-  readonly cause: unknown;
-}> {}
 
 /**
  * SQLSTATE → HTTP status, following the PostgREST 16 table

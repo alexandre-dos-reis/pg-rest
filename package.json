@@ -47,9 +47,6 @@
     "test:compare": "bun test tests/compare",
     "bench": "bun bench/run.ts"
   },
-  "dependencies": {
-    "effect": "^4.1.2"
-  },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
     "@hono/node-server": "^2.1.6",

@@ -19,7 +19,9 @@ The GitHub workflow *Benchmark* runs the same thing on demand (manual trigger on
 | `CONNECTIONS` | 32 | concurrent HTTP connections from the load generator ([autocannon](https://github.com/mcollina/autocannon)) |
 | `POOL` | 10 | database connections per server (`db-pool` for PostgREST) |
 | `CLIENTS` / `ORDERS` / `PRODUCTS` | 20000 / 100000 / 1000 | data volume |
-| `TARGETS` | `postgrest,pg-rest-bun,pg-rest-node` | which servers to run |
+| `TARGETS` | `postgrest,pg-rest-bun,pg-rest-bun-compiled,pg-rest-bun-bytecode,pg-rest-bun-aot,pg-rest-node` | which servers to run. The three `pg-rest-bun-*` executables are the Bun server built with `bun build --compile`, `... --bytecode`, and `bun compile` (experimental AOT) |
+| `AOT_BUN` | the running `bun` | path to a Bun that has the `bun compile` command (stable 1.4.4 does not; the canary does) |
+| `BASELINE_DIR` | unset | another built checkout of this repo; adds a `baseline` target running its `bench/servers/bun.ts` (to compare two versions of pg-rest) |
 | `ONLY` | all | comma-separated scenario names (see `scenarios.ts`) |
 | `VERBOSE` | off | print the diverging bodies when results differ |
 | `KEEP` | off | keep the benchmark database |
