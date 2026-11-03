@@ -79,7 +79,7 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
     const r = await t.get("/rpc/req_info", { headers: { "X-Test": "hello", Cookie: "sid=abc%20123; other=1" } });
     const info = r.json();
     expect(info).toMatchObject({ method: "GET", path: "/rpc/req_info", header: "hello", cookie: "abc 123" });
-    expect(info.search_path).toBe('"api", public');
+    expect(info.search_path).toBe('"api", "public"');
     await t.close();
     t = await makeApi({ requestSettings: false });
     expect((await t.get("/rpc/req_info", { headers: { "X-Test": "hello" } })).json()).toMatchObject({ method: null, header: null });
@@ -87,7 +87,7 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
 
   test("extraSearchPath", async () => {
     t = await makeApi({ extraSearchPath: ["public", "v2"] });
-    expect((await t.get("/rpc/req_info")).json().search_path).toBe('"api", public, "v2"');
+    expect((await t.get("/rpc/req_info")).json().search_path).toBe('"api", "public", "v2"');
   });
 
   test("preRequest as a SQL function can reject the request", async () => {
@@ -152,7 +152,7 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
     broken = true;
     const res = await api.handle(new Request("http://x/clients"));
     expect(res.status).toBe(503);
-    expect((await res.json()).code).toBe("PGRST001");
+    expect(((await res.json()) as { code: string }).code).toBe("PGRST001");
     await api.close();
   });
 });
