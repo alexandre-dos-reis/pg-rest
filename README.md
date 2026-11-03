@@ -98,7 +98,7 @@ Numbers from one run on a small 2-vCPU sandbox (indicative only; see the benchma
 | --- | --- | --- | --- |
 | Throughput | 1.2–1.5× on most reads, ~2× on writes | same as plain Bun (within noise) | 0.7–0.9× on the cheapest queries, ahead on heavier ones |
 | Peak memory | ~80 MB | ~50 MB | ~125 MB |
-| Setup | nothing extra | single executable; needs a recent (canary) Bun | any Node 22+ |
+| Setup | nothing extra | single executable; needs a recent (canary) Bun | Node (tested on 22) |
 | Pick it when | you can run Bun (default choice) | memory or deployment size matters and you accept an experimental feature | Bun is not an option |
 
 `bun build --compile` and `--bytecode` performed like plain Bun, so they are only worth it if you want a single binary. PostgREST itself uses the least memory (about 40–47 MB).
