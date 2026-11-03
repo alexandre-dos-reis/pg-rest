@@ -2,7 +2,7 @@
   "name": "pg-rest",
   "type": "module",
   "version": "0.0.0",
-  "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) — no JWT required.",
+  "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) \u2014 no JWT required.",
   "author": "Alexandre Dos Reis",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./adapters/bun": {
+      "types": "./dist/adapters/bun.d.ts",
+      "default": "./dist/adapters/bun.js"
+    },
+    "./adapters/node-postgres": {
+      "types": "./dist/adapters/node-postgres.d.ts",
+      "default": "./dist/adapters/node-postgres.js"
+    },
+    "./adapters/postgres-js": {
+      "types": "./dist/adapters/postgres-js.d.ts",
+      "default": "./dist/adapters/postgres-js.js"
+    },
+    "./adapters/pglite": {
+      "types": "./dist/adapters/pglite.d.ts",
+      "default": "./dist/adapters/pglite.js"
     },
     "./package.json": "./package.json"
   },
@@ -34,10 +50,28 @@
     "effect": "^4.1.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "@types/bun": "latest",
     "@types/pg": "^8.23.1",
     "pg": "^8.23.1",
+    "postgres": "^4.0.0",
     "tsdown": "^0.17.0",
     "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "pg": "^8.0.0",
+    "postgres": ">=3.0.0",
+    "@electric-sql/pglite": ">=0.2.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "postgres": {
+      "optional": true
+    },
+    "@electric-sql/pglite": {
+      "optional": true
+    }
   }
 }

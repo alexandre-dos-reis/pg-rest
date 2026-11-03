@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession, Row } from "../../src/adapter";
+import type { DbAdapter, DbSession, Row } from "../adapter";
 
 /** The subset of `Bun.SQL` that is used (structural: no import from "bun" needed). */
 interface BunSqlLike {

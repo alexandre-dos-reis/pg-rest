@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { createPgRest } from "../dist/index.js";
-import { nodePostgresAdapter } from "../example/adapters/node-postgres.ts";
+import { nodePostgresAdapter } from "../dist/adapters/node-postgres.js";
 
 const admin = process.env["TEST_DATABASE_URL"];
 if (!admin) throw new Error("TEST_DATABASE_URL is not set");

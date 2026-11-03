@@ -1,0 +1,13 @@
+{
+  "name": "pg-rest-example-pglite",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.ts"
+  },
+  "dependencies": {
+    "pg-rest": "file:../..",
+    "@hono/node-server": "^1.13.0",
+    "@electric-sql/pglite": ">=0.2.0"
+  }
+}
