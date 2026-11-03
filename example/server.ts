@@ -3,7 +3,7 @@
 // "X-User" header: replace resolveContext with your real session/API-key lookup.
 import { createPgRest } from "../src/index";
 
-const api = await createPgRest({
+const pgRest = await createPgRest({
   db: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres",
   schemas: ["api"],
   anonymousRole: "anon",
@@ -13,10 +13,10 @@ const api = await createPgRest({
   },
 });
 
-const server = Bun.serve({ port: 3000, fetch: (req) => api.handle(req) });
+const server = Bun.serve({ port: 3000, fetch: (req) => pgRest.handle(req) });
 console.log(`pg-rest example listening on ${server.url}`);
 
 process.on("SIGINT", async () => {
-  await api.close();
+  await pgRest.close();
   process.exit(0);
 });
