@@ -44,15 +44,18 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build",
-    "test:compare": "bun test tests/compare"
+    "test:compare": "bun test tests/compare",
+    "bench": "bun bench/run.ts"
   },
   "dependencies": {
     "effect": "^4.1.2"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
+    "@hono/node-server": "^2.1.6",
     "@types/bun": "latest",
     "@types/pg": "^8.23.1",
+    "autocannon": "^8.0.0",
     "pg": "^8.23.1",
     "postgres": "^4.0.0",
     "tsdown": "^0.17.0",
