@@ -1,4 +1,9 @@
-import { Context, Data, Effect, Layer, Ref, Semaphore } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 import type { DbAdapter } from "./adapter";
 import { type CoreConfig, type RequestContext, handleRequest } from "./core";
 import { ApiError, DbQueryError, PgRestError, dbErrorToApiError } from "./errors";

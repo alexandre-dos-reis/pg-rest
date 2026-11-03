@@ -1,4 +1,6 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, PgRestError, normalizeDbError } from "./errors";
