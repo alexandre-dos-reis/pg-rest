@@ -16,10 +16,11 @@ export const signJwt = (claims: Record<string, unknown>): string => {
 
 export interface RunningPostgrest {
   readonly url: string;
+  readonly pid: number;
   stop(): Promise<void>;
 }
 
-export const startPostgrest = async (dbUrl: string, port: number, schemas: string[]): Promise<RunningPostgrest> => {
+export const startPostgrest = async (dbUrl: string, port: number, schemas: string[], pool = 2): Promise<RunningPostgrest> => {
   if (!POSTGREST_BIN) throw new Error("POSTGREST_BIN is not set");
   const proc = Bun.spawn([POSTGREST_BIN], {
     env: {
@@ -28,7 +29,7 @@ export const startPostgrest = async (dbUrl: string, port: number, schemas: strin
       PGRST_DB_SCHEMAS: schemas.join(","),
       PGRST_DB_ANON_ROLE: "anon",
       PGRST_DB_TX_END: "commit-allow-override",
-      PGRST_DB_POOL: "2",
+      PGRST_DB_POOL: String(pool),
       PGRST_DB_AGGREGATES_ENABLED: "true", // off by default in v16; pg-rest always allows aggregates
       PGRST_JWT_SECRET: JWT_SECRET,
       PGRST_SERVER_HOST: "127.0.0.1",
@@ -56,6 +57,7 @@ export const startPostgrest = async (dbUrl: string, port: number, schemas: strin
   }
   return {
     url,
+    pid: proc.pid,
     async stop() {
       proc.kill();
       await proc.exited;

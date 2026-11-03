@@ -6,3 +6,5 @@ dist
 examples/*/package-lock.json
 examples/*/bun.lock
 examples/*/bun.lockb
+
+bench/results/
