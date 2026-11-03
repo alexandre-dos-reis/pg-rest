@@ -117,10 +117,11 @@ Columns are, in order: PostgREST 16; pg-rest on Bun; the same server compiled wi
 - **Compiled executables are not meaningfully faster here.** `--compile`, `--bytecode` and `bun compile` land within about ±8% of plain `bun` in every scenario,
   which is within run-to-run noise: the time is spent in PostgreSQL, JSON and the socket, not in JS start-up or tier-up. Bytecode would help cold start, which this
   benchmark does not measure (it warms up first). The AOT build is the exception on memory: **54 MB peak against 79 MB** (47 against 68 MB in the short smoke run).
-- **`bun compile --explain`:** the AOT compiler reports that only about 41% of property accesses in the bundle are "free" (typed). Most of the cost comes from
-  compiling the *built* `dist/` JavaScript, whose exported functions count as "called by code the compiler can't see". Compiling the TypeScript source of the library
-  instead lowers the largest entry from 59% to 19% of the estimated untyped time. That suggests the AOT result could improve if a consumer compiles pg-rest from source
-  with tighter types; I have not benchmarked that.
+- **`bun compile --explain` and compiling from source:** the AOT compiler reports that only about 41% of property accesses in the bundle are "free" (typed). Most of the cost comes
+  from compiling the *built* `dist/` JavaScript, whose exported functions count as "called by code the compiler can't see"; compiling the TypeScript source instead lowers the
+  largest entry from 59% to 19% of the estimated untyped time. I benchmarked that too (`pg-rest-bun-aot-src`, a second run with only PostgREST, plain Bun, `--compile` and the two AOT builds):
+  **it made no measurable difference.** Against PostgREST, AOT from `dist` ranged 1.12–1.55× on reads and AOT from `src` 1.20–1.47×, with no consistent winner, and
+  peak memory was the same (50 vs 51 MB, against 82 MB for plain Bun). The workload is dominated by PostgreSQL, JSON and the socket, so untyped JS isn't the bottleneck.
 - **pg-rest on Bun vs PostgREST:** at least as fast in 13 of 14 scenarios, 1.2–1.5× for most reads, about 1.9–2.2× for writes and `aggregate`, and 5–6× for
   `embed-nested-m2m`. `pk-lookup` is a tie (0.95–1.06×). Results were verified identical; I did not investigate why the nested embed differs so much (likely the SQL each generates),
   so don't treat it as a guarantee for your queries.
