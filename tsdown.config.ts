@@ -1,6 +1,9 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  exports: true,
-  // ...config options
+  entry: ["src/index.ts"],
+  format: "esm",
+  dts: true,
+  platform: "neutral",
+  external: ["bun"],
 });

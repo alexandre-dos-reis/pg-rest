@@ -2,19 +2,18 @@
   "name": "pg-rest",
   "type": "module",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "author": "Author Name <author.name@mail.com>",
+  "description": "A PostgREST-compatible REST layer for PostgreSQL, built for Bun and consumed as a library. You decide who the user is (RLS) — no JWT required.",
+  "author": "Alexandre Dos Reis",
   "license": "MIT",
-  "homepage": "https://github.com/author/library#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
-  },
-  "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git"
   },
   "exports": {
-    ".": "./dist/index.mjs",
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
     "./package.json": "./package.json"
   },
   "main": "./dist/index.mjs",
@@ -26,27 +25,16 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "start": "tsx ./src/standalone.ts",
-    "test": "vitest",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm run build"
-  },
-  "devDependencies": {
-    "@testcontainers/postgresql": "^11.10.0",
-    "@types/node": "^24.10.1",
-    "@types/pg": "^8.16.0",
-    "bumpp": "^10.3.2",
-    "tsdown": "^0.17.0",
-    "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.15"
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@effect/language-service": "^0.62.5",
-    "@effect/platform": "^0.94.0",
-    "@effect/platform-node": "^0.104.0",
-    "@effect/sql-pg": "^0.50.0",
-    "effect": "^3.19.13",
-    "pg": "^8.16.3"
+    "effect": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "tsdown": "^0.17.0",
+    "typescript": "^5.9.3"
   }
 }
