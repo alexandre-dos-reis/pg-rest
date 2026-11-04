@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb, hasPostgis } from "../support/db";
+import { hasDb, requirePostgis } from "../support/db";
 import { makeApi, type TestApi } from "../support/api";
 import { cases, type Case } from "./cases";
 import { POSTGREST_BIN, signJwt, startPostgrest, type RunningPostgrest } from "./postgrest";
@@ -133,9 +133,10 @@ describe.skipIf(!enabled)("pg-rest vs PostgREST 16", () => {
   };
 
   for (const c of cases) {
-    test.skipIf(c.requires === "postgis" && !hasPostgis)(
+    test(
       `${c.known ? "[known difference] " : ""}${c.name}${c.as && c.as !== "anon" ? ` (as ${c.as})` : ""}`,
       async () => {
+        if (c.requires === "postgis") requirePostgis();
         const snap = await snapshot();
         const a = await normalize(await send(theirs.url, c), c);
         await restore(snap);

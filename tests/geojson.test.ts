@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb, hasPostgis } from "./support/db";
+import { hasDb, requirePostgis } from "./support/db";
 import { makeApi, type TestApi } from "./support/api";
 
-describe.skipIf(!hasDb || !hasPostgis)("application/geo+json", () => {
+describe.skipIf(!hasDb)("application/geo+json", () => {
   let t: TestApi;
   beforeAll(async () => {
+    requirePostgis();
     t = await makeApi();
   });
   afterAll(async () => {
