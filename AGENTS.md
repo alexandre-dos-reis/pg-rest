@@ -36,7 +36,7 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 
 ```bash
 bun install
-bun run typecheck      # tsc --noEmit (tests, src, bench; scripts/ is excluded on purpose)
+bun run typecheck      # tsc --noEmit (src and tests only; bench/, scripts/ and examples/ are not typechecked)
 bun run build          # tsdown -> dist/ (index.js and adapters/*.js)
 bun test               # unit + integration; integration tests need TEST_DATABASE_URL
 bun run test:compare   # needs POSTGREST_BIN and TEST_DATABASE_URL
