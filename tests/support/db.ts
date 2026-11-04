@@ -64,6 +64,6 @@ export const requirePostgis = (): void => {
   if (hasPostgis) return;
   throw new Error(
     "PostGIS is not available on TEST_DATABASE_URL, so the GeoJSON cases cannot run.\n" +
-      "Point TEST_DATABASE_URL at a Postgres 16 that has PostGIS available (CI uses postgis/postgis:16-3.4).",
+      "Point TEST_DATABASE_URL at a Postgres 16 that has PostGIS available (`mise run db:start`, or postgis/postgis:16-3.6 as CI does).",
   );
 };

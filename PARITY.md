@@ -139,16 +139,19 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 Two layers:
 
 1. **Own suites** – 190+ tests against a real PostgreSQL 16 (schema, parsing, reads, writes, RPC, request context, security).
-2. **Differential test against PostgREST 16.0** – `tests/compare` starts the real `postgrest` binary and pg-rest on the *same* database
+2. **Differential test against PostgREST 16.5** – `tests/compare` starts the real `postgrest` binary and pg-rest on the *same* database
    and replays 339 requests against both (reads, filters, embedding, writes rolled back with `Prefer: tx=rollback`, RPC, errors, headers),
    diffing status, `Content-Type`, `Content-Range`, `Location`, `Preference-Applied`, `Allow` and the JSON body (error bodies included).
-   10 cases need PostGIS and are skipped without it; of the other 329, **328 are byte-for-byte equivalent** and one is the known
+   10 of them need PostGIS and fail without it; of the other 329, **328 are byte-for-byte equivalent** and one is the known
    difference listed below.
 
 ```sh
-# get a binary: https://github.com/PostgREST/postgrest/releases/tag/v16.0
+mise install   # the pinned binary, see mise.toml; or fetch it yourself:
+               # https://github.com/PostgREST/postgrest/releases/tag/v16.5
 POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=postgres://user@host/postgres bun run test:compare
 ```
+
+The GeoJSON cases need PostGIS and fail without it. `mise run db:start` gives a cluster that has it.
 
 The comparison only covers what the cases exercise; it is not exhaustive. Anything not in `tests/compare/cases.ts` is unverified against PostgREST.
 Without `POSTGREST_BIN` the whole suite skips silently rather than failing, so a green `bun test` says nothing about parity unless the

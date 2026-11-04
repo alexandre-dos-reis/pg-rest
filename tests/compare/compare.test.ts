@@ -133,18 +133,15 @@ describe.skipIf(!enabled)("pg-rest vs PostgREST 16", () => {
   };
 
   for (const c of cases) {
-    test(
-      `${c.known ? "[known difference] " : ""}${c.name}${c.as && c.as !== "anon" ? ` (as ${c.as})` : ""}`,
-      async () => {
-        if (c.requires === "postgis") requirePostgis();
-        const snap = await snapshot();
-        const a = await normalize(await send(theirs.url, c), c);
-        await restore(snap);
-        const b = await normalize(await send(null, c), c);
-        await restore(snap);
-        if (c.known) expect(b).not.toEqual(a);
-        else expect(b).toEqual(a);
-      },
-    );
+    test(`${c.known ? "[known difference] " : ""}${c.name}${c.as && c.as !== "anon" ? ` (as ${c.as})` : ""}`, async () => {
+      if (c.requires === "postgis") requirePostgis();
+      const snap = await snapshot();
+      const a = await normalize(await send(theirs.url, c), c);
+      await restore(snap);
+      const b = await normalize(await send(null, c), c);
+      await restore(snap);
+      if (c.known) expect(b).not.toEqual(a);
+      else expect(b).toEqual(a);
+    });
   }
 });

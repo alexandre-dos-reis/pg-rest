@@ -12,7 +12,7 @@ on:
         default: "32"
 
 env:
-  POSTGREST_VERSION: v16.0
+  POSTGREST_VERSION: v16.5
 
 jobs:
   bench:

@@ -24,7 +24,10 @@ describe.skipIf(!hasDb)("application/geo+json", () => {
       geometry: { type: "Point", coordinates: [1, 2] },
       properties: { id: 1, name: "a" },
     });
-    expect(body.features[2].geometry).toEqual({ type: null });
+    // places.geom is NULL on this row, and PostGIS renders that itself: 3.4 emits {"type": null},
+    // 3.6 emits null. pg-rest forwards whatever ST_AsGeoJSON produced, and tests/compare asserts
+    // PostgREST agrees on the same server, so either is right here.
+    expect([null, { type: null }]).toContainEqual(body.features[2].geometry);
   });
 
   test("no rows is an empty collection", async () => {
