@@ -89,7 +89,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `Prefer: max-affected` (`PGRST124`) | ✅ | |
 | Write response `select`, embeds and filters | ✅ | |
 | Write through updatable views | ✅ | |
-| `Prefer: params=single-object` | ❌ | Removed |
+| `Prefer: params=single-object` | ➖ | Removed from PostgREST v16 itself |
 
 ## Functions (RPC)
 
@@ -128,7 +128,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `OPTIONS` / CORS | 🟡 | `OPTIONS` handled with `Allow`; CORS headers are the host's responsibility |
 | Schema cache from `pg_catalog` | ✅ | Tables, views, columns, PK/UK/FK, functions, comments |
 | Domain types, enums, range/array/composite types | 🟡 | Passed through as Postgres returns them; only common types tested |
-| Hot-reloading on DDL | ❌ | Call `reloadSchema()` after migrations |
+| Hot-reloading on DDL | ➖ | Needs a dedicated `LISTEN` connection (see the README); call `reloadSchema()` after migrations |
 
 ## Verification status
 
