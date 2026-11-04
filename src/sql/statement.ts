@@ -21,6 +21,8 @@ export interface StatementOptions {
   readonly stripNulls?: boolean | undefined;
   /** Render the body as CSV, the way PostgREST does: header from the first row, then PostgreSQL's record text. */
   readonly csv?: boolean | undefined;
+  /** Render the rows as a GeoJSON FeatureCollection, the way PostgREST does (needs PostGIS). */
+  readonly geojson?: boolean | undefined;
   /** Render the body with a custom media type handler; binary bodies come back hex-encoded. */
   readonly handler?: MediaChoice | undefined;
   /**
@@ -45,7 +47,12 @@ const handlerBody = (h: MediaChoice): string => {
     : `coalesce((array_agg(_t.pgrst_scalar::text))[1], '')`;
 };
 
-const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean, handler?: MediaChoice): string => {
+const GEOJSON_BODY =
+  `json_build_object('type', 'FeatureCollection', 'features', ` +
+  `coalesce(json_agg(ST_AsGeoJSON(_t)::json), '[]'::json))::text`;
+
+const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean, handler?: MediaChoice, geojson?: boolean): string => {
+  if (geojson && shape !== "none") return GEOJSON_BODY;
   if (handler && shape !== "none") return handlerBody(handler);
   if (csv && shape !== "none") return CSV_BODY;
   const wrap = (e: string) => (strip ? `json_strip_nulls(${e})` : e);
@@ -83,7 +90,7 @@ export const buildStatement = (o: StatementOptions): string => {
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
     `count(*)::text AS page_total, ` +
-    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv), o.handler)} AS body, ` +
+    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv), o.handler, o.geojson)} AS body, ` +
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
     `nullif(current_setting('response.headers', true), '') AS response_headers, ` +
     (up

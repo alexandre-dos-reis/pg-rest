@@ -50,7 +50,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `Accept: application/json`, `text/csv`, `application/vnd.pgrst.object+json` (+ `nulls=stripped`) | ✅ | Singular → `PGRST116` |
 | `application/vnd.pgrst.plan` (EXPLAIN output) | ✅ | `for=` and `options=`; off unless `planEnabled` (like `db-plan-enabled`) |
 | Custom media type handlers: aggregates named after a media type (per table or `anyelement`, incl. the `*/*` catch-all) returning a domain | ✅ | `text/plain`, `text/xml`, `application/octet-stream`, … |
-| `application/geo+json` | ❌ | Needs PostGIS; not tested (no PostGIS in the test image) |
+| `application/geo+json` | ✅ | `FeatureCollection` via PostGIS `ST_AsGeoJSON(record)`; needs PostGIS in your database. Tested against PostgREST on a PostGIS image |
 | `Prefer: handling=strict/lenient` | ✅ | |
 | `Prefer: timezone=` | ✅ | |
 | Response `Preference-Applied`, `Vary`, `Location` | ✅ | |

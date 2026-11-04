@@ -14,6 +14,8 @@ export interface Case {
   readonly known?: string;
   /** Skip comparing the body (compare status and headers only). */
   readonly ignoreBody?: boolean;
+  /** Needs PostGIS in the test database (skipped without it). */
+  readonly requires?: "postgis";
 }
 
 const get = (path: string, extra: Partial<Case> = {}): Case => ({ name: `GET ${path}`, path, ...extra });
@@ -34,6 +36,7 @@ const write = (method: string, path: string, body: unknown, extra: Partial<Case>
   headers: { Prefer: "tx=rollback", ...(extra.headers ?? {}) }, // leave the shared database untouched
 });
 const rep = { Prefer: "return=representation, tx=rollback" };
+const GEO = "application/geo+json";
 const J = { "Content-Type": "application/json" };
 
 const allCases: Case[] = [
@@ -82,6 +85,32 @@ const allCases: Case[] = [
   get("/clients?select=id&order=id", { headers: { Prefer: "count=none" } }),
   get("/clients?select=id,name&order=id", { headers: { Accept: "text/csv" } }),
   get("/clients?select=id,name,tags&order=id", { headers: { Accept: "text/csv" }, name: "csv with array" }),
+  // application/geo+json (PostGIS)
+  get("/places?order=id", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: all columns" }),
+  get("/places?order=id&select=id,name,geom", {
+    headers: { Accept: GEO },
+    requires: "postgis",
+    name: "geojson: select",
+  }),
+  get("/places?id=eq.99", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: no rows" }),
+  get("/places?select=id,name", {
+    headers: { Accept: GEO },
+    requires: "postgis",
+    name: "geojson: geometry column missing",
+  }),
+  get("/place_names", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: view without geometry" }),
+  get("/places?select=id,geom&order=id&limit=1", {
+    headers: { Accept: GEO },
+    requires: "postgis",
+    name: "geojson: limit",
+  }),
+  get("/rpc/all_places", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: rpc set" }),
+  get("/rpc/nums", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: scalar set is an error" }),
+  get("/places?id=eq.1&select=id,geom", {
+    headers: { Accept: `${GEO}, application/vnd.pgrst.object+json` },
+    requires: "postgis",
+    name: "geojson wins when listed first",
+  }),
   // custom media type handlers
   get("/rpc/plain_hi", { name: "handler: scalar domain, default Accept" }),
   get("/rpc/plain_hi", { headers: { Accept: "text/plain" }, name: "handler: scalar domain text/plain" }),

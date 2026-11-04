@@ -162,3 +162,21 @@ CREATE FUNCTION api.nums_plain() RETURNS SETOF api."text/plain" LANGUAGE sql IMM
 CREATE FUNCTION api.clients_txt_t(state text, c api.clients) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(state,'') || c.name || ';' $$;
 CREATE FUNCTION api.clients_fin(state text) RETURNS api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT state $$;
 CREATE AGGREGATE api."text/plain"(api.clients) (sfunc = api.clients_txt_t, stype = text, finalfunc = api.clients_fin);
+
+-- GeoJSON (application/geo+json) needs PostGIS: only created when the extension is available
+DO $do$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS postgis;
+  CREATE TABLE api.places (id int PRIMARY KEY, name text, geom geometry(Point,4326), area geometry(Polygon,4326));
+  INSERT INTO api.places VALUES
+    (1, 'a', ST_SetSRID(ST_MakePoint(1,2),4326), ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 0))',4326)),
+    (2, 'b', ST_SetSRID(ST_MakePoint(3.5,4),4326), NULL),
+    (3, 'c', NULL, NULL);
+  GRANT SELECT ON api.places TO anon, authenticated;
+  CREATE FUNCTION api.all_places() RETURNS SETOF api.places LANGUAGE sql STABLE AS 'SELECT * FROM api.places';
+  CREATE VIEW api.place_names AS SELECT id, name FROM api.places;
+  GRANT SELECT ON api.place_names TO anon, authenticated;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'PostGIS not available: skipping the GeoJSON fixture (%)', SQLERRM;
+END
+$do$;

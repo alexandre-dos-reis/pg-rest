@@ -72,6 +72,7 @@ export interface Env {
 /** Statement options that depend on the negotiated output format. */
 const formatOptions = (format: OutputFormat) => ({
   csv: format.kind === "csv",
+  geojson: format.kind === "geojson",
   handler: format.kind === "handler" ? format.choice : undefined,
 });
 
@@ -984,6 +985,8 @@ const buildResponse = (
     contentType = format.choice.contentType;
   } else if (format.kind === "csv") {
     contentType = "text/csv; charset=utf-8";
+  } else if (format.kind === "geojson") {
+    contentType = "application/geo+json; charset=utf-8";
   } else if (format.kind === "object") {
     contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;
   } else if (format.kind === "json" && format.stripNulls) {

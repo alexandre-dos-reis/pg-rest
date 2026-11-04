@@ -155,6 +155,8 @@ export type OutputFormat =
   | { readonly kind: "json"; readonly stripNulls: boolean }
   | { readonly kind: "object"; readonly stripNulls: boolean }
   | { readonly kind: "csv" }
+  /** `application/geo+json`: a GeoJSON FeatureCollection built by PostGIS's `ST_AsGeoJSON(record)`. */
+  | { readonly kind: "geojson" }
   | { readonly kind: "openapi" }
   /** `application/vnd.pgrst.plan`: answer with the EXPLAIN of the query that `inner` describes. */
   | {
@@ -240,6 +242,9 @@ export const parseAccept = (
         return { kind: "object", stripNulls };
       case "text/csv":
         return { kind: "csv" };
+      case "application/geo+json":
+        if (!isRoot) return { kind: "geojson" };
+        break;
     }
   }
   throw new PgRestError(
