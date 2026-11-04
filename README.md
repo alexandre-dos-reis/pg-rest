@@ -160,15 +160,26 @@ cast targets must match a strict type allowlist, GUC names must be dotted. See `
 
 ## Development
 
+`mise.toml` pins the PostgREST binary the differential test needs and runs a throwaway Postgres 16 **with PostGIS**
+(required: the `application/geo+json` cases fail without it). Nothing is installed system-wide.
+
 ```sh
 bun install
-TEST_DATABASE_URL=postgres://user@host:5432/postgres bun test   # needs a Postgres 16 you can create databases on
-bun run typecheck
-bun run build
-
-# differential test against a real PostgREST 16 binary (see PARITY.md)
-POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=... bun run test:compare
-
-# run an example end to end (build first); the second argument is a database URL with the schema loaded
-bun run build && scripts/check-example.sh with-node-postgres postgres://user@host:5432/mydb
+mise install        # PostgREST 16.5, the official static release
+mise run db:start   # Postgres 16 + PostGIS under .cache/ (also db:stop, db:reset)
+mise run test       # the whole suite, differential and GeoJSON cases included
 ```
+
+Or bring your own Postgres 16 and PostgREST:
+
+```sh
+TEST_DATABASE_URL=postgres://user@host:5432/postgres bun test   # a server you can create databases on
+POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=... bun run test:compare   # see PARITY.md
+bun run typecheck && bun run build
+
+# run an example end to end; the second argument is a database URL with the schema loaded
+scripts/check-example.sh with-node-postgres postgres://user@host:5432/mydb
+```
+
+The examples depend on `pg-rest` by version, so use `bun run link:examples [name]` to point them at the local
+build; `bun run check:examples` asserts they match the root `package.json`.

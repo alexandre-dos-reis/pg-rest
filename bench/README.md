@@ -5,10 +5,12 @@ PostgreSQL database**, with the same data, the same connection-pool size and the
 
 ```sh
 bun run build                      # the benchmark uses the built package, as a consumer would
-POSTGREST_BIN=/path/to/postgrest \
+POSTGREST_BIN="$(mise which postgrest)" \
 BENCH_ADMIN_URL=postgres://postgres@localhost:5432/postgres \
 bun run bench                      # writes bench/results/latest.md and latest.json
 ```
+
+`mise install` provides the binary (v16.5, pinned in `mise.toml`); any PostgREST 16 on disk works too.
 
 `BENCH_ADMIN_URL` must be a superuser URL of a throwaway server (the runner creates and drops its own database).
 The GitHub workflow *Benchmark* runs the same thing on demand (manual trigger only: shared CI runners are too noisy to gate PRs on).
