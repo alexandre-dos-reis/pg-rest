@@ -30,12 +30,16 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
 | `examples/with-*` | independent runnable examples, each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
-| `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts` |
+| `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
+| `mise.toml` | the pinned PostgREST binary, and the tasks that run a Postgres 16 + PostGIS cluster |
 
 ## Commands
 
 ```bash
 bun install
+mise install           # the pinned PostgREST binary (tests/compare); see mise.toml
+mise run db:start      # Postgres 16 + PostGIS on $PGPORT, under .cache/ (also db:stop, db:reset)
+mise run test          # the whole suite against that cluster and that binary
 bun run typecheck      # tsc --noEmit (src and tests only; bench/, scripts/ and examples/ are not typechecked)
 bun run lint           # oxlint on src and tests (config: .oxlintrc.json)
 bun run fmt            # oxfmt --write (config: .oxfmtrc.json); fmt:check is what CI runs
@@ -43,16 +47,39 @@ bun run build          # tsdown -> dist/ (index.js and adapters/*.js)
 bun test               # unit + integration; integration tests need TEST_DATABASE_URL
 bun run test:compare   # needs POSTGREST_BIN and TEST_DATABASE_URL
 bun run bench          # see bench/README.md
+bun run check:examples # every example depends on the root pg-rest version (--fix rewrites them)
+bun run link:examples  # point the examples at the local build, without touching their package.json
 ```
 
-- Integration tests are **skipped** (not failed) without `TEST_DATABASE_URL`: a superuser URL of a throwaway PostgreSQL 16 server (with PostGIS to run the `application/geo+json` tests, otherwise they are skipped). Each test
+- Integration tests are **skipped** (not failed) without `TEST_DATABASE_URL`: a superuser URL of a throwaway PostgreSQL 16 server. Each test
   suite creates and drops its own database, so never point it at data you care about. A green `bun test` with no database proves little: run it
   with one.
-- The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.0** static binary; CI downloads it from the GitHub release).
-  Run them whenever you touch parsing, SQL generation, error codes or response headers.
+- That server **must have PostGIS**: the `application/geo+json` cases used to skip without it and now fail, which is how they were found to match
+  PostgREST all along while `PARITY.md` still listed eight differences as open. `mise run db:start` provides it; CI uses `postgis/postgis:16-3.6`.
+- The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.5** static binary; `mise install` fetches it, CI downloads the same
+  release). Run them whenever you touch parsing, SQL generation, error codes or response headers.
+- Examples depend on `pg-rest` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
+  Use `bun run link:examples [name]`. `bun run version` moves them onto each new release, and `scripts/githooks/pre-commit` (wired up by the
+  `prepare` script on `bun install`) refuses a commit that leaves them out of step with the root `package.json`.
 - CI (`.github/workflows/ci.yml`): typecheck + build + tests on PostgreSQL 16, a Node job (`scripts/node-smoke.ts` against the built `dist`),
   an examples matrix (`scripts/check-example.sh`), and the PostgREST differential test.
 - Typecheck runs before the build in CI, so `src`/`tests` code must not import from `dist`.
+
+## Releasing
+
+Releases are driven by [changesets](https://github.com/changesets/changesets); nothing is published by hand.
+
+```bash
+bun run changeset      # a note saying patch/minor/major and what changed; commit it with the change
+```
+
+`.github/workflows/release.yml` runs after CI passes on `main`: pending notes become a **"chore: version packages"** PR, and
+merging that PR publishes to npm and tags a GitHub release. `bun run version` is what the PR runs -- it bumps `package.json`,
+writes `CHANGELOG.md`, and points the examples at the new version, since they depend on `pg-rest` by version and would
+otherwise ask npm for one that does not exist.
+
+A change with nothing to release (tests, docs, CI) needs no changeset. Publishing needs an `NPM_TOKEN` repository secret;
+provenance is on (`id-token: write`), so releases are attested to the workflow that built them.
 
 ## Conventions and gotchas
 
@@ -71,7 +98,7 @@ bun run bench          # see bench/README.md
 
 ## Benchmarks
 
-`bench/run.ts` needs `POSTGREST_BIN` and `BENCH_ADMIN_URL` (superuser URL of a throwaway server), and a built `dist/`. A full run takes about
+`bench/run.ts` needs `POSTGREST_BIN` (`mise install`, or `mise which postgrest`) and `BENCH_ADMIN_URL` (superuser URL of a throwaway server), and a built `dist/`. A full run takes about
 12 minutes for 5 servers (run it in the background). Findings so far are in `bench/README.md`; they come from a 2-vCPU sandbox and are indicative
 only, with a few percent of noise between runs. `bun compile` (experimental AOT, `--compile --aot`) exists only in recent canary Bun builds; point
 `AOT_BUN` at one. Don't claim a performance improvement from a single run.

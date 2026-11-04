@@ -46,6 +46,10 @@
     "prepublishOnly": "bun run build",
     "test:compare": "bun test tests/compare",
     "bench": "bun bench/run.ts",
+    "changeset": "changeset",
+    "version": "changeset version && bun run check:examples --fix && bun install --lockfile-only",
+    "release": "changeset publish",
+    "prepare": "git rev-parse --git-dir > /dev/null 2>&1 && git config core.hooksPath scripts/githooks || true",
     "check:examples": "bun run scripts/check-example-versions.ts",
     "link:examples": "scripts/link-examples.sh",
     "lint": "oxlint src tests",
@@ -53,6 +57,7 @@
     "fmt:check": "oxfmt --check src tests"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.3",
     "@electric-sql/pglite": "^0.5.15",
     "@hono/node-server": "^2.1.6",
     "@types/bun": "latest",

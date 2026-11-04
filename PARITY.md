@@ -50,7 +50,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `Accept: application/json`, `text/csv`, `application/vnd.pgrst.object+json` (+ `nulls=stripped`) | ✅ | Singular → `PGRST116` |
 | `application/vnd.pgrst.plan` (EXPLAIN output) | ✅ | `for=` and `options=`; off unless `planEnabled` (like `db-plan-enabled`) |
 | Custom media type handlers: aggregates named after a media type (per table or `anyelement`, incl. the `*/*` catch-all) returning a domain | ✅ | `text/plain`, `text/xml`, `application/octet-stream`, … |
-| `application/geo+json` | ✅ | `FeatureCollection` via PostGIS `ST_AsGeoJSON(record)`; needs PostGIS in your database. Tested against PostgREST on a PostGIS image |
+| `application/geo+json` | ✅ | `FeatureCollection` via PostGIS `ST_AsGeoJSON(record)`; needs PostGIS in your database. Compared against PostgREST on the same PostGIS, including a NULL geometry, which 3.4 renders `{"type": null}` and 3.6 renders `null` |
 | `Prefer: handling=strict/lenient` | ✅ | |
 | `Prefer: timezone=` | ✅ | |
 | Response `Preference-Applied`, `Vary`, `Location` | ✅ | |
@@ -138,32 +138,32 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 
 Two layers:
 
-1. **Own suites** – 177+ tests against a real PostgreSQL 16 (schema, parsing, reads, writes, RPC, request context, security).
-2. **Differential test against PostgREST 16.0** – `tests/compare` starts the real `postgrest` binary and pg-rest on the *same* database
-   and replays ~175 requests against both (reads, filters, embedding, writes rolled back with `Prefer: tx=rollback`, RPC, errors, headers),
+1. **Own suites** – 190+ tests against a real PostgreSQL 16 (schema, parsing, reads, writes, RPC, request context, security).
+2. **Differential test against PostgREST 16.5** – `tests/compare` starts the real `postgrest` binary and pg-rest on the *same* database
+   and replays 339 requests against both (reads, filters, embedding, writes rolled back with `Prefer: tx=rollback`, RPC, errors, headers),
    diffing status, `Content-Type`, `Content-Range`, `Location`, `Preference-Applied`, `Allow` and the JSON body (error bodies included).
-   164 cases are byte-for-byte equivalent; 11 are known differences listed below.
+   10 of them need PostGIS and fail without it; of the other 329, **328 are byte-for-byte equivalent** and one is the known
+   difference listed below.
 
 ```sh
-# get a binary: https://github.com/PostgREST/postgrest/releases/tag/v16.0
+mise install   # the pinned binary, see mise.toml; or fetch it yourself:
+               # https://github.com/PostgREST/postgrest/releases/tag/v16.5
 POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=postgres://user@host/postgres bun run test:compare
 ```
 
+The GeoJSON cases need PostGIS and fail without it. `mise run db:start` gives a cluster that has it.
+
 The comparison only covers what the cases exercise; it is not exhaustive. Anything not in `tests/compare/cases.ts` is unverified against PostgREST.
+Without `POSTGREST_BIN` the whole suite skips silently rather than failing, so a green `bun test` says nothing about parity unless the
+binary was present.
 
 ### Known differences (asserted by the comparison test)
 
+One, and it is deliberate. The test asserts it still differs, so it cannot go stale unnoticed.
+
 | Case | PostgREST 16 | pg-rest |
 | --- | --- | --- |
-| CSV output of array columns | PostgreSQL text syntax `{a,b}` | JSON text `["a","b"]` |
-| `limit=abc` | ignored (200) | `400 PGRST100` |
 | Invalid cast target (`select=id::int4 from x`) | forwarded to PostgreSQL → `42601` | rejected up front: `400 PGRST100` (SQL-injection hardening) |
-| `order=rel(col)` | supported for embedded to-one; `PGRST108` when not embedded | `PGRST127` not implemented |
-| `merge-duplicates` upsert that only updates rows | `200` | `201` |
-| Invalid JSON body | parser-specific `details` | different `details` |
-| Single unnamed `json` parameter given an array body with differing keys | `400 PGRST102` | passes the array through |
-| `Accept: text/csv` on a scalar function result | CSV | not supported |
-| Unsupported HTTP method (`TRACE`) | empty body | `PGRST117` JSON error |
 
 ### Differences found by the comparison and fixed
 
@@ -171,6 +171,11 @@ Content-Range on RPC / PATCH responses, `Cannot coerce the result to a single JS
 `nulls=stripped` media types, `416` carrying `Content-Range` and `Preference-Applied`, `PGRST102` for bulk inserts with differing keys,
 PUT error texts, PGRST202/203 texts, fewer "did you mean" hints, real table names in PostgreSQL error messages, `HEAD` content type,
 embedding by foreign-key column (`c:client_id(*)`), self-reference resolution (table name → children, column name → parent).
+
+Then, all previously listed as known differences: CSV of array columns (now PostgreSQL's own record text, `{a,b}`, quoted exactly as
+PostgREST quotes it), `limit=abc` ignored rather than `PGRST100`, `order=rel(col)` on a relation that is not embedded (`PGRST108`),
+`merge-duplicates` upsert that only updates returning `200`, the `details` of an invalid JSON body, a single unnamed `json` parameter
+given an array body with differing keys, `Accept: text/csv` on a scalar function result, and `TRACE` answering with an empty body.
 
 ### Configuration differences used by the comparison
 

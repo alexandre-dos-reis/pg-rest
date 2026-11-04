@@ -8,3 +8,5 @@ examples/*/bun.lock
 examples/*/bun.lockb
 
 bench/results/
+
+.cache/

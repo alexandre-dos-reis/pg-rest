@@ -42,7 +42,7 @@ export const createTestDb = async (): Promise<TestDb> => {
   };
 };
 
-/** True when the test server has the PostGIS extension available (GeoJSON tests are skipped otherwise). */
+/** True when the test server has the PostGIS extension available. */
 export const hasPostgis: boolean = await (async () => {
   if (!ADMIN_URL) return false;
   const admin = new SQL(ADMIN_URL);
@@ -55,3 +55,15 @@ export const hasPostgis: boolean = await (async () => {
     await admin.close();
   }
 })();
+
+/**
+ * The GeoJSON suites need PostGIS. A database without it is a broken setup, not a reason to pass
+ * quietly: skipping is what let nine stale parity differences survive. Fail, and say what to do.
+ */
+export const requirePostgis = (): void => {
+  if (hasPostgis) return;
+  throw new Error(
+    "PostGIS is not available on TEST_DATABASE_URL, so the GeoJSON cases cannot run.\n" +
+      "Point TEST_DATABASE_URL at a Postgres 16 that has PostGIS available (`mise run db:start`, or postgis/postgis:16-3.6 as CI does).",
+  );
+};

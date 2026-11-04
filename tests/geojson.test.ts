@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb, hasPostgis } from "./support/db";
+import { hasDb, requirePostgis } from "./support/db";
 import { makeApi, type TestApi } from "./support/api";
 
-describe.skipIf(!hasDb || !hasPostgis)("application/geo+json", () => {
+describe.skipIf(!hasDb)("application/geo+json", () => {
   let t: TestApi;
   beforeAll(async () => {
+    requirePostgis();
     t = await makeApi();
   });
   afterAll(async () => {
@@ -23,7 +24,10 @@ describe.skipIf(!hasDb || !hasPostgis)("application/geo+json", () => {
       geometry: { type: "Point", coordinates: [1, 2] },
       properties: { id: 1, name: "a" },
     });
-    expect(body.features[2].geometry).toEqual({ type: null });
+    // places.geom is NULL on this row, and PostGIS renders that itself: 3.4 emits {"type": null},
+    // 3.6 emits null. pg-rest forwards whatever ST_AsGeoJSON produced, and tests/compare asserts
+    // PostgREST agrees on the same server, so either is right here.
+    expect([null, { type: null }]).toContainEqual(body.features[2].geometry);
   });
 
   test("no rows is an empty collection", async () => {

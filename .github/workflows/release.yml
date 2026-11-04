@@ -1,0 +1,61 @@
+name: Release
+
+# Only after CI has passed on main, never in parallel with itself.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `success` alone is enough because ci.yml has no paths-ignore: it runs on every commit to main,
+    # including the one that merges the "Version Packages" PR, which is the commit that has to publish.
+    # Give ci.yml a paths filter later and that commit can be skipped instead of passing, which would
+    # silently merge a version bump and never release it -- then this needs to accept `skipped` for
+    # that commit too.
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changesets reads tags and history
+          # workflow_run checks out the default branch head, which is what we publish.
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org # writes the .npmrc that npm publish reads
+
+      - run: bun install --frozen-lockfile
+
+      # Opens (or updates) the "Version Packages" PR when changesets are pending, and publishes to npm
+      # once that PR is merged. `version` also moves the examples onto the new version; `release` runs
+      # `changeset publish`, and prepublishOnly builds dist/.
+      - uses: changesets/action@v2
+        with:
+          version-script: bun run version
+          publish-script: bun run release
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
+          create-github-releases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
