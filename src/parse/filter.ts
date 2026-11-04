@@ -1,28 +1,62 @@
 import { PgRestError } from "../errors";
-import {
-  type FieldRef,
-  parseError,
-  parseField,
-  splitTopLevel,
-  unquote,
-} from "./field";
+import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
 import { type SelectItem, parseSelect } from "./select";
 
 export type Operator =
-  | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
-  | "like" | "ilike" | "match" | "imatch"
-  | "in" | "is" | "isdistinct"
-  | "fts" | "plfts" | "phfts" | "wfts"
-  | "cs" | "cd" | "ov" | "sl" | "sr" | "nxl" | "nxr" | "adj";
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "like"
+  | "ilike"
+  | "match"
+  | "imatch"
+  | "in"
+  | "is"
+  | "isdistinct"
+  | "fts"
+  | "plfts"
+  | "phfts"
+  | "wfts"
+  | "cs"
+  | "cd"
+  | "ov"
+  | "sl"
+  | "sr"
+  | "nxl"
+  | "nxr"
+  | "adj";
 
 const OPERATORS: ReadonlySet<string> = new Set([
-  "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "match", "imatch",
-  "in", "is", "isdistinct", "fts", "plfts", "phfts", "wfts",
-  "cs", "cd", "ov", "sl", "sr", "nxl", "nxr", "adj",
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "like",
+  "ilike",
+  "match",
+  "imatch",
+  "in",
+  "is",
+  "isdistinct",
+  "fts",
+  "plfts",
+  "phfts",
+  "wfts",
+  "cs",
+  "cd",
+  "ov",
+  "sl",
+  "sr",
+  "nxl",
+  "nxr",
+  "adj",
 ]);
-const QUANTIFIABLE: ReadonlySet<string> = new Set([
-  "eq", "gt", "gte", "lt", "lte", "like", "ilike", "match", "imatch",
-]);
+const QUANTIFIABLE: ReadonlySet<string> = new Set(["eq", "gt", "gte", "lt", "lte", "like", "ilike", "match", "imatch"]);
 const FTS: ReadonlySet<string> = new Set(["fts", "plfts", "phfts", "wfts"]);
 const IS_VALUES: ReadonlySet<string> = new Set(["null", "not_null", "true", "false", "unknown"]);
 
@@ -98,11 +132,7 @@ const parseList = (raw: string, where: string): string[] => {
  * Parse `[not.]op[(modifier)].value`, the right-hand side of a filter.
  * `unquoteValue` is true inside and()/or() trees where values may be quoted.
  */
-export const parseOperatorExpr = (
-  field: FieldRef,
-  expr: string,
-  unquoteValue = false,
-): Filter => {
+export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = false): Filter => {
   let rest = expr;
   let negate = false;
   if (rest.startsWith("not.")) {
@@ -145,10 +175,7 @@ export const parseOperatorExpr = (
   } else if (op === "is") {
     const v = String(value).toLowerCase();
     if (!IS_VALUES.has(v)) {
-      throw parseError(
-        `failed to parse filter (${expr})`,
-        "is only accepts null, not_null, true, false and unknown",
-      );
+      throw parseError(`failed to parse filter (${expr})`, "is only accepts null, not_null, true, false and unknown");
     }
     value = v;
   }
@@ -225,11 +252,7 @@ const parseCount = (name: string, v: string): number => {
 // query string
 // ---------------------------------------------------------------------------
 
-const walkEmbeds = (
-  items: ReadonlyArray<SelectItem>,
-  prefix: string[],
-  known: Map<string, string>,
-) => {
+const walkEmbeds = (items: ReadonlyArray<SelectItem>, prefix: string[], known: Map<string, string>) => {
   for (const it of items) {
     if (it.kind !== "embed") continue;
     const name = it.alias ?? it.target;
@@ -321,7 +344,10 @@ export const parseQuery = (
           null,
         );
       }
-      paramsFor(parts.slice(0, -1), key).presence.push({ embed: known.get(embedPath)!.split(".").pop()!, present: Boolean(m[1]) });
+      paramsFor(parts.slice(0, -1), key).presence.push({
+        embed: known.get(embedPath)!.split(".").pop()!,
+        present: Boolean(m[1]),
+      });
       continue;
     }
     const path = parts.slice(0, -1);

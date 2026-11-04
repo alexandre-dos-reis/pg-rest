@@ -72,11 +72,9 @@ export const relKey = (schema: string, name: string) => `${schema}.${name}`;
 const kindOf = (k: string): RelationKind =>
   k === "v" ? "view" : k === "m" ? "matview" : k === "f" ? "foreign" : k === "p" ? "partitioned" : "table";
 
-const schemaList = (schemas: ReadonlyArray<string>) =>
-  `ARRAY[${schemas.map(literal).join(",")}]::text[]`;
+const schemaList = (schemas: ReadonlyArray<string>) => `ARRAY[${schemas.map(literal).join(",")}]::text[]`;
 
-const asJson = (inner: string) =>
-  `SELECT coalesce(json_agg(r), '[]'::json)::text AS j FROM (${inner}) r`;
+const asJson = (inner: string) => `SELECT coalesce(json_agg(r), '[]'::json)::text AS j FROM (${inner}) r`;
 
 const run = async <T>(db: DbSession, sql: string): Promise<T[]> => {
   const rows = await db.query(asJson(sql));
@@ -85,10 +83,7 @@ const run = async <T>(db: DbSession, sql: string): Promise<T[]> => {
 };
 
 /** Read the catalog and build a fresh {@link SchemaCache}. */
-export const introspect = async (
-  db: DbSession,
-  schemas: ReadonlyArray<string>,
-): Promise<SchemaCache> => {
+export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>): Promise<SchemaCache> => {
   const S = schemaList(schemas);
 
   const relRows = await run<{
@@ -392,11 +387,7 @@ export const findRelationships = (
   if (!hint) return out;
   return out.filter((r) => {
     if (r.junction) {
-      return (
-        r.junction.relation.name === hint ||
-        r.junction.fkFrom.name === hint ||
-        r.junction.fkTo.name === hint
-      );
+      return r.junction.relation.name === hint || r.junction.fkFrom.name === hint || r.junction.fkTo.name === hint;
     }
     return r.fk.name === hint || r.fk.cols.includes(hint) || r.fk.fcols.includes(hint);
   });
@@ -419,7 +410,9 @@ export const resolveRelationship = (
       400,
       "PGRST200",
       `Could not find a relationship between '${from.name}' and '${target}' in the schema cache`,
-      hint ? `Searched for a foreign key relationship between '${from.name}' and '${target}' using the hint '${hint}' in the schema '${from.schema}', but no matches were found.` : `Searched for a foreign key relationship between '${from.name}' and '${target}' in the schema '${from.schema}', but no matches were found.`,
+      hint
+        ? `Searched for a foreign key relationship between '${from.name}' and '${target}' using the hint '${hint}' in the schema '${from.schema}', but no matches were found.`
+        : `Searched for a foreign key relationship between '${from.name}' and '${target}' in the schema '${from.schema}', but no matches were found.`,
       null,
     );
   }

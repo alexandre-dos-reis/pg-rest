@@ -55,7 +55,12 @@ export const toApiError = (e: unknown, role: string, anonymousRole: string): Api
     return new ApiError({
       status: 503,
       headers: {},
-      body: { code: "PGRST001", message: "Database connection failed", details: e instanceof Error ? e.message : null, hint: null },
+      body: {
+        code: "PGRST001",
+        message: "Database connection failed",
+        details: e instanceof Error ? e.message : null,
+        hint: null,
+      },
     });
   }
   return new ApiError({

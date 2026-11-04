@@ -22,10 +22,7 @@ export const parseError = (message: string, details?: string): PgRestError =>
  * with the index of every character that is at depth 0 and outside quotes.
  * Returning `true` from `visit` stops the scan.
  */
-export const scanTopLevel = (
-  s: string,
-  visit: (index: number, ch: string) => boolean | void,
-): void => {
+export const scanTopLevel = (s: string, visit: (index: number, ch: string) => boolean | void): void => {
   let depth = 0;
   let quoted = false;
   for (let i = 0; i < s.length; i++) {

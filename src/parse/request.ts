@@ -30,13 +30,16 @@ export const parseTarget = (pathname: string, basePath = ""): Target => {
     else if (path.startsWith(`${base}/`)) path = path.slice(base.length);
     else throw new PgRestError(404, "PGRST125", `Invalid path specified in request URL`);
   }
-  const segs = path.split("/").filter(Boolean).map((s) => {
-    try {
-      return decodeURIComponent(s);
-    } catch {
-      throw new PgRestError(400, "PGRST100", "Invalid URL encoding in path");
-    }
-  });
+  const segs = path
+    .split("/")
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        throw new PgRestError(400, "PGRST100", "Invalid URL encoding in path");
+      }
+    });
   if (segs.length === 0) return { type: "root" };
   if (segs[0] === "rpc") {
     if (segs.length !== 2) throw new PgRestError(404, "PGRST125", "Invalid path specified in request URL");
@@ -121,7 +124,13 @@ export const parseRange = (range: string | null, unit: string | null): RangeSpec
   if (m[2] === "") return { offset: start };
   const end = Number(m[2]);
   if (end < start) {
-    throw new PgRestError(416, "PGRST103", "Requested range not satisfiable", `The lower boundary must be lower than or equal to the upper boundary in the Range header.`, null);
+    throw new PgRestError(
+      416,
+      "PGRST103",
+      "Requested range not satisfiable",
+      `The lower boundary must be lower than or equal to the upper boundary in the Range header.`,
+      null,
+    );
   }
   return { offset: start, limit: end - start + 1 };
 };

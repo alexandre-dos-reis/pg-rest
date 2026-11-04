@@ -45,7 +45,10 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build",
     "test:compare": "bun test tests/compare",
-    "bench": "bun bench/run.ts"
+    "bench": "bun bench/run.ts",
+    "lint": "oxlint src tests",
+    "fmt": "oxfmt src tests",
+    "fmt:check": "oxfmt --check src tests"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
@@ -53,6 +56,8 @@
     "@types/bun": "latest",
     "@types/pg": "^8.23.1",
     "autocannon": "^8.0.0",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
     "pg": "^8.23.1",
     "postgres": "^4.0.0",
     "tsdown": "^0.17.0",

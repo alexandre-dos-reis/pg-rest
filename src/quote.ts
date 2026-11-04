@@ -8,8 +8,7 @@ export const quoteIdent = (name: string): string => {
   return `"${name.replace(/"/g, '""')}"`;
 };
 
-export const quoteQualified = (schema: string, name: string): string =>
-  `${quoteIdent(schema)}.${quoteIdent(name)}`;
+export const quoteQualified = (schema: string, name: string): string => `${quoteIdent(schema)}.${quoteIdent(name)}`;
 
 /**
  * Escape a string as an SQL literal of *unknown* type, so Postgres infers the
@@ -42,12 +41,7 @@ const TYPE_RE = new RegExp(`^(?:(?:${MULTI_WORD})|${ID}(?:\\.${ID})?)${MOD}${ARR
 export const safeType = (type: string): string => {
   const t = type.trim();
   if (t.length > 100 || !TYPE_RE.test(t)) {
-    throw new PgRestError(
-      400,
-      "PGRST100",
-      "Invalid type in cast",
-      `"${type}" is not an allowed cast target`,
-    );
+    throw new PgRestError(400, "PGRST100", "Invalid type in cast", `"${type}" is not an allowed cast target`);
   }
   return t;
 };

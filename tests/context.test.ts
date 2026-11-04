@@ -19,8 +19,14 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
 
   test("role, claims and custom settings reach SQL", async () => {
     t = await makeApi();
-    const r = await t.get("/rpc/whoami", { ctx: { role: "authenticated", claims: { sub: "u-9", email: "u@x.com" }, settings: { "app.tenant": "acme" } } });
-    expect(r.json()).toEqual({ role: "authenticated", claims: { role: "authenticated", sub: "u-9", email: "u@x.com" }, tenant: "acme" });
+    const r = await t.get("/rpc/whoami", {
+      ctx: { role: "authenticated", claims: { sub: "u-9", email: "u@x.com" }, settings: { "app.tenant": "acme" } },
+    });
+    expect(r.json()).toEqual({
+      role: "authenticated",
+      claims: { role: "authenticated", sub: "u-9", email: "u@x.com" },
+      tenant: "acme",
+    });
   });
 
   test("an explicit role claim is not overwritten", async () => {
@@ -82,7 +88,10 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
     expect(info.search_path).toBe('"api", "public"');
     await t.close();
     t = await makeApi({ requestSettings: false });
-    expect((await t.get("/rpc/req_info", { headers: { "X-Test": "hello" } })).json()).toMatchObject({ method: null, header: null });
+    expect((await t.get("/rpc/req_info", { headers: { "X-Test": "hello" } })).json()).toMatchObject({
+      method: null,
+      header: null,
+    });
   });
 
   test("extraSearchPath", async () => {
@@ -114,7 +123,9 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
   test("the schema cache can be reloaded after a migration", async () => {
     t = await makeApi();
     expect((await t.get("/late")).status).toBe(404);
-    await t.db.adapter.query("CREATE TABLE api.late (id int PRIMARY KEY); INSERT INTO api.late VALUES (1); GRANT SELECT ON api.late TO anon");
+    await t.db.adapter.query(
+      "CREATE TABLE api.late (id int PRIMARY KEY); INSERT INTO api.late VALUES (1); GRANT SELECT ON api.late TO anon",
+    );
     expect((await t.get("/late")).status).toBe(404);
     await t.api.reloadSchema();
     expect((await t.get("/late")).json()).toEqual([{ id: 1 }]);
@@ -125,7 +136,9 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
     const { createPgRest } = await import("../src/index");
     const probe = await makeApi();
     try {
-      await expect(createPgRest({ db: probe.db.adapter, schemas: ["pg_catalog"] })).rejects.toThrow(/cannot be exposed/);
+      await expect(createPgRest({ db: probe.db.adapter, schemas: ["pg_catalog"] })).rejects.toThrow(
+        /cannot be exposed/,
+      );
     } finally {
       await probe.close();
     }

@@ -7,7 +7,11 @@ describe("runtime-agnostic library", () => {
     const offenders: string[] = [];
     for await (const file of new Glob("src/**/*.ts").scan(".")) {
       const text = (await Bun.file(file).text()).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, ""); // ignore comments
-      if (/from\s+["'](bun|bun:[^"']*|node:[^"']*|pg|postgres|@electric-sql\/pglite)["']|\bBun\.|\bprocess\.|require\(|import\(["']bun/.test(text)) {
+      if (
+        /from\s+["'](bun|bun:[^"']*|node:[^"']*|pg|postgres|@electric-sql\/pglite)["']|\bBun\.|\bprocess\.|require\(|import\(["']bun/.test(
+          text,
+        )
+      ) {
         offenders.push(file);
       }
     }

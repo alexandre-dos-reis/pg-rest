@@ -43,10 +43,7 @@ const bodyExpr = (shape: BodyShape, strip: boolean): string => {
  * (RPC, triggers) can influence the response by calling `set_config`.
  */
 export const buildStatement = (o: StatementOptions): string => {
-  const ctes = [
-    ...(o.source ? [`pgrst_source AS (${o.source})`] : []),
-    `pgrst_body AS (${o.rows})`,
-  ];
+  const ctes = [...(o.source ? [`pgrst_source AS (${o.source})`] : []), `pgrst_body AS (${o.rows})`];
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
     `count(*)::text AS page_total, ` +

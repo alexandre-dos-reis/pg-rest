@@ -76,18 +76,57 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
     /* keep defaults */
   }
 
-  const relations = [...cache.relations.values()].filter((r) => r.schema === schema).sort((a, b) => a.name.localeCompare(b.name));
-  const functions = [...cache.functions.values()].flat().filter((f) => f.schema === schema).sort((a, b) => a.name.localeCompare(b.name));
+  const relations = [...cache.relations.values()]
+    .filter((r) => r.schema === schema)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const functions = [...cache.functions.values()]
+    .flat()
+    .filter((f) => f.schema === schema)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const parameters: Json = {
-    preferReturn: { name: "Prefer", description: "Preference", required: false, in: "header", type: "string", enum: ["return=representation", "return=minimal", "return=headers-only"] },
-    preferCount: { name: "Prefer", description: "Preference", required: false, in: "header", type: "string", enum: ["count=none"] },
-    preferPost: { name: "Prefer", description: "Preference", required: false, in: "header", type: "string", enum: ["return=representation", "return=minimal", "return=headers-only", "resolution=ignore-duplicates", "resolution=merge-duplicates"] },
+    preferReturn: {
+      name: "Prefer",
+      description: "Preference",
+      required: false,
+      in: "header",
+      type: "string",
+      enum: ["return=representation", "return=minimal", "return=headers-only"],
+    },
+    preferCount: {
+      name: "Prefer",
+      description: "Preference",
+      required: false,
+      in: "header",
+      type: "string",
+      enum: ["count=none"],
+    },
+    preferPost: {
+      name: "Prefer",
+      description: "Preference",
+      required: false,
+      in: "header",
+      type: "string",
+      enum: [
+        "return=representation",
+        "return=minimal",
+        "return=headers-only",
+        "resolution=ignore-duplicates",
+        "resolution=merge-duplicates",
+      ],
+    },
     select: { name: "select", description: "Filtering Columns", required: false, in: "query", type: "string" },
     on_conflict: { name: "on_conflict", description: "On Conflict", required: false, in: "query", type: "string" },
     order: { name: "order", description: "Ordering", required: false, in: "query", type: "string" },
     range: { name: "Range", description: "Limiting and Pagination", required: false, in: "header", type: "string" },
-    rangeUnit: { name: "Range-Unit", description: "Limiting and Pagination", required: false, default: "items", in: "header", type: "string" },
+    rangeUnit: {
+      name: "Range-Unit",
+      description: "Limiting and Pagination",
+      required: false,
+      default: "items",
+      in: "header",
+      type: "string",
+    },
     offset: { name: "offset", description: "Limiting and Pagination", required: false, in: "query", type: "string" },
     limit: { name: "limit", description: "Limiting and Pagination", required: false, in: "query", type: "string" },
   };
@@ -124,7 +163,13 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
       filterRefs.push({ $ref: `#/parameters/${key}` });
     }
     const bodyKey = `body.${rel.name}`;
-    parameters[bodyKey] = { name: rel.name, description: rel.name, required: false, in: "body", schema: { $ref: `#/definitions/${rel.name}` } };
+    parameters[bodyKey] = {
+      name: rel.name,
+      description: rel.name,
+      required: false,
+      in: "body",
+      schema: { $ref: `#/definitions/${rel.name}` },
+    };
 
     const ref = `#/definitions/${rel.name}`;
     const op: Json = {
@@ -150,7 +195,11 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
     if (rel.insertable) {
       op["post"] = {
         tags: [rel.name],
-        parameters: [{ $ref: `#/parameters/${bodyKey}` }, { $ref: "#/parameters/select" }, { $ref: "#/parameters/preferPost" }],
+        parameters: [
+          { $ref: `#/parameters/${bodyKey}` },
+          { $ref: "#/parameters/select" },
+          { $ref: "#/parameters/preferPost" },
+        ],
         responses: { "201": { description: "Created" } },
       };
     }
@@ -188,8 +237,18 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
     host,
     basePath: opts.basePath || "/",
     schemes: [scheme],
-    consumes: ["application/json", "application/vnd.pgrst.object+json;nulls=stripped", "application/vnd.pgrst.object+json", "text/csv"],
-    produces: ["application/json", "application/vnd.pgrst.object+json;nulls=stripped", "application/vnd.pgrst.object+json", "text/csv"],
+    consumes: [
+      "application/json",
+      "application/vnd.pgrst.object+json;nulls=stripped",
+      "application/vnd.pgrst.object+json",
+      "text/csv",
+    ],
+    produces: [
+      "application/json",
+      "application/vnd.pgrst.object+json;nulls=stripped",
+      "application/vnd.pgrst.object+json",
+      "text/csv",
+    ],
     paths,
     definitions,
     parameters,
@@ -207,7 +266,11 @@ const rpcPath = (fn: FunctionDef): Json => {
   }
   const post: Json = {
     tags: [`(rpc) ${fn.name}`],
-    produces: ["application/json", "application/vnd.pgrst.object+json;nulls=stripped", "application/vnd.pgrst.object+json"],
+    produces: [
+      "application/json",
+      "application/vnd.pgrst.object+json;nulls=stripped",
+      "application/vnd.pgrst.object+json",
+    ],
     parameters: [
       {
         name: "args",
@@ -224,7 +287,11 @@ const rpcPath = (fn: FunctionDef): Json => {
   if (fn.volatility !== "volatile") {
     path["get"] = {
       tags: [`(rpc) ${fn.name}`],
-      produces: ["application/json", "application/vnd.pgrst.object+json;nulls=stripped", "application/vnd.pgrst.object+json"],
+      produces: [
+        "application/json",
+        "application/vnd.pgrst.object+json;nulls=stripped",
+        "application/vnd.pgrst.object+json",
+      ],
       parameters: fn.args
         .filter((a) => a.name)
         .map((a) => ({ name: a.name, required: !a.hasDefault, in: "query", ...pgTypeToOpenApi(a.type) })),
