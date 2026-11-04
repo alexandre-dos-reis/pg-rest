@@ -1,6 +1,7 @@
 import { PgRestError } from "../errors";
 import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
 import { type SelectItem, parseSelect } from "./select";
+import { IS_VALUES_ORDER, filterSyntax, orderSyntax, scanList } from "./syntax";
 
 export type Operator =
   | "eq"
@@ -133,6 +134,10 @@ const parseList = (raw: string, where: string): string[] => {
  * `unquoteValue` is true inside and()/or() trees where values may be quoted.
  */
 export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = false): Filter => {
+  if (!unquoteValue) {
+    const checked = filterSyntax(expr);
+    if (checked instanceof PgRestError) throw checked;
+  }
   let rest = expr;
   let negate = false;
   if (rest.startsWith("not.")) {
@@ -171,9 +176,12 @@ export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = 
 
   let value: string | string[] = unquoteValue ? unquote(rawValue) : rawValue;
   if (op === "in") {
-    value = parseList(rawValue, expr);
+    // PostgREST stops at the closing parenthesis and ignores what follows.
+    const end = unquoteValue ? undefined : scanList(rawValue, 0);
+    value = parseList(typeof end === "number" ? rawValue.slice(0, end) : rawValue, expr);
   } else if (op === "is") {
-    const v = String(value).toLowerCase();
+    const prefix = unquoteValue ? undefined : IS_VALUES_ORDER.find((w) => rawValue.startsWith(w));
+    const v = (prefix ?? String(value)).toLowerCase();
     if (!IS_VALUES.has(v)) {
       throw parseError(`failed to parse filter (${expr})`, "is only accepts null, not_null, true, false and unknown");
     }
@@ -219,7 +227,13 @@ export const parseLogic = (op: "and" | "or", negate: boolean, value: string): Lo
 // order / pagination
 // ---------------------------------------------------------------------------
 
-export const parseOrder = (input: string): OrderTerm[] =>
+export const parseOrder = (input: string): OrderTerm[] => {
+  const bad = orderSyntax(input);
+  if (bad) throw bad;
+  return parseOrderTerms(input);
+};
+
+const parseOrderTerms = (input: string): OrderTerm[] =>
   splitTopLevel(input, ",").map((raw) => {
     const tokens = raw.trim().split(".");
     let nulls: "first" | "last" | undefined;
