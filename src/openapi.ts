@@ -283,7 +283,7 @@ const rpcPath = (fn: FunctionDef): Json => {
     ...(fn.comment ? { summary: fn.comment } : {}),
   };
   const path: Json = { post };
-  // Volatile functions cannot be called with GET (PostgREST >= 13.0.5).
+  // Volatile functions cannot be called with GET (PostgREST v16).
   if (fn.volatility !== "volatile") {
     path["get"] = {
       tags: [`(rpc) ${fn.name}`],

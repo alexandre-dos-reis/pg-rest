@@ -103,7 +103,7 @@ export const normalizeDbError = (e: unknown): unknown => {
 
 /**
  * SQLSTATE → HTTP status, following the PostgREST 16 table
- * (https://docs.postgrest.org/en/v14/references/errors.html).
+ * (https://docs.postgrest.org/en/v16/references/errors.html).
  */
 const statusFromSqlState = (state: string, role: string | undefined, anon: string | undefined): number => {
   if (/^PT\d{3}$/.test(state)) return Number(state.slice(2));
