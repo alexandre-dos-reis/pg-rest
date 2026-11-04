@@ -423,6 +423,20 @@ const allCases: Case[] = [
     { headers: { ...rep, ...J }, name: "insert through view" },
   ),
   write("PUT", "/clients?id=eq.1", { id: 1, name: "Put", email: "ada@example.com" }, { headers: { ...rep, ...J } }),
+  write(
+    "PATCH",
+    "/clients?limit=1&order=id&id=gt.0",
+    { name: "L" },
+    { headers: { ...rep, ...J }, name: "PATCH ignores limit and order" },
+  ),
+  write("PATCH", "/clients?offset=1&id=gt.0", { name: "L" }, { headers: { ...J }, name: "PATCH ignores offset" }),
+  write("DELETE", "/orders?limit=1&order=id&id=gt.0", undefined, { headers: { ...rep }, name: "DELETE ignores limit" }),
+  write(
+    "PUT",
+    "/clients?id=eq.1&order=id",
+    { id: 1, name: "P", email: "ada@example.com" },
+    { headers: { ...J }, name: "PUT ignores order" },
+  ),
   write("PUT", "/clients?id=eq.1", { id: 2, name: "Put" }, { headers: { ...rep, ...J }, name: "put pk mismatch" }),
   write("PUT", "/clients", { id: 1, name: "Put" }, { headers: { ...rep, ...J }, name: "put without pk filter" }),
   write(

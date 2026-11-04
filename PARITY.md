@@ -85,7 +85,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `PUT` single-row upsert | ✅ | `PGRST114` / `PGRST115` checks |
 | `PATCH` with filters | ✅ | Empty body handled |
 | `DELETE` with filters | ✅ | |
-| `limit`/`offset`/`order` on `PATCH`/`DELETE` | 🟡 | Limited-write validation is not fully ported |
+| `limit`/`offset`/`order` on `PATCH`/`DELETE` | ✅ | Ignored, as in PostgREST v16 (`PUT` with limit/offset → `PGRST114`) |
 | `Prefer: max-affected` (`PGRST124`) | ✅ | |
 | Write response `select`, embeds and filters | ✅ | |
 | Write through updatable views | ✅ | |

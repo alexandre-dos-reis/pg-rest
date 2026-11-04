@@ -427,11 +427,6 @@ const planTable = (
     return { rows: "SELECT * FROM pgrst_source", shape: shapeFor(r) };
   };
 
-  // Writes may not use embedded filters, limits or offsets.
-  if (method !== "POST" && method !== "PUT" && (query.root.limit !== undefined || query.root.offset !== undefined)) {
-    throw new PgRestError(400, "PGRST100", "limit and offset are not supported on PATCH, PUT and DELETE", null, null);
-  }
-
   const common = {
     method,
     rel,

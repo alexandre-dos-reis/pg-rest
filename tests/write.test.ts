@@ -257,10 +257,15 @@ describe.skipIf(!hasDb)("writes", () => {
       expect((await t.patch("/orders", { nope: 1 }, { ctx })).json().code).toBe("PGRST204");
       expect((await t.call("PATCH", "/orders", { ctx })).json().code).toBe("PGRST102");
     });
-    test("limit and offset are not supported on writes", async () => {
-      const r = await t.patch("/orders?limit=1", { status: "x" }, { ctx });
-      expect(r.status).toBe(400);
-      expect(r.json().code).toBe("PGRST100");
+    test("limit, offset and order are ignored on PATCH and DELETE (as in PostgREST v16)", async () => {
+      const before = (await t.get("/orders?select=id&status=neq.x", { ctx })).json().length;
+      const r = await t.patch(
+        "/orders?limit=1&offset=1&order=id&select=id",
+        { status: "x" },
+        { ctx, headers: { Prefer: "return=representation" } },
+      );
+      expect(r.status).toBe(200);
+      expect(r.json().length).toBe(before);
     });
     test("views that are not updatable fail in the database (class 55 is a 500, like PostgREST)", async () => {
       const r = await t.patch("/client_totals", { revenue: 1 }, { ctx });
