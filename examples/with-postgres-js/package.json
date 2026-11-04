@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "pg-rest": "^0.0.0",
+    "pg-rest": "^0.1.0",
     "postgres": "^4.0.0"
   },
   "devDependencies": {
