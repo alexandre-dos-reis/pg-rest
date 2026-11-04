@@ -1,4 +1,4 @@
--- Run once against an empty database:  psql "$DATABASE_URL" -f schema.sql
+-- Run after 1-better-auth.sql (it needs the "user" table):  psql "$DATABASE_URL" -f 1-better-auth.sql -f 2-api.sql
 DO $$ BEGIN  -- roles are cluster-wide: create them only once
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
@@ -10,8 +10,9 @@ GRANT USAGE ON SCHEMA api TO anon, authenticated;
 
 CREATE TABLE api.todos (
   id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  -- the Better Auth user (public."user".id); the foreign key is added by server.ts once Better Auth has created its tables
-  owner_id text DEFAULT (current_setting('request.jwt.claims', true)::json ->> 'sub'),
+  -- the Better Auth user who owns the row (the session's user id, taken from the JWT claims by default)
+  owner_id text DEFAULT (current_setting('request.jwt.claims', true)::json ->> 'sub')
+           REFERENCES public."user"(id) ON DELETE CASCADE,
   title    text NOT NULL,
   done     boolean NOT NULL DEFAULT false,
   created  timestamptz NOT NULL DEFAULT now()

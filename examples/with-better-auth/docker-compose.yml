@@ -5,4 +5,5 @@ services:
       POSTGRES_PASSWORD: postgres
     ports: ["5432:5432"]
     volumes:
-      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./1-better-auth.sql:/docker-entrypoint-initdb.d/1-better-auth.sql:ro
+      - ./2-api.sql:/docker-entrypoint-initdb.d/2-api.sql:ro

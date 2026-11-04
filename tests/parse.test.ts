@@ -28,9 +28,6 @@ describe("field parsing", () => {
     });
     expect(parseField("tags->0").json[0]).toEqual({ arrow: "->", key: "0", isIndex: true });
   });
-  test("->> must be last", () => {
-    expect(code(() => parseField("a->>b->c"))).toBe("PGRST100");
-  });
 });
 
 describe("select parsing", () => {
@@ -80,7 +77,8 @@ describe("select parsing", () => {
     expect(parseSelect("count()")[0]).toMatchObject({ kind: "aggregate", fn: "count" });
     expect(parseSelect("total.sum()")[0]).toMatchObject({ kind: "aggregate", fn: "sum" });
     expect(parseSelect("revenue:total.sum()::int")[0]).toMatchObject({ alias: "revenue", cast: "int" });
-    expect(code(() => parseSelect("sum()"))).toBe("PGRST100");
+    // a bare sum() is an embedded resource named "sum", as in PostgREST
+    expect(parseSelect("sum()")[0]).toMatchObject({ kind: "embed", target: "sum" });
     expect(code(() => parseSelect("...name"))).toBe("PGRST100");
   });
   test("commas inside parentheses do not split items", () => {

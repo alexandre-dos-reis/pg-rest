@@ -105,6 +105,7 @@ const allCases: Case[] = [
     name: "geojson: limit",
   }),
   get("/rpc/all_places", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: rpc set" }),
+  get("/rpc/nothing", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: void function is an error" }),
   get("/rpc/nums", { headers: { Accept: GEO }, requires: "postgis", name: "geojson: scalar set is an error" }),
   get("/places?id=eq.1&select=id,geom", {
     headers: { Accept: `${GEO}, application/vnd.pgrst.object+json` },
@@ -191,6 +192,30 @@ const allCases: Case[] = [
   get("/clients?order=id.desc.nullsfirst.x", { name: "syntax: order=id.desc.nullsfirst.x" }),
   get("/clients?select=id,,name"),
   get("/clients?select=id::int4%20from%20x"),
+  get("/clients?select=id,"),
+  get("/clients?select=%2Cid"),
+  get("/clients?select=id,,name"),
+  get("/clients?select=id)"),
+  get("/clients?select=(id)"),
+  get("/clients?select=id,orders("),
+  get("/clients?select=orders!(id)"),
+  get("/clients?select=id::"),
+  get("/clients?select=a->"),
+  get("/clients?select=a:"),
+  get("/clients?select=a:b:c"),
+  get("/clients?select=...id"),
+  get("/clients?select=sum()"),
+  get("/clients?select=**"),
+  get("/clients?select=id,name,"),
+  get("/clients?select=id%20name"),
+  get("/clients?or=(id.eq.1"),
+  get("/clients?and=(id.eq.1,)"),
+  get("/clients?or=(id.eq.1)x"),
+  get("/clients?or=(id.eq.1,and(id.eq.2,name.eq.a))"),
+  get("/clients?not.or=(id.eq.1,id.eq.2)"),
+  get("/clients?or=(id.eq.1,(id.eq.2))"),
+  get("/clients?or=()"),
+  get("/clients?and=(id.eq.1,id.foo.2)"),
 
   // ── embedding ────────────────────────────────────────────
   get("/orders?select=id,clients(name)&order=id"),
@@ -609,7 +634,6 @@ const allCases: Case[] = [
  * The test asserts the responses still differ, so an entry that starts matching must be removed.
  */
 const KNOWN: Record<string, string> = {
-  "GET /clients?select=id,,name": "parser error texts (message/details) differ: PostgREST quotes its parsec output",
   "GET /clients?select=id::int4%20from%20x":
     "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
 };

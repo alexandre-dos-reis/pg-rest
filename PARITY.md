@@ -115,7 +115,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | --- | --- | --- |
 | PostgREST error body `{code, message, details, hint}` | ✅ | |
 | Parse errors of filters and `order` (`unexpected "f" expecting …`, line/column) | ✅ | Same wording as PostgREST's Parsec parser |
-| Parse errors of `select` and `and()`/`or()` | 🟡 | `PGRST100`, but the details text differs; `select=id)` / `select=(id)` are rejected where PostgREST is lenient |
+| Parse errors of `select` and `and()`/`or()` | ✅ | Ported PostgREST's Parsec grammar: same wording, and the same leniency (the select parse stops where it cannot continue, `select=id)` works) |
 | Invalid / odd payloads (`[]`, scalars, arrays of scalars, array on `PATCH`) | ✅ | Same status and message as PostgREST |
 | `PGRST1xx`–`PGRST3xx` codes (parsing, schema cache, auth) | ✅ | Most; `PGRST3xx` JWT codes are replaced by whatever `resolveContext` throws |
 | SQLSTATE → HTTP status table | ✅ | |
@@ -157,7 +157,6 @@ The comparison only covers what the cases exercise; it is not exhaustive. Anythi
 | --- | --- | --- |
 | CSV output of array columns | PostgreSQL text syntax `{a,b}` | JSON text `["a","b"]` |
 | `limit=abc` | ignored (200) | `400 PGRST100` |
-| Query-string parse error texts (`id=bogus.1`, `select=id,,name`) | parsec output in `message`/`details` | different wording, same `PGRST100` code and status |
 | Invalid cast target (`select=id::int4 from x`) | forwarded to PostgreSQL → `42601` | rejected up front: `400 PGRST100` (SQL-injection hardening) |
 | `order=rel(col)` | supported for embedded to-one; `PGRST108` when not embedded | `PGRST127` not implemented |
 | `merge-duplicates` upsert that only updates rows | `200` | `201` |

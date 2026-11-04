@@ -95,12 +95,10 @@ const parseItem = (raw: string): SelectItem => {
     if (inner.trim() === "") {
       const dot = head.lastIndexOf(".");
       const fn = (dot >= 0 ? head.slice(dot + 1) : head).trim().toLowerCase();
-      if (AGGREGATES.has(fn)) {
+      const colPart = dot >= 0 ? head.slice(0, dot) : "";
+      // a bare `sum()` is not an aggregate: PostgREST reads it as an embedded resource named `sum`
+      if (AGGREGATES.has(fn) && (colPart || fn === "count")) {
         if (spread) throw parseError("Cannot spread an aggregate", `in "${raw}"`);
-        const colPart = dot >= 0 ? head.slice(0, dot) : "";
-        if (!colPart && fn !== "count") {
-          throw parseError(`${fn}() needs a column`, `use column.${fn}()`);
-        }
         return {
           kind: "aggregate",
           fn: fn as AggregateFn,

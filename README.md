@@ -153,12 +153,6 @@ code is handled by *your* application instead. These are not gaps: adding them w
 | In-database configuration (`db-pre-config`, per-role `ALTER ROLE ... SET pgrst.*`) | Settings are options in code, not rows in the database, so they are versioned and visible with the application. | Use the options; `preRequest` can still call a SQL function if you want database-side logic. |
 | Schema cache refresh over SQL: `NOTIFY pgrst, 'reload schema'` / `db-channel`, `SIGUSR1`/`SIGUSR2`, DDL event triggers | They require a dedicated `LISTEN` connection and signal handling, which a library must not hold open or assume (serverless, PGlite and pooled connections can't `LISTEN`). The introspection itself (`pg_catalog`) is implemented. | Call `reloadSchema()` after migrations, or wire it to your own `LISTEN`. A failed reload keeps the old cache. |
 
-### Not yet: a gap you could fill
-
-These exist in PostgREST and are not implemented *yet*. Contributions welcome; the status of each is in [`PARITY.md`](PARITY.md).
-
-- PostgREST's exact Parsec error wording for `select` and `and()`/`or()` syntax errors (filters and `order` match; the error codes and status already do)
-
 ## Security notes
 
 Request values are never concatenated raw: values become escaped literals or `$n::text` parameters, identifiers are quoted,

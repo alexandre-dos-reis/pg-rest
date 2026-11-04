@@ -720,7 +720,9 @@ const planRpc = (
     };
   }
 
-  const shape: BodyShape = call.shape === "void" ? "none" : call.shape === "scalar" ? "scalar" : "scalar-array";
+  // GeoJSON is built for void functions too (and fails in PostGIS, like PostgREST).
+  const shape: BodyShape =
+    call.shape === "void" && format.kind !== "geojson" ? "none" : call.shape === "scalar" ? "scalar" : "scalar-array";
   return { ...base, shape, statement: buildStatement({ rows: call.source, shape, ...formatOptions(format) }) };
 };
 

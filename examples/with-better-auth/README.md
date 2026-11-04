@@ -4,7 +4,7 @@ The same todo API with Row Level Security, but the caller is a real user signed 
 (email + password, session cookie) instead of a demo header. This folder is self-contained: copy it anywhere.
 
 ```sh
-docker compose up -d      # Postgres 16 with schema.sql loaded
+docker compose up -d      # Postgres 16 with 1-better-auth.sql, then 2-api.sql loaded
 npm install
 node server.ts            # Node >= 22.18 runs TypeScript natively
 ```
@@ -23,12 +23,13 @@ resolveContext: async (req) => {
 },
 ```
 
-- No session → `undefined` → pg-rest runs the request as the `anon` role (read-only in `schema.sql`).
+- No session → `undefined` → pg-rest runs the request as the `anon` role (read-only in `2-api.sql`).
 - Session → role `authenticated`, and `claims.sub` is the Better Auth user id, which the RLS policies read through
   `current_setting('request.jwt.claims')`.
 - Requests under `/api/auth/*` go to Better Auth; everything else goes to pg-rest. Both share one `pg.Pool`.
-- `api.todos.owner_id` is a foreign key to Better Auth's `public."user"(id)` (deleting a user deletes their todos). `schema.sql` runs before Better Auth has
-  created its tables, so `server.ts` adds the constraint right after Better Auth's migrations (idempotent). The two seeded todos have no owner: readable by all, writable by nobody.
+- Two SQL files, run in order: `1-better-auth.sql` creates Better Auth's tables (`"user"`, `session`, `account`, `verification`, the same DDL its
+  own migrations generate), then `2-api.sql` creates the `api` schema. That order lets `api.todos.owner_id` be a real foreign key to
+  `public."user"(id)` (deleting a user deletes their todos). The two seeded todos have no owner: readable by all, writable by nobody.
 - Better Auth's tables live in the `public` schema; pg-rest only exposes `api`, so users and sessions are not reachable through the REST API.
 
 pg-rest has no CSRF protection of its own. If browsers call it with cookies, apply your usual CSRF defences (SameSite cookies, an `Origin` check)

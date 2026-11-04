@@ -107,11 +107,5 @@ export const parseField = (input: string): FieldRef => {
     const isIndex = /^-?\d+$/.test(raw);
     json.push({ arrow: arrows[i - 1]!, key: isIndex ? raw : unquote(raw), isIndex });
   }
-  // `->>` returns text, so nothing may follow it.
-  for (let i = 0; i < json.length - 1; i++) {
-    if (json[i]!.arrow === "->>") {
-      throw parseError("Invalid JSON path", `"->>" must be the last operator in "${input}"`);
-    }
-  }
   return { name, json };
 };
