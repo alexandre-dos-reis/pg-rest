@@ -32,14 +32,9 @@ describe.skipIf(!hasDb)("rpc", () => {
 
   test("set of composite rows supports select, filters, order and paging", async () => {
     const r = await t.get("/rpc/orders_by_status?s=paid&select=id,total&order=id.desc");
-    expect(r.json()).toEqual([
-      { id: 3, total: 99.99 },
-      { id: 1, total: 250 },
-    ]);
+    expect(r.json()).toEqual([{ id: 3, total: 99.99 }, { id: 1, total: 250 }]);
     expect((await t.get("/rpc/orders_by_status?s=paid&total=gt.100&select=id")).json()).toEqual([{ id: 1 }]);
-    expect((await t.get("/rpc/orders_by_status?s=paid&order=id&limit=1&offset=1&select=id")).json()).toEqual([
-      { id: 3 },
-    ]);
+    expect((await t.get("/rpc/orders_by_status?s=paid&order=id&limit=1&offset=1&select=id")).json()).toEqual([{ id: 3 }]);
     const counted = await t.get("/rpc/orders_by_status?s=paid&limit=1", { headers: { Prefer: "count=exact" } });
     expect(counted.status).toBe(206);
     expect(counted.headers.get("content-range")).toBe("0-0/2");
@@ -48,12 +43,7 @@ describe.skipIf(!hasDb)("rpc", () => {
   test("results of a table type can embed", async () => {
     const r = await t.get("/rpc/orders_by_status?s=shipped&select=id,clients(name),products(name)");
     expect(r.json()[0].clients).toEqual({ name: "Grace" });
-    expect(
-      r
-        .json()[0]
-        .products.map((p: any) => p.name)
-        .sort(),
-    ).toEqual(["Keyboard", "Monitor"]);
+    expect(r.json()[0].products.map((p: any) => p.name).sort()).toEqual(["Keyboard", "Monitor"]);
   });
 
   test("RETURNS TABLE", async () => {
@@ -78,12 +68,14 @@ describe.skipIf(!hasDb)("rpc", () => {
   });
 
   test("a single unnamed json parameter receives the whole body", async () => {
-    const body = [{ a: 1 }, { b: [1, 2, 3] }];
+    const body = [{ a: 1 }, { a: [1, 2, 3] }];
     const r = await t.post("/rpc/echo_unnamed", body);
     expect(r.json()).toEqual(body);
-    expect(
-      (await t.post("/rpc/echo_unnamed", "just a string", { headers: { "Content-Type": "application/json" } })).status,
-    ).toBe(400);
+    // like PostgREST, the objects of an array body must agree on their keys
+    const mismatch = await t.post("/rpc/echo_unnamed", [{ a: 1 }, { b: 2 }]);
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.json().code).toBe("PGRST102");
+    expect((await t.post("/rpc/echo_unnamed", "just a string", { headers: { "Content-Type": "application/json" } })).status).toBe(400);
     expect((await t.post("/rpc/echo_json", { body: { k: "v" } })).json()).toEqual({ k: "v" });
   });
 
@@ -138,38 +130,20 @@ describe.skipIf(!hasDb)("rpc", () => {
     const scalar = await t.post("/rpc/add", { a: 1, b: 2 }, { headers: { Prefer: "handling=strict, max-affected=1" } });
     expect(scalar.status).toBe(400);
     expect(scalar.json().code).toBe("PGRST128");
-    const set = await t.post(
-      "/rpc/orders_by_status",
-      { s: "paid" },
-      { headers: { Prefer: "handling=strict, max-affected=1" } },
-    );
+    const set = await t.post("/rpc/orders_by_status", { s: "paid" }, { headers: { Prefer: "handling=strict, max-affected=1" } });
     expect(set.json().code).toBe("PGRST124");
-    expect(
-      (
-        await t.post(
-          "/rpc/orders_by_status",
-          { s: "shipped" },
-          { headers: { Prefer: "handling=strict, max-affected=1" } },
-        )
-      ).status,
-    ).toBe(200);
+    expect((await t.post("/rpc/orders_by_status", { s: "shipped" }, { headers: { Prefer: "handling=strict, max-affected=1" } })).status).toBe(200);
   });
 
   test("singular object response for set-returning functions", async () => {
-    const one = await t.get("/rpc/orders_by_status?s=shipped&select=id", {
-      headers: { Accept: "application/vnd.pgrst.object+json" },
-    });
+    const one = await t.get("/rpc/orders_by_status?s=shipped&select=id", { headers: { Accept: "application/vnd.pgrst.object+json" } });
     expect(one.json()).toEqual({ id: 4 });
-    const many = await t.get("/rpc/orders_by_status?s=paid", {
-      headers: { Accept: "application/vnd.pgrst.object+json" },
-    });
+    const many = await t.get("/rpc/orders_by_status?s=paid", { headers: { Accept: "application/vnd.pgrst.object+json" } });
     expect(many.status).toBe(406);
   });
 
   test("RPC results follow the same Accept rules (csv)", async () => {
-    const r = await t.get("/rpc/orders_by_status?s=paid&select=id,status&order=id", {
-      headers: { Accept: "text/csv" },
-    });
+    const r = await t.get("/rpc/orders_by_status?s=paid&select=id,status&order=id", { headers: { Accept: "text/csv" } });
     expect(r.text).toBe("id,status\n1,paid\n3,paid");
   });
 

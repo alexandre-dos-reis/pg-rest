@@ -17,9 +17,22 @@ export interface StatementOptions {
   readonly count?: string | undefined;
   readonly shape: BodyShape;
   readonly stripNulls?: boolean | undefined;
+  /** Render the body as CSV, the way PostgREST does: header from the first row, then PostgreSQL's record text. */
+  readonly csv?: boolean | undefined;
+  /**
+   * `source` flags inserted rows in a `pgrst_inserted` column (merge-duplicates upsert). These are the
+   * source's other columns; the status becomes 200 when rows were returned but none was inserted.
+   */
+  readonly upsertColumns?: ReadonlyArray<string> | undefined;
 }
 
-const bodyExpr = (shape: BodyShape, strip: boolean): string => {
+const CSV_BODY =
+  `coalesce((SELECT string_agg(k, ',') FROM (SELECT json_object_keys(r)::text AS k FROM ` +
+  `(SELECT row_to_json(hh) AS r FROM pgrst_body AS hh LIMIT 1) s) a), '') || E'\\n' || ` +
+  `coalesce(string_agg(substring(_t::text, 2, length(_t::text) - 2), E'\\n'), '')`;
+
+const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean): string => {
+  if (csv && shape !== "none") return CSV_BODY;
   const wrap = (e: string) => (strip ? `json_strip_nulls(${e})` : e);
   switch (shape) {
     case "array":
@@ -43,14 +56,25 @@ const bodyExpr = (shape: BodyShape, strip: boolean): string => {
  * (RPC, triggers) can influence the response by calling `set_config`.
  */
 export const buildStatement = (o: StatementOptions): string => {
-  const ctes = [...(o.source ? [`pgrst_source AS (${o.source})`] : []), `pgrst_body AS (${o.rows})`];
+  const up = o.upsertColumns;
+  const ctes = [
+    ...(o.source && up
+      ? [`pgrst_ins AS (${o.source})`, `pgrst_source AS (SELECT ${up.join(", ")} FROM pgrst_ins)`]
+      : o.source
+        ? [`pgrst_source AS (${o.source})`]
+        : []),
+    `pgrst_body AS (${o.rows})`,
+  ];
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
     `count(*)::text AS page_total, ` +
-    `${bodyExpr(o.shape, Boolean(o.stripNulls))} AS body, ` +
+    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv))} AS body, ` +
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
     `nullif(current_setting('response.headers', true), '') AS response_headers, ` +
-    `nullif(current_setting('response.status', true), '') AS response_status ` +
+    (up
+      ? `coalesce(nullif(current_setting('response.status', true), ''), CASE WHEN EXISTS (SELECT 1 FROM pgrst_ins) AND NOT EXISTS (SELECT 1 FROM pgrst_ins WHERE pgrst_inserted) THEN '200' END)`
+      : `nullif(current_setting('response.status', true), '')`) +
+    ` AS response_status ` +
     `FROM pgrst_body AS _t`
   );
 };

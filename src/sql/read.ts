@@ -3,7 +3,8 @@ import type { NodeParams, ParsedQuery } from "../parse/filter";
 import { outputName, type AggregateItem, type EmbedItem, type FieldItem, type SelectItem } from "../parse/select";
 import { quoteIdent, quoteQualified } from "../quote";
 import { type Relation, type SchemaCache, resolveRelationship } from "../schema";
-import { fieldSql, orderSql, whereSql } from "./filters";
+import type { OrderTerm } from "../parse/filter";
+import { fieldSql, whereSql } from "./filters";
 
 export const ROOT_ALIAS = "pgrst_root";
 
@@ -54,8 +55,6 @@ interface Ctx {
   readonly aliases: Aliases;
 }
 
-const notImplemented = (what: string) => new PgRestError(400, "PGRST127", `${what} is not implemented`, null, null);
-
 const fieldExpr = (item: FieldItem, alias: string): string => {
   const base = fieldSql(alias, item.field);
   const expr = item.cast ? `${base}::${item.cast}` : base;
@@ -70,15 +69,64 @@ const aggregateExpr = (item: AggregateItem, alias: string): string => {
   return `${expr} AS ${quoteIdent(outputName(item))}`;
 };
 
-/** Output column names produced by a list of non-embed items (used for spreads). */
-const plainOutputNames = (items: ReadonlyArray<SelectItem>, rel: Relation): string[] => {
+/** Output column names produced by a list of select items (used for spreads). */
+const itemNames = (ctx: Ctx, items: ReadonlyArray<SelectItem>, rel: Relation): string[] => {
   const out: string[] = [];
   for (const it of items) {
     if (it.kind === "star") out.push(...rel.columns.map((c) => c.name));
-    else if (it.kind === "field") out.push(outputName(it));
-    else throw notImplemented("Spreading an embedded resource that contains aggregates or embeds");
+    else if (it.kind === "field" || it.kind === "aggregate") out.push(outputName(it));
+    else if (it.items.length === 0) continue;
+    else if (it.spread) out.push(...itemNames(ctx, it.items, resolveRelationship(ctx.cache, rel, it.target, it.hint).to));
+    else out.push(it.alias ?? it.target);
   }
   return out;
+};
+
+const orderClause = (
+  ctx: Ctx,
+  terms: ReadonlyArray<OrderTerm>,
+  rel: Relation,
+  alias: string,
+  items: ReadonlyArray<SelectItem>,
+): string => {
+  if (terms.length === 0) return "";
+  const q = quoteIdent;
+  const parts = terms.map((t) => {
+    const tail = `${t.dir.toUpperCase()}${t.nulls ? ` NULLS ${t.nulls.toUpperCase()}` : ""}`;
+    if (!t.relation) return `${fieldSql(alias, t.field)} ${tail}`;
+    const embed = items.find((i): i is EmbedItem => i.kind === "embed" && (i.alias ?? i.target) === t.relation);
+    if (!embed) {
+      throw new PgRestError(
+        400,
+        "PGRST108",
+        `'${t.relation}' is not an embedded resource in this request`,
+        null,
+        `Verify that '${t.relation}' is included in the 'select' query parameter.`,
+      );
+    }
+    const r = resolveRelationship(ctx.cache, rel, embed.target, embed.hint);
+    if (r.kind !== "m2o" && r.kind !== "o2o") {
+      throw new PgRestError(
+        400,
+        "PGRST118",
+        `A related order on '${t.relation}' is not possible`,
+        `'${rel.name}' and '${embed.target}' do not form a many-to-one or one-to-one relationship`,
+        null,
+      );
+    }
+    // PostgREST orders by the embedded query's output, so the column has to be selected there
+    const selected = embed.items.filter((i) => i.kind !== "embed");
+    if (selected.length > 0 && !selected.some((i) => i.kind === "star" || (i.kind === "field" && i.field.name === t.field.name))) {
+      throw new PgRestError(400, "42703", `column ${rel.name}_${embed.target}_1.${t.field.name} does not exist`, null, null);
+    }
+    const o = ctx.aliases.next("pgrst_o");
+    if (r.computed) {
+      return `(SELECT ${fieldSql(o, t.field)} FROM ${quoteQualified(r.computed.schema, r.computed.name)}(${q(alias)}) AS ${q(o)} LIMIT 1) ${tail}`;
+    }
+    const cond = r.toCols.map((c, i) => `${q(o)}.${q(c)} = ${q(alias)}.${q(r.fromCols[i]!)}`).join(" AND ");
+    return `(SELECT ${fieldSql(o, t.field)} FROM ${quoteQualified(r.to.schema, r.to.name)} AS ${q(o)} WHERE ${cond} LIMIT 1) ${tail}`;
+  });
+  return `ORDER BY ${parts.join(", ")}`;
 };
 
 const buildItems = (
@@ -87,17 +135,11 @@ const buildItems = (
   rel: Relation,
   alias: string,
   path: string[],
-  isRoot: boolean,
 ): Built => {
   const cols: string[] = [];
   const joins: Join[] = [];
   const groupBy: string[] = [];
   const aggregated = items.some((i) => i.kind === "aggregate");
-
-  if (aggregated && !isRoot) throw notImplemented("Aggregate functions in embedded resources");
-  if (aggregated && items.some((i) => i.kind === "embed")) {
-    throw notImplemented("Combining aggregate functions with embedded resources");
-  }
 
   for (const item of items) {
     switch (item.kind) {
@@ -121,6 +163,7 @@ const buildItems = (
         const e = buildEmbed(ctx, item, rel, alias, path);
         cols.push(...e.cols);
         joins.push(e.join);
+        if (aggregated) groupBy.push(...e.group);
         break;
       }
     }
@@ -156,24 +199,26 @@ const buildEmbed = (
   parentRel: Relation,
   parentAlias: string,
   path: string[],
-): { cols: string[]; join: Join } => {
+): { cols: string[]; join: Join; group: string[] } => {
   const relationship = resolveRelationship(ctx.cache, parentRel, item.target, item.hint);
   const name = item.alias ?? item.target;
   const childPath = [...path, name];
   const params = ctx.query.embeds.get(childPath.join("."));
   const toOne = relationship.kind === "m2o" || relationship.kind === "o2o";
-  if (item.spread && !toOne) throw notImplemented("Spreading a to-many embedded resource");
-
   const child = relationship.to;
   const cAlias = ctx.aliases.next("pgrst_c");
   const eAlias = ctx.aliases.next("pgrst_j");
-  const inner = buildItems(ctx, item.items, child, cAlias, childPath, false);
+  const inner = buildItems(ctx, item.items, child, cAlias, childPath);
   const hasCols = inner.cols.length > 0;
 
   const q = quoteIdent;
   const conds: string[] = [];
   let from: string;
-  if (relationship.junction) {
+  if (relationship.computed) {
+    const fn = relationship.computed;
+    from = `${quoteQualified(fn.schema, fn.name)}(${q(parentAlias)}) AS ${q(cAlias)}`;
+    conds.push("TRUE");
+  } else if (relationship.junction) {
     const j = relationship.junction;
     const jAlias = ctx.aliases.next("pgrst_m");
     const onTo = j.fkTo.cols.map((c, i) => `${q(jAlias)}.${q(c)} = ${q(cAlias)}.${q(j.fkTo.fcols[i]!)}`);
@@ -190,42 +235,70 @@ const buildEmbed = (
   conds.push(...(params ? whereSql(params.filters, cAlias, child) : []));
   conds.push(...presenceConditions(params, inner.joins));
 
-  const order = params ? orderSql(params.order, cAlias) : "";
+  const order = params ? orderClause(ctx, params.order, child, cAlias, item.items) : "";
   const page = paging(params?.limit, params?.offset);
   const sel = hasCols ? inner.cols.join(", ") : "1";
-  const body = `SELECT ${sel} FROM ${from} WHERE ${conds.join(" AND ")}${order ? ` ${order}` : ""}${page}`;
+  const groupSql = inner.aggregated && inner.groupBy.length ? ` GROUP BY ${inner.groupBy.join(", ")}` : "";
+  const body = `SELECT ${sel} FROM ${from} WHERE ${conds.join(" AND ")}${groupSql}${order ? ` ${order}` : ""}${page}`;
+  // PostgREST embeds with jsonb (key order and spacing are visible in CSV output)
+  const J = "jsonb";
 
   const joinKw = item.join === "inner" ? "JOIN LATERAL" : "LEFT JOIN LATERAL";
 
   if (item.spread) {
-    const names = plainOutputNames(item.items, child);
-    const lateral = `${joinKw} (${body}${page ? "" : " LIMIT 1"}) AS ${q(eAlias)} ON TRUE`;
+    const names = itemNames(ctx, item.items, child);
+    if (toOne) {
+      const lateral = `${joinKw} (${body}${page ? "" : " LIMIT 1"}) AS ${q(eAlias)} ON TRUE`;
+      const refs = names.map((n) => `${q(eAlias)}.${q(n)}`);
+      return {
+        cols: names.map((n, i) => `${refs[i]} AS ${q(n)}`),
+        join: { sql: lateral, alias: eAlias, name, inner: item.join === "inner" },
+        group: refs,
+      };
+    }
+    if (inner.aggregated) {
+      throw new PgRestError(
+        400,
+        "PGRST127",
+        "Feature not implemented",
+        "Aggregates are not implemented for one-to-many or many-to-many spreads.",
+        null,
+      );
+    }
+    // to-many spread: every column becomes an array with one entry per related row
+    const agg = names.map((n) => `coalesce(${J}_agg(_r.${q(n)}), '[]'::${J}) AS ${q(n)}`).join(", ");
+    const having = item.join === "inner" ? " HAVING count(*) > 0" : "";
+    const lateral = `${joinKw} (SELECT ${agg || "1"} FROM (${body}) AS _r${having}) AS ${q(eAlias)} ON TRUE`;
+    const refs = names.map((n) => `${q(eAlias)}.${q(n)}`);
     return {
-      cols: names.map((n) => `${q(eAlias)}.${q(n)} AS ${q(n)}`),
+      cols: names.map((n, i) => `${refs[i]} AS ${q(n)}`),
       join: { sql: lateral, alias: eAlias, name, inner: item.join === "inner" },
+      group: refs,
     };
   }
 
   if (toOne) {
-    const lateral = `${joinKw} (SELECT to_json(_r) AS j FROM (${body}) AS _r LIMIT 1) AS ${q(eAlias)} ON TRUE`;
+    const lateral = `${joinKw} (SELECT to_${J}(_r) AS j FROM (${body}) AS _r LIMIT 1) AS ${q(eAlias)} ON TRUE`;
     return {
       cols: hasCols ? [`${q(eAlias)}.j AS ${q(name)}`] : [],
       join: { sql: lateral, alias: eAlias, name, inner: item.join === "inner" },
+      group: hasCols ? [`${q(eAlias)}.j`] : [],
     };
   }
 
   const having = item.join === "inner" ? " HAVING count(*) > 0" : "";
-  const lateral = `${joinKw} (SELECT json_agg(_r) AS j FROM (${body}) AS _r${having}) AS ${q(eAlias)} ON TRUE`;
+  const lateral = `${joinKw} (SELECT ${J}_agg(_r) AS j FROM (${body}) AS _r${having}) AS ${q(eAlias)} ON TRUE`;
   return {
-    cols: hasCols ? [`coalesce(${q(eAlias)}.j, '[]'::json) AS ${q(name)}`] : [],
+    cols: hasCols ? [`coalesce(${q(eAlias)}.j, '[]'::${J}) AS ${q(name)}`] : [],
     join: { sql: lateral, alias: eAlias, name, inner: item.join === "inner" },
+    group: hasCols ? [`${q(eAlias)}.j`] : [],
   };
 };
 
 /** Build the SELECT (and matching COUNT) for a read request. */
 export const buildRead = (opts: ReadOptions): ReadSql => {
   const ctx: Ctx = { cache: opts.cache, query: opts.query, aliases: new Aliases() };
-  const built = buildItems(ctx, opts.query.select, opts.rel, ROOT_ALIAS, [], true);
+  const built = buildItems(ctx, opts.query.select, opts.rel, ROOT_ALIAS, []);
 
   const where = [
     ...whereSql(opts.query.root.filters, ROOT_ALIAS, opts.rel),
@@ -235,7 +308,7 @@ export const buildRead = (opts: ReadOptions): ReadSql => {
   const fromClause = `${opts.from} AS ${quoteIdent(ROOT_ALIAS)}`;
   const joinSql = built.joins.map((j) => j.sql).join(" ");
   const groupClause = built.aggregated && built.groupBy.length ? ` GROUP BY ${built.groupBy.join(", ")}` : "";
-  const order = orderSql(opts.query.root.order, ROOT_ALIAS);
+  const order = orderClause(ctx, opts.query.root.order, opts.rel, ROOT_ALIAS, opts.query.select);
 
   const cols = built.cols.length ? built.cols.join(", ") : "1";
   const unpaged = `SELECT ${cols} FROM ${fromClause}${joinSql ? ` ${joinSql}` : ""}${whereClause}${groupClause}`;

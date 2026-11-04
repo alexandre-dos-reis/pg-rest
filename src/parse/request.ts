@@ -5,6 +5,8 @@ export type Method = "GET" | "HEAD" | "POST" | "PATCH" | "PUT" | "DELETE" | "OPT
 
 const METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]);
 
+export const isSupportedMethod = (m: string): boolean => METHODS.has(m.toUpperCase());
+
 export const parseMethod = (m: string): Method => {
   const up = m.toUpperCase();
   if (!METHODS.has(up)) {
@@ -139,31 +141,65 @@ export type OutputFormat =
   | { readonly kind: "json"; readonly stripNulls: boolean }
   | { readonly kind: "object"; readonly stripNulls: boolean }
   | { readonly kind: "csv" }
-  | { readonly kind: "openapi" };
+  | { readonly kind: "openapi" }
+  /** `application/vnd.pgrst.plan`: answer with the EXPLAIN of the query that `inner` describes. */
+  | {
+      readonly kind: "plan";
+      readonly format: "json" | "text";
+      readonly forType: string;
+      readonly options: ReadonlyArray<string>;
+      readonly inner: OutputFormat;
+    };
 
 const parseAcceptEntry = (entry: string) => {
   const [type = "", ...params] = entry.split(";").map((s) => s.trim());
   let q = 1;
   let stripNulls = false;
+  let forType: string | undefined;
+  let options: string[] = [];
   for (const p of params) {
-    const [k, v] = p.split("=").map((s) => s.trim().replace(/^"|"$/g, ""));
+    const eq = p.indexOf("=");
+    const k = (eq < 0 ? p : p.slice(0, eq)).trim();
+    const v = (eq < 0 ? "" : p.slice(eq + 1)).trim().replace(/^"|"$/g, "");
     if (k === "q") q = Number(v);
     else if (k === "nulls" && v === "stripped") stripNulls = true;
+    else if (k === "for") forType = v;
+    else if (k === "options") options = v.split("|").filter((o) => PLAN_OPTIONS.has(o));
   }
-  return { type: type.toLowerCase(), q: Number.isNaN(q) ? 1 : q, stripNulls };
+  return { type: type.toLowerCase(), q: Number.isNaN(q) ? 1 : q, stripNulls, forType, options };
+};
+
+const PLAN_OPTIONS: ReadonlySet<string> = new Set(["analyze", "verbose", "settings", "buffers", "wal"]);
+
+const describeEntry = (e: { type: string; forType: string | undefined; options: ReadonlyArray<string> }): string => {
+  if (!e.type.startsWith("application/vnd.pgrst.plan")) return e.type;
+  const fmt = e.type.endsWith("+json") ? "+json" : "+text";
+  const opts = e.options.length ? `; options=${e.options.join("|")}` : "";
+  return `application/vnd.pgrst.plan${fmt}; for="${e.forType ?? "application/json"}"${opts}`;
 };
 
 /** Pick an output format from the `Accept` header. */
-export const parseAccept = (accept: string | null, isRoot: boolean): OutputFormat => {
+export const parseAccept = (accept: string | null, isRoot: boolean, planEnabled = false): OutputFormat => {
   const entries = (accept ?? "*/*")
     .split(",")
     .map((e) => e.trim())
     .filter(Boolean)
     .map(parseAcceptEntry)
     .sort((a, b) => b.q - a.q);
-  if (entries.length === 0) entries.push({ type: "*/*", q: 1, stripNulls: false });
+  if (entries.length === 0) entries.push({ type: "*/*", q: 1, stripNulls: false, forType: undefined, options: [] });
 
-  for (const { type, stripNulls } of entries) {
+  for (const { type, stripNulls, forType, options } of entries) {
+    if (type === "application/vnd.pgrst.plan" || type === "application/vnd.pgrst.plan+json" || type === "application/vnd.pgrst.plan+text") {
+      if (!planEnabled || isRoot) continue;
+      const inner = parseAccept(forType ?? "application/json", false, false);
+      return {
+        kind: "plan",
+        format: type.endsWith("+json") ? "json" : "text",
+        forType: forType ?? "application/json",
+        options,
+        inner,
+      };
+    }
     switch (type) {
       case "*/*":
       case "application/*":
@@ -184,7 +220,7 @@ export const parseAccept = (accept: string | null, isRoot: boolean): OutputForma
   throw new PgRestError(
     406,
     "PGRST107",
-    "None of these media types are available: " + entries.map((e) => e.type).join(", "),
+    "None of these media types are available: " + entries.map(describeEntry).join(", "),
   );
 };
 

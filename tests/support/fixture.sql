@@ -116,6 +116,18 @@ BEGIN
   END IF;
 END $$;
 
+CREATE FUNCTION api.sum_all(VARIADIC nums int[]) RETURNS int LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(sum(n), 0)::int FROM unnest(nums) n $$;
+CREATE FUNCTION api.join_all(sep text, VARIADIC parts text[]) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT array_to_string(parts, sep) $$;
+CREATE FUNCTION api.blob() RETURNS bytea LANGUAGE sql IMMUTABLE AS $$ SELECT '\x68656c6c6f'::bytea $$;
+
+-- Computed relationships: functions taking a table row and returning related rows.
+CREATE FUNCTION api.order_client(api.orders) RETURNS SETOF api.clients ROWS 1 LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.clients WHERE id = $1.client_id $$;
+CREATE FUNCTION api.recent_orders(api.clients) RETURNS SETOF api.orders LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.orders WHERE client_id = $1.id ORDER BY id DESC $$;
+CREATE FUNCTION api.client_profile(api.clients) RETURNS api.profiles LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.profiles WHERE client_id = $1.id $$;
+
 -- Data
 INSERT INTO api.clients (name, email, meta, tags) VALUES
   ('Ada',   'ada@example.com',   '{"tier":"gold","address":{"city":"London"}}', '{vip,early}'),

@@ -46,7 +46,7 @@ export const createSchemaStore = async (db: DbAdapter, schemas: ReadonlyArray<st
 const CONNECTION_ERROR = /^(ERR_POSTGRES_(CONNECTION|AUTH|TLS|IDLE|LIFETIME)|ECONN|ETIMEDOUT|EPIPE|ENOTFOUND)/;
 
 /** Map anything thrown while handling a request to an {@link ApiError}. */
-export const toApiError = (e: unknown, role: string, anonymousRole: string): ApiError => {
+export const toApiError = (e: unknown, role: string | undefined, anonymousRole: string | undefined): ApiError => {
   if (e instanceof ApiError) return e;
   if (e instanceof PgRestError) return new ApiError({ status: e.status, body: e.body, headers: e.headers });
   if (e instanceof DbQueryError) return dbErrorToApiError(e, role, anonymousRole);
@@ -73,7 +73,12 @@ export const toApiError = (e: unknown, role: string, anonymousRole: string): Api
 export const errorResponse = (err: ApiError): Response =>
   new Response(JSON.stringify(err.body), {
     status: err.status,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...err.headers },
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      // every 401 invites the client to authenticate, like PostgREST
+      ...(err.status === 401 ? { "WWW-Authenticate": "Bearer" } : {}),
+      ...err.headers,
+    },
   });
 
 /** Handle a request. Never rejects: errors become PostgREST-style JSON responses. */

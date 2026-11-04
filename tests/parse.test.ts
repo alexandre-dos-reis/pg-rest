@@ -181,8 +181,9 @@ describe("query strings", () => {
     expect(p.root.filters).toHaveLength(0);
   });
   test("bad limit", () => {
-    expect(code(() => q("limit=abc"))).toBe("PGRST100");
-    expect(code(() => q("offset=-1"))).toBe("PGRST100");
+    // PostgREST ignores values that are not non-negative integers.
+    expect(code(() => q("limit=abc"))).toBe("no error");
+    expect(code(() => q("offset=-1"))).toBe("no error");
   });
 });
 

@@ -235,17 +235,19 @@ export const parseOrder = (input: string): OrderTerm[] =>
     }
     const expr = tokens.join(".");
     const related = /^([^()>-]+)\((.+)\)$/.exec(expr);
+    if (related && /[()]/.test(related[2]!)) {
+      throw parseError(`"failed to parse order (${input})"`, `unexpected '(' in "${expr}"`);
+    }
     const base = related
       ? { relation: unquote(related[1]!), field: parseField(related[2]!) }
       : { field: parseField(expr) };
     return { ...base, dir, ...(nulls ? { nulls } : {}) };
   });
 
-const parseCount = (name: string, v: string): number => {
-  if (!/^\d+$/.test(v)) {
-    throw parseError(`Failed to parse ${name}`, `${name} must be a non-negative integer, got "${v}"`);
-  }
-  return Number(v);
+/** PostgREST ignores a `limit`/`offset` that is not an integer; a negative limit is refused later. */
+const parseCount = (name: "limit" | "offset", v: string): number | undefined => {
+  const ok = name === "limit" ? /^-?\d+$/.test(v) : /^\d+$/.test(v);
+  return ok ? Number(v) : undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -324,9 +326,11 @@ export const parseQuery = (
       } else if (last === "order") {
         paramsFor(path, key).order.push(...parseOrder(value));
       } else if (last === "limit") {
-        paramsFor(path, key).limit = parseCount("limit", value);
+        const n = parseCount("limit", value);
+        if (n !== undefined) paramsFor(path, key).limit = n;
       } else {
-        paramsFor(path, key).offset = parseCount("offset", value);
+        const n = parseCount("offset", value);
+        if (n !== undefined) paramsFor(path, key).offset = n;
       }
       continue;
     }

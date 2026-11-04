@@ -18,6 +18,7 @@ interface Seen {
   location: string | null;
   preferenceApplied: string | null;
   allow: string | null;
+  wwwAuthenticate: string | null;
   body: unknown;
 }
 
@@ -79,6 +80,7 @@ const normalize = async (res: Response, c: Case): Promise<Seen> => {
     location: res.headers.get("location"),
     preferenceApplied: tokens(res.headers.get("preference-applied")),
     allow: res.headers.get("allow"),
+    wwwAuthenticate: res.headers.get("www-authenticate"),
     body: scrub(body),
   };
 };
@@ -88,7 +90,7 @@ describe.skipIf(!enabled)("pg-rest vs PostgREST 16", () => {
   let theirs: RunningPostgrest;
 
   beforeAll(async () => {
-    ours = await makeApi({ allowTxOverride: true });
+    ours = await makeApi({ allowTxOverride: true, planEnabled: true });
     theirs = await startPostgrest(ours.db.url, 54340 + Math.floor(Math.random() * 500), ["api", "v2"]);
   }, 60_000);
   afterAll(async () => {

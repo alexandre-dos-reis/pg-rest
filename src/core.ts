@@ -7,6 +7,7 @@ import {
   type Preferences,
   parseAccept,
   parseBody,
+  isSupportedMethod,
   parseMethod,
   parsePrefer,
   parseRange,
@@ -16,9 +17,9 @@ import { literal, quoteIdent } from "./quote";
 import { buildOpenApi } from "./openapi";
 import { getRelation, type Relation, type SchemaCache } from "./schema";
 import { buildRead } from "./sql/read";
-import { buildRpc, resolveFunction, type RpcCall } from "./sql/rpc";
+import { buildRpc, isSingleUnnamedParam, resolveFunction, type RpcCall } from "./sql/rpc";
 import { buildStatement, type BodyShape } from "./sql/statement";
-import { buildDelete, buildInsert, buildUpdate, type JsonObject, type Returning } from "./sql/write";
+import { buildDelete, buildInsert, upsertColumns, buildUpdate, type JsonObject, type Returning } from "./sql/write";
 
 /** Who is making the request, as far as the database is concerned. */
 export interface RequestContext {
@@ -44,12 +45,15 @@ export interface PreRequestInfo {
 
 export interface CoreConfig {
   readonly schemas: ReadonlyArray<string>;
-  readonly anonymousRole: string;
+  /** Role for requests without one; `undefined` refuses anonymous access (PGRST302). */
+  readonly anonymousRole: string | undefined;
   readonly maxRows?: number | undefined;
   readonly basePath: string;
   readonly extraSearchPath: ReadonlyArray<string>;
   /** Honor `Prefer: tx=rollback|commit` (PostgREST `db-tx-end`). */
   readonly allowTxOverride: boolean;
+  /** Answer `Accept: application/vnd.pgrst.plan` with the query plan. */
+  readonly planEnabled: boolean;
   readonly openApi: boolean;
   /** Expose `request.headers` / `request.cookies` / `request.method` / `request.path` to SQL. */
   readonly requestSettings: boolean;
@@ -74,11 +78,7 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 const readSchema = (env: Env, request: Request, method: Method): string => {
-  const wanted = (
-    method === "GET" || method === "HEAD"
-      ? request.headers.get("accept-profile")
-      : request.headers.get("content-profile")
-  )?.trim();
+  const wanted = (method === "GET" || method === "HEAD" ? request.headers.get("accept-profile") : request.headers.get("content-profile"))?.trim();
   if (!wanted) return env.config.schemas[0]!;
   if (!env.config.schemas.includes(wanted)) {
     throw new PgRestError(
@@ -100,10 +100,7 @@ const parseCookies = (header: string | null): Record<string, string> => {
     if (eq < 0) continue;
     const k = part.slice(0, eq).trim();
     if (!k) continue;
-    const v = part
-      .slice(eq + 1)
-      .trim()
-      .replace(/^"|"$/g, "");
+    const v = part.slice(eq + 1).trim().replace(/^"|"$/g, "");
     try {
       out[k] = decodeURIComponent(v);
     } catch {
@@ -124,10 +121,7 @@ const applyCtxSql = (
   schema: string,
   prefer: Preferences,
 ): { sql: string; params: string[] } => {
-  const entries: Array<[string, string]> = [
-    ["role", role],
-    ["request.jwt.claims", JSON.stringify(claims)],
-  ];
+  const entries: Array<[string, string]> = [["role", role], ["request.jwt.claims", JSON.stringify(claims)]];
   if (env.config.requestSettings) {
     const headers: Record<string, string> = {};
     request.headers.forEach((v, k) => {
@@ -145,13 +139,7 @@ const applyCtxSql = (
   if (prefer.timezone) entries.push(["timezone", prefer.timezone]);
   for (const [k, v] of Object.entries(ctx.settings ?? {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$/.test(k)) {
-      throw new PgRestError(
-        500,
-        "PGRST100",
-        `Invalid setting name "${k}"`,
-        null,
-        "Custom settings need a prefix, e.g. app.tenant_id",
-      );
+      throw new PgRestError(500, "PGRST100", `Invalid setting name "${k}"`, null, "Custom settings need a prefix, e.g. app.tenant_id");
     }
     entries.push([k, v]);
   }
@@ -165,11 +153,7 @@ const applyCtxSql = (
 const parseResponseHeaders = (raw: unknown): Record<string, string> => {
   if (raw == null || raw === "") return {};
   const bad = () =>
-    new PgRestError(
-      500,
-      "PGRST111",
-      "response.headers guc must be a JSON array composed of objects with a single key and a string value",
-    );
+    new PgRestError(500, "PGRST111", "response.headers guc must be a JSON array composed of objects with a single key and a string value");
   let parsed: unknown;
   try {
     parsed = JSON.parse(String(raw));
@@ -196,19 +180,6 @@ const parseStatusGuc = (raw: unknown): number | undefined => {
     throw new PgRestError(500, "PGRST112", "response.status guc must be a valid status code");
   }
   return n;
-};
-
-const csvCell = (v: unknown): string => {
-  if (v === null || v === undefined) return "";
-  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
-
-const toCsv = (bodyJson: string): string => {
-  const rows = JSON.parse(bodyJson) as Array<Record<string, unknown>>;
-  if (!Array.isArray(rows) || rows.length === 0) return "";
-  const cols = Object.keys(rows[0]!);
-  return [cols.map(csvCell).join(","), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(","))].join("\n");
 };
 
 const appliedHeader = (p: Preferences, honoredTx: boolean): string | undefined => {
@@ -255,13 +226,7 @@ interface Plan {
 }
 
 const asRows = (body: unknown, what: string): JsonObject[] => {
-  const bad = () =>
-    new PgRestError(
-      400,
-      "PGRST102",
-      "Empty or invalid json",
-      `${what} must be a JSON object or an array of JSON objects`,
-    );
+  const bad = () => new PgRestError(400, "PGRST102", "Empty or invalid json", `${what} must be a JSON object or an array of JSON objects`);
   const isObj = (v: unknown): v is JsonObject => v !== null && typeof v === "object" && !Array.isArray(v);
   if (Array.isArray(body)) {
     if (!body.every(isObj)) throw bad();
@@ -272,6 +237,9 @@ const asRows = (body: unknown, what: string): JsonObject[] => {
 };
 
 const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; limit?: number } | undefined) => {
+  if (query.root.limit !== undefined && query.root.limit < 0) {
+    throw new PgRestError(416, "PGRST103", "Requested range not satisfiable", "Limit should be greater than or equal to zero.", null);
+  }
   let limit = query.root.limit ?? range?.limit;
   const offset = query.root.offset ?? range?.offset ?? 0;
   const max = env.config.maxRows;
@@ -284,6 +252,11 @@ const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; 
 // ---------------------------------------------------------------------------
 
 export const handleRequest = async (env: Env, request: Request, ctx: RequestContext): Promise<Response> => {
+  if (!ctx.role && env.config.anonymousRole === undefined) {
+    throw new PgRestError(401, "PGRST302", "Anonymous access is disabled", null, null);
+  }
+  // like PostgREST's web server, answer other methods (TRACE...) with an empty 405
+  if (!isSupportedMethod(request.method)) return new Response(null, { status: 405, headers: { "Content-Type": JSON_CT } });
   const method = parseMethod(request.method);
   const url = new URL(request.url);
   const target = parseTarget(url.pathname, env.config.basePath);
@@ -293,12 +266,7 @@ export const handleRequest = async (env: Env, request: Request, ctx: RequestCont
   const honoredTx = env.config.allowTxOverride;
   if (prefer.tx && !honoredTx) invalid.push(`tx=${prefer.tx}`);
   if (prefer.handling === "strict" && invalid.length > 0) {
-    throw new PgRestError(
-      400,
-      "PGRST122",
-      "Invalid preferences given with handling=strict",
-      `Invalid preferences: ${invalid.join(", ")}`,
-    );
+    throw new PgRestError(400, "PGRST122", "Invalid preferences given with handling=strict", `Invalid preferences: ${invalid.join(", ")}`);
   }
 
   if (method === "OPTIONS") {
@@ -320,21 +288,19 @@ export const handleRequest = async (env: Env, request: Request, ctx: RequestCont
   }
 
   if (target.type === "root") {
-    if (method !== "GET" && method !== "HEAD")
-      throw new PgRestError(405, "PGRST117", `Unsupported HTTP method: ${method}`);
+    if (method !== "GET" && method !== "HEAD") throw new PgRestError(405, "PGRST117", `Unsupported HTTP method: ${method}`);
     if (!env.config.openApi) throw new PgRestError(404, "PGRST126", "Root endpoint metadata is disabled");
     parseAccept(request.headers.get("accept"), true);
-    const doc = buildOpenApi(env.cache, schema, {
-      serverUrl: env.config.serverUrl ?? url.origin,
-      basePath: env.config.basePath,
-    });
+    const doc = buildOpenApi(env.cache, schema, { serverUrl: env.config.serverUrl ?? url.origin, basePath: env.config.basePath });
     return new Response(method === "HEAD" ? null : JSON.stringify(doc), {
       status: 200,
       headers: { "Content-Type": "application/openapi+json; charset=utf-8" },
     });
   }
 
-  const format = parseAccept(request.headers.get("accept"), false);
+  const requested = parseAccept(request.headers.get("accept"), false, env.config.planEnabled);
+  const format = requested.kind === "plan" ? requested.inner : requested;
+  const wantsPlan = requested.kind === "plan" ? requested : undefined;
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
   const body = await parseBody(request, method);
 
@@ -345,7 +311,7 @@ export const handleRequest = async (env: Env, request: Request, ctx: RequestCont
     plan = planRpc(env, method, schema, target.name, url, prefer, format, range, body);
   }
 
-  return execute(env, ctx, request, method, url.pathname, schema, prefer, format, plan, honoredTx);
+  return execute(env, ctx, request, method, url.pathname, schema, prefer, format, plan, honoredTx, wantsPlan);
 };
 
 // ---------------------------------------------------------------------------
@@ -370,14 +336,7 @@ const planTable = (
 
   if (method === "GET" || method === "HEAD") {
     const { limit, offset } = effectivePaging(env, query, range);
-    const read = buildRead({
-      cache: env.cache,
-      rel,
-      from: `${quoteIdent(rel.schema)}.${quoteIdent(rel.name)}`,
-      query,
-      limit,
-      offset,
-    });
+    const read = buildRead({ cache: env.cache, rel, from: `${quoteIdent(rel.schema)}.${quoteIdent(rel.name)}`, query, limit, offset });
     const shape: BodyShape = singular ? "object" : "array";
     const paged = limit !== undefined || offset > 0;
     const needCount = prefer.count === "exact" || prefer.count === "estimated";
@@ -399,14 +358,14 @@ const planTable = (
         count: needCount && paged ? read.count : undefined,
         shape,
         stripNulls: strip,
+        csv: format.kind === "csv",
       }),
     };
   }
 
   const returning: Returning =
     prefer.return === "representation" ? "representation" : prefer.return === "headers-only" ? "pk" : "minimal";
-  const shapeFor = (r: Returning): BodyShape =>
-    r === "representation" ? (singular ? "object" : "array") : r === "pk" ? "array" : "none";
+  const shapeFor = (r: Returning): BodyShape => (r === "representation" ? (singular ? "object" : "array") : r === "pk" ? "array" : "none");
   const rowsFor = (r: Returning): { rows: string; shape: BodyShape } => {
     if (r === "representation") {
       // The request's filters selected the rows to write; they must not be applied
@@ -423,15 +382,7 @@ const planTable = (
     throw new PgRestError(400, "PGRST100", "limit and offset are not supported on PATCH, PUT and DELETE", null, null);
   }
 
-  const common = {
-    method,
-    rel,
-    readOnly: false,
-    source: true,
-    offset: 0,
-    countInStatement: false,
-    pagedRead: false,
-  } as const;
+  const common = { method, rel, readOnly: false, source: true, offset: 0, countInStatement: false, pagedRead: false } as const;
 
   if (method === "POST") {
     if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
@@ -443,6 +394,7 @@ const planTable = (
       onConflict: query.onConflict,
       resolution: prefer.resolution,
       missingDefault: prefer.missing === "default",
+      flagInserted: true,
       returning,
     });
     const { rows: outRows, shape } = rowsFor(returning);
@@ -452,7 +404,14 @@ const planTable = (
       returning,
       params: insertSql.includes("$1") ? [JSON.stringify(rows)] : [],
       shape,
-      statement: buildStatement({ source: insertSql, rows: outRows, shape, stripNulls: strip }),
+      statement: buildStatement({
+        source: insertSql,
+        rows: outRows,
+        shape,
+        stripNulls: strip,
+        csv: format.kind === "csv",
+        upsertColumns: insertSql.includes("pgrst_inserted") ? upsertColumns(rel, returning) : undefined,
+      }),
     };
   }
 
@@ -460,12 +419,7 @@ const planTable = (
     if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
     const obj = body.value;
     if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-      throw new PgRestError(
-        400,
-        "PGRST102",
-        "Empty or invalid json",
-        "The payload of a PATCH request must be a JSON object",
-      );
+      throw new PgRestError(400, "PGRST102", "Empty or invalid json", "The payload of a PATCH request must be a JSON object");
     }
     const updateSql = buildUpdate({ rel, body: obj as JsonObject, filters: query.root.filters, returning });
     const { rows: outRows, shape } = rowsFor(returning);
@@ -478,11 +432,7 @@ const planTable = (
         returning,
         params: [],
         shape: emptyShape,
-        statement: buildStatement({
-          source: "SELECT 1 WHERE FALSE",
-          rows: "SELECT * FROM pgrst_source",
-          shape: emptyShape,
-        }),
+        statement: buildStatement({ source: "SELECT 1 WHERE FALSE", rows: "SELECT * FROM pgrst_source", shape: emptyShape, csv: format.kind === "csv" }),
       };
     }
     return {
@@ -491,7 +441,7 @@ const planTable = (
       returning,
       params: [JSON.stringify(obj)],
       shape,
-      statement: buildStatement({ source: updateSql, rows: outRows, shape, stripNulls: strip }),
+      statement: buildStatement({ source: updateSql, rows: outRows, shape, stripNulls: strip, csv: format.kind === "csv" }),
     };
   }
 
@@ -504,7 +454,7 @@ const planTable = (
       returning,
       params: [],
       shape,
-      statement: buildStatement({ source: deleteSql, rows: outRows, shape, stripNulls: strip }),
+      statement: buildStatement({ source: deleteSql, rows: outRows, shape, stripNulls: strip, csv: format.kind === "csv" }),
     };
   }
 
@@ -512,12 +462,7 @@ const planTable = (
   if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
   const row = body.value;
   if (row === null || typeof row !== "object" || Array.isArray(row)) {
-    throw new PgRestError(
-      400,
-      "PGRST102",
-      "Empty or invalid json",
-      "The payload of a PUT request must be a JSON object",
-    );
+    throw new PgRestError(400, "PGRST102", "Empty or invalid json", "The payload of a PUT request must be a JSON object");
   }
   if (query.root.limit !== undefined || query.root.offset !== undefined) {
     throw new PgRestError(400, "PGRST114", "limit/offset querystring parameters are not allowed for PUT");
@@ -527,22 +472,10 @@ const planTable = (
   }
   const keyValues = new Map<string, string>();
   for (const f of query.root.filters) {
-    if (
-      f.kind === "filter" &&
-      f.op === "eq" &&
-      !f.negate &&
-      !f.quantifier &&
-      f.field.json.length === 0 &&
-      typeof f.value === "string" &&
-      rel.pk.includes(f.field.name)
-    ) {
+    if (f.kind === "filter" && f.op === "eq" && !f.negate && !f.quantifier && f.field.json.length === 0 && typeof f.value === "string" && rel.pk.includes(f.field.name)) {
       keyValues.set(f.field.name, f.value);
     } else {
-      throw new PgRestError(
-        405,
-        "PGRST105",
-        "Filters must include all and only primary key columns with 'eq' operators",
-      );
+      throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
     }
   }
   if (!rel.pk.every((c) => keyValues.has(c))) {
@@ -563,13 +496,17 @@ const planTable = (
     returning,
     params: [JSON.stringify([full])],
     shape,
-    statement: buildStatement({ source: putSql, rows: outRows, shape, stripNulls: strip }),
+    statement: buildStatement({ source: putSql, rows: outRows, shape, stripNulls: strip, csv: format.kind === "csv" }),
   };
 };
 
 // ---------------------------------------------------------------------------
 // planning: RPC
 // ---------------------------------------------------------------------------
+
+/** A query-string value in the filter syntax (`eq.5`, `not.in.(1,2)`, `like(any).{a*}`), not a plain argument. */
+const looksLikeFilter = (v: string): boolean =>
+  /^(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|match|imatch|in|is|isdistinct|cs|cd|ov|sl|sr|nxl|nxr|adj|fts|plfts|phfts|wfts)(\([a-z]+\))?\./.test(v);
 
 const planRpc = (
   env: Env,
@@ -585,51 +522,63 @@ const planRpc = (
   if (method !== "GET" && method !== "HEAD" && method !== "POST") {
     throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
   }
-  const candidates = env.cache.functions.get(`${schema}.${name}`) ?? [];
-  const allArgNames = new Set(candidates.flatMap((f) => f.args.map((a) => a.name)));
   const RESERVED = new Set(["select", "order", "limit", "offset", "and", "or", "columns", "on_conflict"]);
 
   let argValues: Record<string, unknown> = {};
-  let rawBody = false;
+  let nonObjectBody = false;
   const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+  const getArgKeys = new Set<string>();
+  const bare = new Set<string>();
 
   if (method === "POST") {
     if (body) {
-      if (isObj(body.value)) argValues = body.value;
-      else rawBody = true;
+      const v = body.value;
+      if (isObj(v)) argValues = v;
+      else {
+        nonObjectBody = true;
+        if (Array.isArray(v) && v.length > 0) {
+          // PostgREST reads the function arguments from the objects of an array body; they must agree on their keys
+          const keysOf = (o: unknown) => (isObj(o) ? Object.keys(o).sort().join("\u0000") : undefined);
+          const first = keysOf(v[0]);
+          if (first === undefined || v.some((o) => keysOf(o) !== first)) {
+            throw new PgRestError(400, "PGRST102", "All object keys must match", null, null);
+          }
+          argValues = v[0] as Record<string, unknown>;
+        }
+      }
     }
   } else {
+    // every query parameter that is not a filter, a reserved word or a bare key is an argument
+    for (const kv of url.search.slice(1).split("&")) if (kv !== "" && !kv.includes("=")) bare.add(decodeURIComponent(kv));
+    const lists = new Map<string, string[]>();
     for (const [k, v] of url.searchParams) {
-      if (!RESERVED.has(k) && allArgNames.has(k)) argValues[k] = v;
+      if (RESERVED.has(k) || bare.has(k) || looksLikeFilter(v) || k.includes(".")) continue;
+      lists.set(k, [...(lists.get(k) ?? []), v]);
+    }
+    for (const [k, vs] of lists) {
+      getArgKeys.add(k);
+      argValues[k] = vs.length === 1 ? vs[0] : vs;
     }
   }
   const provided = Object.keys(argValues);
-  const fn = resolveFunction(env.cache, schema, name, new Set(provided), rawBody);
+  const fn = resolveFunction(env.cache, schema, name, new Set(provided), nonObjectBody, method === "POST");
+  // GET: repeated parameters make a list, and a variadic parameter always takes one
+  for (const a of fn.args) {
+    if (a.variadic && getArgKeys.has(a.name) && !Array.isArray(argValues[a.name])) argValues[a.name] = [argValues[a.name]];
+  }
+  const rawBody = nonObjectBody && isSingleUnnamedParam(fn);
   const call = buildRpc(env.cache, fn, provided, rawBody);
 
   const fnArgNames = new Set(fn.args.map((a) => a.name));
-  const query = parseQuery([...url.searchParams], {
+  const query = parseQuery([...url.searchParams].filter(([k, v]) => !(v === "" && bare.has(k))), {
     // On GET, parameters that name function arguments are not filters.
     allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
   });
   const argsJson = rawBody ? JSON.stringify(body!.value) : JSON.stringify(argValues);
-  const params = call.usesBody
-    ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson]
-    : [];
+  const params = call.usesBody ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson] : [];
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
 
-  const base = {
-    method,
-    kind: "rpc",
-    readOnly: method !== "POST",
-    source: false,
-    rpc: call,
-    rel: call.relation,
-    params,
-    offset: 0,
-    countInStatement: false,
-    pagedRead: false,
-  } as const;
+  const base = { method, kind: "rpc", readOnly: method !== "POST", source: false, rpc: call, rel: call.relation, params, offset: 0, countInStatement: false, pagedRead: false } as const;
 
   if (call.shape === "rows" || call.shape === "object") {
     const { limit, offset } = effectivePaging(env, query, range);
@@ -645,17 +594,12 @@ const planRpc = (
       countInStatement: needCount && paged,
       planned: prefer.count === "planned" || prefer.count === "estimated" ? read.unpaged : undefined,
       shape,
-      statement: buildStatement({
-        rows: read.rows,
-        count: needCount && paged ? read.count : undefined,
-        shape,
-        stripNulls: strip,
-      }),
+      statement: buildStatement({ rows: read.rows, count: needCount && paged ? read.count : undefined, shape, stripNulls: strip, csv: format.kind === "csv" }),
     };
   }
 
   const shape: BodyShape = call.shape === "void" ? "none" : call.shape === "scalar" ? "scalar" : "scalar-array";
-  return { ...base, shape, statement: buildStatement({ rows: call.source, shape }) };
+  return { ...base, shape, statement: buildStatement({ rows: call.source, shape, csv: format.kind === "csv" }) };
 };
 
 // ---------------------------------------------------------------------------
@@ -682,12 +626,13 @@ const execute = async (
   format: OutputFormat,
   plan: Plan,
   honoredTx: boolean,
+  wantsPlan?: Extract<OutputFormat, { kind: "plan" }>,
 ): Promise<Response> => {
-  const role = ctx.role ?? env.config.anonymousRole;
+  const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
   const setup = applyCtxSql(env, ctx, role, claims, request, method, pathname, schema, prefer);
   const strict = prefer.handling === "strict";
-  const rollback = honoredTx && prefer.tx === "rollback";
+  const rollback = (honoredTx && prefer.tx === "rollback") || wantsPlan !== undefined;
 
   const attempt = async (): Promise<RawResult> => {
     try {
@@ -709,6 +654,14 @@ const execute = async (
           const parsed = typeof cell === "string" ? JSON.parse(cell) : cell;
           const n = Number((parsed as any)?.[0]?.Plan?.["Plan Rows"]);
           planned = Number.isFinite(n) ? n : undefined;
+        }
+
+        if (wantsPlan) {
+          const opts = ["FORMAT " + wantsPlan.format.toUpperCase(), ...wantsPlan.options.map((o) => o.toUpperCase())];
+          const lines = await s.query(`EXPLAIN (${opts.join(", ")}) ${plan.statement}`, plan.params);
+          const cells = lines.map((l) => l["QUERY PLAN"]);
+          const text = wantsPlan.format === "json" ? (typeof cells[0] === "string" ? cells[0] : JSON.stringify(cells[0], null, 2)) : cells.join("\n");
+          throw new RollbackWith({ pageTotal: 0, body: text, total: undefined, planned: undefined, responseHeaders: {}, responseStatus: undefined } satisfies RawResult);
         }
 
         const rows = await s.query(plan.statement, plan.params);
@@ -734,18 +687,9 @@ const execute = async (
         }
         if (strict && prefer.maxAffected !== undefined) {
           if (plan.kind === "rpc" && plan.rpc && !plan.rpc.fn.returnsSet) {
-            throw new PgRestError(
-              400,
-              "PGRST128",
-              "max-affected preference is only valid for functions that return a set",
-              null,
-              null,
-            );
+            throw new PgRestError(400, "PGRST128", "max-affected preference is only valid for functions that return a set", null, null);
           }
-          if (
-            (plan.kind === "update" || plan.kind === "delete" || plan.kind === "rpc") &&
-            pageTotal > prefer.maxAffected
-          ) {
+          if ((plan.kind === "update" || plan.kind === "delete" || plan.kind === "rpc") && pageTotal > prefer.maxAffected) {
             throw new PgRestError(
               400,
               "PGRST124",
@@ -761,8 +705,7 @@ const execute = async (
       if (e instanceof RollbackWith) return e.value as RawResult;
       // The root table is aliased internally; PostgreSQL error texts should name the real table.
       if (e instanceof DbQueryError && plan.kind !== "rpc" && plan.rel) {
-        const fix = (t: string | undefined) =>
-          t?.replace(/"pgrst_root"/g, `"${plan.rel!.name}"`).replace(/pgrst_root\./g, `${plan.rel!.name}.`);
+        const fix = (t: string | undefined) => t?.replace(/"pgrst_root"/g, `"${plan.rel!.name}"`).replace(/pgrst_root\./g, `${plan.rel!.name}.`);
         throw new DbQueryError(e.sqlState, fix(e.message) ?? e.message, fix(e.detail), fix(e.hint));
       }
       throw e;
@@ -781,6 +724,16 @@ const execute = async (
     }
   }
 
+  if (wantsPlan) {
+    const opts = wantsPlan.options.length ? `; options=${wantsPlan.options.join("|")}` : "";
+    return new Response(method === "HEAD" ? null : result.body, {
+      status: 200,
+      headers: {
+        "Content-Type": `application/vnd.pgrst.plan+${wantsPlan.format}; for="${wantsPlan.forType}"${opts}; charset=utf-8`,
+        Vary: "Accept, Prefer, Range",
+      },
+    });
+  }
   return buildResponse(env, request, method, prefer, format, plan, result, honoredTx);
 };
 
@@ -808,12 +761,7 @@ const buildResponse = (
   else if (prefer.count === "planned") total = r.planned;
   else if (prefer.count === "estimated") {
     const max = env.config.maxRows;
-    total =
-      max !== undefined && r.planned !== undefined && r.planned > max
-        ? r.planned
-        : plan.countInStatement
-          ? r.total
-          : r.pageTotal;
+    total = max !== undefined && r.planned !== undefined && r.planned > max ? r.planned : plan.countInStatement ? r.total : r.pageTotal;
   }
   const totalStr = total === undefined ? "*" : String(total);
 
@@ -821,31 +769,15 @@ const buildResponse = (
   let text = r.body;
   let contentType = JSON_CT;
 
-  if (
-    plan.kind === "read" ||
-    (plan.kind === "rpc" && plan.pagedRead !== undefined && (plan.shape === "array" || plan.shape === "object"))
-  ) {
+  if (plan.kind === "read" || (plan.kind === "rpc" && plan.pagedRead !== undefined && (plan.shape === "array" || plan.shape === "object"))) {
     const first = plan.offset;
     const last = plan.offset + r.pageTotal - 1;
     headers["Content-Range"] = r.pageTotal > 0 ? `${first}-${last}/${totalStr}` : `*/${totalStr}`;
-    if (
-      total !== undefined &&
-      plan.offset > 0 &&
-      r.pageTotal === 0 &&
-      plan.offset >= total &&
-      prefer.count !== "planned"
-    ) {
-      throw new PgRestError(
-        416,
-        "PGRST103",
-        "Requested range not satisfiable",
-        `An offset of ${plan.offset} was requested, but there are only ${total} rows.`,
-        null,
-        {
-          "Content-Range": `*/${total}`,
-          ...(applied ? { "Preference-Applied": applied } : {}),
-        },
-      );
+    if (total !== undefined && plan.offset > 0 && r.pageTotal === 0 && plan.offset >= total && prefer.count !== "planned") {
+      throw new PgRestError(416, "PGRST103", "Requested range not satisfiable", `An offset of ${plan.offset} was requested, but there are only ${total} rows.`, null, {
+        "Content-Range": `*/${total}`,
+        ...(applied ? { "Preference-Applied": applied } : {}),
+      });
     }
     if (total !== undefined && r.pageTotal > 0 && r.pageTotal < total) status = 206;
     if (total !== undefined && r.pageTotal === total && plan.offset > 0) status = 206;
@@ -855,10 +787,7 @@ const buildResponse = (
   } else {
     if (plan.kind === "update") {
       const n = r.pageTotal;
-      headers["Content-Range"] =
-        n > 0
-          ? `0-${n - 1}/${prefer.count === "exact" ? String(n) : "*"}`
-          : `*/${prefer.count === "exact" ? "0" : "*"}`;
+      headers["Content-Range"] = n > 0 ? `0-${n - 1}/${prefer.count === "exact" ? String(n) : "*"}` : `*/${prefer.count === "exact" ? "0" : "*"}`;
     } else if (plan.kind !== "put") {
       headers["Content-Range"] = `*/${prefer.count === "exact" ? String(r.pageTotal) : "*"}`;
     }
@@ -884,8 +813,7 @@ const buildResponse = (
 
   if (plan.kind === "insert" && (plan.returning ?? "minimal") !== "representation") text = "";
 
-  if (format.kind === "csv" && text) {
-    text = toCsv(text);
+  if (format.kind === "csv") {
     contentType = "text/csv; charset=utf-8";
   } else if (format.kind === "object") {
     contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;

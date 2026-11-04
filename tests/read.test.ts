@@ -95,7 +95,7 @@ describe.skipIf(!hasDb)("reads", () => {
       expect(await names('/clients?or=(name.eq."Ada",name.in.("Linus","x,y"))&order=id')).toEqual(["Ada", "Linus"]);
     });
     test("bad filters are PGRST100", async () => {
-      for (const q of ["id=foo.1", "id=eq", "id=is.maybe", "or=id.eq.1", "limit=x"]) {
+      for (const q of ["id=foo.1", "id=eq", "id=is.maybe", "or=id.eq.1"]) {
         const r = await t.get(`/clients?${q}`);
         expect(r.status).toBe(400);
         expect(r.json().code).toBe("PGRST100");

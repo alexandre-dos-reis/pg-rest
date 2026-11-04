@@ -58,6 +58,12 @@ export interface FunctionDef {
   readonly returnsVoid: boolean;
   readonly volatility: "immutable" | "stable" | "volatile";
   readonly comment: string | null;
+  /** The table when the function's only parameter is a table row (computed relationships). */
+  readonly argRelation?: { readonly schema: string; readonly name: string };
+  /** The table whose rows the function returns. */
+  readonly returnRelation?: { readonly schema: string; readonly name: string };
+  /** Planner row estimate; 1 on a set-returning function makes a computed relationship to-one. */
+  readonly rows: number;
 }
 
 export interface SchemaCache {
@@ -80,6 +86,71 @@ const run = async <T>(db: DbSession, sql: string): Promise<T[]> => {
   const rows = await db.query(asJson(sql));
   const j = rows[0]?.["j"];
   return JSON.parse(typeof j === "string" ? j : "[]") as T[];
+};
+
+interface ViewColumn {
+  readonly vschema: string;
+  readonly vname: string;
+  readonly vcol: string;
+  readonly tschema: string;
+  readonly tname: string;
+  readonly tcol: string;
+}
+
+/**
+ * Foreign keys seen through views: a view that exposes the columns of a foreign key (directly, or
+ * through other views) gets the same relationships as the table, towards tables and views alike.
+ */
+const viewForeignKeys = (fks: ReadonlyArray<ForeignKey>, rows: ReadonlyArray<ViewColumn>): ForeignKey[] => {
+  const viewCols = new Map<string, Map<string, { key: string; col: string }>>();
+  for (const r of rows) {
+    const key = relKey(r.vschema, r.vname);
+    const m = viewCols.get(key) ?? new Map();
+    m.set(r.vcol, { key: relKey(r.tschema, r.tname), col: r.tcol });
+    viewCols.set(key, m);
+  }
+  // follow view -> view chains down to the table behind each column
+  const base = (key: string, col: string, depth = 0): { key: string; col: string } => {
+    const next = viewCols.get(key)?.get(col);
+    return next && depth < 16 ? base(next.key, next.col, depth + 1) : { key, col };
+  };
+  /** Every view that exposes all of `cols` of table `tableKey`, with the view-side column names. */
+  const exposing = (tableKey: string, cols: ReadonlyArray<string>) => {
+    const out: Array<{ schema: string; name: string; cols: string[] }> = [];
+    for (const [vkey, m] of viewCols) {
+      const names: string[] = [];
+      for (const c of cols) {
+        let found: string | undefined;
+        for (const [vcol] of m) {
+          const b = base(vkey, vcol);
+          if (b.key === tableKey && b.col === c) {
+            found = vcol;
+            break;
+          }
+        }
+        if (found === undefined) break;
+        names.push(found);
+      }
+      if (names.length === cols.length) {
+        const [schema, ...rest] = vkey.split(".");
+        out.push({ schema: schema!, name: rest.join("."), cols: names });
+      }
+    }
+    return out;
+  };
+
+  const out: ForeignKey[] = [];
+  for (const fk of fks) {
+    const sources = [{ schema: fk.schema, name: fk.table, cols: [...fk.cols] }, ...exposing(relKey(fk.schema, fk.table), fk.cols)];
+    const targets = [{ schema: fk.fschema, name: fk.ftable, cols: [...fk.fcols] }, ...exposing(relKey(fk.fschema, fk.ftable), fk.fcols)];
+    for (const [i, s] of sources.entries()) {
+      for (const [j, t] of targets.entries()) {
+        if (i === 0 && j === 0) continue;
+        out.push({ name: fk.name, schema: s.schema, table: s.name, cols: s.cols, fschema: t.schema, ftable: t.name, fcols: t.cols });
+      }
+    }
+  }
+  return out;
 };
 
 /** Read the catalog and build a fresh {@link SchemaCache}. */
@@ -167,6 +238,34 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
         AND (ns.nspname = ANY(${S}) OR fns.nspname = ANY(${S}))`,
   );
 
+  // Plain columns of views (and materialized views) and the table column each one is read from,
+  // taken from the rewrite rule's target list. PostgREST uses this to follow foreign keys through views.
+  const viewRows = await run<{
+    vschema: string;
+    vname: string;
+    vcol: string;
+    tschema: string;
+    tname: string;
+    tcol: string;
+  }>(
+    db,
+    `SELECT DISTINCT ON (vc.oid, m.x[1]::int)
+            vn.nspname AS vschema, vc.relname AS vname, va.attname AS vcol,
+            tn.nspname AS tschema, tc.relname AS tname, ta.attname AS tcol
+       FROM pg_rewrite rw
+       JOIN pg_class vc ON vc.oid = rw.ev_class AND vc.relkind IN ('v','m')
+       JOIN pg_namespace vn ON vn.oid = vc.relnamespace
+       CROSS JOIN LATERAL regexp_matches(rw.ev_action::text,
+            ':resno (\\d+) :resname [^:]* :ressortgroupref \\d+ :resorigtbl (\\d+) :resorigcol (\\d+) :resjunk false', 'g')
+            WITH ORDINALITY AS m(x, ord)
+       JOIN pg_attribute va ON va.attrelid = vc.oid AND va.attnum = m.x[1]::int AND NOT va.attisdropped
+       JOIN pg_class tc ON tc.oid = m.x[2]::oid
+       JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+       JOIN pg_attribute ta ON ta.attrelid = tc.oid AND ta.attnum = m.x[3]::int
+      WHERE vn.nspname = ANY(${S}) AND rw.rulename = '_RETURN' AND m.x[2]::oid <> 0
+      ORDER BY vc.oid, m.x[1]::int, m.ord DESC`,
+  );
+
   const fnRows = await run<{
     schema: string;
     name: string;
@@ -177,6 +276,9 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     has_out: boolean;
     n_defaults: number;
     comment: string | null;
+    rows: number;
+    arg_rel: { schema: string; name: string } | null;
+    ret_rel: { schema: string; name: string } | null;
     args: Array<{ name: string; type: string; mode: string }>;
   }>(
     db,
@@ -187,6 +289,13 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
             coalesce(p.proargmodes && ARRAY['o','b','t']::"char"[], false) AS has_out,
             p.pronargdefaults AS n_defaults,
             obj_description(p.oid, 'pg_proc') AS comment,
+            p.prorows::float8 AS rows,
+            (SELECT json_build_object('schema', n2.nspname, 'name', c2.relname)
+               FROM pg_type t2 JOIN pg_class c2 ON c2.oid = t2.typrelid JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+              WHERE p.pronargs = 1 AND t2.oid = p.proargtypes[0] AND c2.relkind IN ('r','v','m','f','p')) AS arg_rel,
+            (SELECT json_build_object('schema', n2.nspname, 'name', c2.relname)
+               FROM pg_type t2 JOIN pg_class c2 ON c2.oid = t2.typrelid JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+              WHERE t2.oid = p.prorettype AND c2.relkind IN ('r','v','m','f','p')) AS ret_rel,
             (SELECT coalesce(json_agg(json_build_object(
                        'name', coalesce(p.proargnames[t.i], ''),
                        'type', format_type(t.typ, NULL),
@@ -223,6 +332,8 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       });
     }
   }
+
+  foreignKeys.push(...viewForeignKeys(foreignKeys, viewRows));
 
   const colsByRel = new Map<string, Column[]>();
   for (const c of colRows) {
@@ -277,6 +388,9 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       returnsVoid: f.return_type === "void",
       volatility: f.volatility === "i" ? "immutable" : f.volatility === "s" ? "stable" : "volatile",
       comment: f.comment,
+      rows: f.rows,
+      ...(f.arg_rel ? { argRelation: f.arg_rel } : {}),
+      ...(f.ret_rel ? { returnRelation: f.ret_rel } : {}),
     };
     const key = relKey(f.schema, f.name);
     functions.set(key, [...(functions.get(key) ?? []), def]);
@@ -299,6 +413,8 @@ export interface Relationship {
   readonly fromCols: ReadonlyArray<string>;
   readonly toCols: ReadonlyArray<string>;
   readonly fk: ForeignKey;
+  /** Computed relationship: a function taking a row of `from` and returning rows of `to`. */
+  readonly computed?: FunctionDef;
   /** Many-to-many only: the junction table and its two FKs. */
   readonly junction?: {
     readonly relation: Relation;
@@ -320,6 +436,7 @@ const describe = (r: Relationship): string => {
   if (j) {
     return `'${j.relation.name}' using '${j.fkFrom.name}' and '${j.fkTo.name}' (many-to-many)`;
   }
+  if (r.computed) return `'${r.computed.name}' (computed, ${r.kind === "m2o" ? "many-to-one" : "one-to-many"})`;
   return `'${r.fk.name}' (${r.kind === "m2o" ? "many-to-one" : r.kind === "o2o" ? "one-to-one" : "one-to-many"}) on ${r.fk.table}(${r.fk.cols.join(",")})`;
 };
 
@@ -359,6 +476,15 @@ export const findRelationships = (
         });
       }
     }
+  }
+
+  // computed relationships: `fn(from_row) RETURNS [SETOF] to_table`
+  for (const f of cache.functions.get(relKey(from.schema, target)) ?? []) {
+    if (f.argRelation?.schema !== from.schema || f.argRelation.name !== from.name || !f.returnRelation) continue;
+    const to = rel(f.returnRelation.schema, f.returnRelation.name);
+    if (!to) continue;
+    const fk: ForeignKey = { name: f.name, schema: from.schema, table: from.name, cols: [], fschema: to.schema, ftable: to.name, fcols: [] };
+    out.push({ kind: !f.returnsSet || f.rows === 1 ? "m2o" : "o2m", from, to, fromCols: [], toCols: [], fk, computed: f });
   }
 
   // many-to-many through a junction table
@@ -454,7 +580,7 @@ const suggest = (cache: SchemaCache, schema: string, name: string): string | nul
   return best ? `Perhaps you meant the table '${schema}.${best.name}'` : null;
 };
 
-const levenshtein = (a: string, b: string): number => {
+export const levenshtein = (a: string, b: string): number => {
   const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     let prev = dp[0]!;

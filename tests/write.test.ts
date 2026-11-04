@@ -11,8 +11,7 @@ describe.skipIf(!hasDb)("writes", () => {
 
   const REP = { Prefer: "return=representation" };
   const ctx = authed();
-  const count = async (table: string) =>
-    Number((await t.db.adapter.query(`SELECT count(*)::int AS n FROM api.${table}`))[0]!["n"]);
+  const count = async (table: string) => Number((await t.db.adapter.query(`SELECT count(*)::int AS n FROM api.${table}`))[0]!["n"]);
 
   describe("POST", () => {
     test("minimal by default: 201, no body", async () => {
@@ -31,10 +30,7 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(row.created_at).toBeTruthy();
     });
     test("bulk insert", async () => {
-      const r = await t.post("/clients?select=name", [{ name: "A" }, { name: "B" }, { name: "C" }], {
-        ctx,
-        headers: REP,
-      });
+      const r = await t.post("/clients?select=name", [{ name: "A" }, { name: "B" }, { name: "C" }], { ctx, headers: REP });
       expect(r.json()).toEqual([{ name: "A" }, { name: "B" }, { name: "C" }]);
       expect(await count("clients")).toBe(6);
     });
@@ -45,11 +41,7 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(r.headers.get("location")).toBe("/clients?id=eq.4");
     });
     test("Location uses every primary key column", async () => {
-      const r = await t.post(
-        "/order_items",
-        { order_id: 2, product_id: 1, qty: 3 },
-        { ctx, headers: { Prefer: "return=headers-only" } },
-      );
+      const r = await t.post("/order_items", { order_id: 2, product_id: 1, qty: 3 }, { ctx, headers: { Prefer: "return=headers-only" } });
       expect(r.headers.get("location")).toBe("/order_items?order_id=eq.2&product_id=eq.1");
     });
     test("representation can embed", async () => {
@@ -74,10 +66,7 @@ describe.skipIf(!hasDb)("writes", () => {
       const nulls = await t.post("/orders?columns=client_id,status", rows, { ctx });
       expect(nulls.status).toBe(400);
       expect(nulls.json().code).toBe("23502");
-      const ok = await t.post("/orders?columns=client_id,status&select=status&order=id", rows, {
-        ctx,
-        headers: { Prefer: "return=representation, missing=default" },
-      });
+      const ok = await t.post("/orders?columns=client_id,status&select=status&order=id", rows, { ctx, headers: { Prefer: "return=representation, missing=default" } });
       expect(ok.status).toBe(201);
       expect(ok.json()).toEqual([{ status: "paid" }, { status: "new" }]);
     });
@@ -91,28 +80,15 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(r.json().code).toBe("23502");
     });
     test("x-www-form-urlencoded and CSV bodies", async () => {
-      const form = await t.post("/clients?select=name", "name=Form+User", {
-        ctx,
-        headers: { ...REP, "Content-Type": "application/x-www-form-urlencoded" },
-      });
+      const form = await t.post("/clients?select=name", "name=Form+User", { ctx, headers: { ...REP, "Content-Type": "application/x-www-form-urlencoded" } });
       expect(form.json()).toEqual([{ name: "Form User" }]);
-      const csv = await t.post("/clients?select=name,email&order=id", 'name,email\nCsv One,one@x\n"Csv, Two",', {
-        ctx,
-        headers: { ...REP, "Content-Type": "text/csv" },
-      });
-      expect(csv.json()).toEqual([
-        { name: "Csv One", email: "one@x" },
-        { name: "Csv, Two", email: null },
-      ]);
+      const csv = await t.post("/clients?select=name,email&order=id", 'name,email\nCsv One,one@x\n"Csv, Two",', { ctx, headers: { ...REP, "Content-Type": "text/csv" } });
+      expect(csv.json()).toEqual([{ name: "Csv One", email: "one@x" }, { name: "Csv, Two", email: null }]);
     });
     test("invalid or empty bodies are PGRST102", async () => {
-      expect(
-        (await t.post("/clients", "{nope", { ctx, headers: { "Content-Type": "application/json" } })).json().code,
-      ).toBe("PGRST102");
+      expect((await t.post("/clients", "{nope", { ctx, headers: { "Content-Type": "application/json" } })).json().code).toBe("PGRST102");
       expect((await t.call("POST", "/clients", { ctx })).json().code).toBe("PGRST102");
-      expect(
-        (await t.post("/clients", "just a string", { ctx, headers: { "Content-Type": "application/json" } })).status,
-      ).toBe(400);
+      expect((await t.post("/clients", "just a string", { ctx, headers: { "Content-Type": "application/json" } })).status).toBe(400);
       expect((await t.post("/clients", [1, 2], { ctx })).json().code).toBe("PGRST102");
     });
     test("unsupported Content-Type is 415", async () => {
@@ -139,14 +115,7 @@ describe.skipIf(!hasDb)("writes", () => {
       expect((await t.post("/clients", { name: "x" }, { ctx })).status).toBe(403);
     });
     test("a failing statement rolls back the whole request", async () => {
-      const r = await t.post(
-        "/clients",
-        [
-          { name: "Fine", email: "fine@example.com" },
-          { name: "Dup", email: "ada@example.com" },
-        ],
-        { ctx },
-      );
+      const r = await t.post("/clients", [{ name: "Fine", email: "fine@example.com" }, { name: "Dup", email: "ada@example.com" }], { ctx });
       expect(r.status).toBe(409);
       expect(await count("clients")).toBe(3);
     });
@@ -154,44 +123,26 @@ describe.skipIf(!hasDb)("writes", () => {
 
   describe("upsert", () => {
     test("resolution=merge-duplicates on the primary key", async () => {
-      const r = await t.post(
-        "/clients?select=id,name",
-        { id: 1, name: "Ada Lovelace" },
-        { ctx, headers: { Prefer: "return=representation, resolution=merge-duplicates" } },
-      );
-      expect(r.status).toBe(201);
+      const r = await t.post("/clients?select=id,name", { id: 1, name: "Ada Lovelace" }, { ctx, headers: { Prefer: "return=representation, resolution=merge-duplicates" } });
+      expect(r.status).toBe(200); // only an existing row was updated
       expect(r.json()).toEqual([{ id: 1, name: "Ada Lovelace" }]);
       expect(await count("clients")).toBe(3);
     });
     test("on_conflict picks another unique column", async () => {
-      const r = await t.post(
-        "/clients?on_conflict=email&select=id,name",
-        [
-          { name: "Ada!", email: "ada@example.com" },
-          { name: "New", email: "new@example.com" },
-        ],
-        {
-          ctx,
-          headers: { Prefer: "return=representation, resolution=merge-duplicates" },
-        },
-      );
+      const r = await t.post("/clients?on_conflict=email&select=id,name", [{ name: "Ada!", email: "ada@example.com" }, { name: "New", email: "new@example.com" }], {
+        ctx,
+        headers: { Prefer: "return=representation, resolution=merge-duplicates" },
+      });
       // (the serial advances even for the row that conflicted, so only check ids loosely)
       expect(r.json().map((x: any) => x.name)).toEqual(["Ada!", "New"]);
       expect(r.json()[0].id).toBe(1);
       expect(await count("clients")).toBe(4);
     });
     test("resolution=ignore-duplicates", async () => {
-      const r = await t.post(
-        "/clients?on_conflict=email&select=name",
-        [
-          { name: "Changed", email: "ada@example.com" },
-          { name: "Fresh", email: "fresh@example.com" },
-        ],
-        {
-          ctx,
-          headers: { Prefer: "return=representation, resolution=ignore-duplicates" },
-        },
-      );
+      const r = await t.post("/clients?on_conflict=email&select=name", [{ name: "Changed", email: "ada@example.com" }, { name: "Fresh", email: "fresh@example.com" }], {
+        ctx,
+        headers: { Prefer: "return=representation, resolution=ignore-duplicates" },
+      });
       expect(r.json()).toEqual([{ name: "Fresh" }]);
       expect((await t.get("/clients?id=eq.1&select=name")).json()).toEqual([{ name: "Ada" }]);
     });
@@ -208,19 +159,14 @@ describe.skipIf(!hasDb)("writes", () => {
     test("updates the matching rows and returns them", async () => {
       const r = await t.patch("/orders?status=eq.paid&select=id,status", { status: "shipped" }, { ctx, headers: REP });
       expect(r.status).toBe(200);
-      expect(r.json()).toEqual([
-        { id: 1, status: "shipped" },
-        { id: 3, status: "shipped" },
-      ]);
+      expect(r.json()).toEqual([{ id: 1, status: "shipped" }, { id: 3, status: "shipped" }]);
       expect(r.headers.get("content-range")).toBe("0-1/*");
     });
     test("minimal is 204 and only the named columns change", async () => {
       const r = await t.patch("/clients?id=eq.1", { email: "new@example.com" }, { ctx });
       expect(r.status).toBe(204);
       expect(r.text).toBe("");
-      expect((await t.get("/clients?id=eq.1&select=name,email")).json()).toEqual([
-        { name: "Ada", email: "new@example.com" },
-      ]);
+      expect((await t.get("/clients?id=eq.1&select=name,email")).json()).toEqual([{ name: "Ada", email: "new@example.com" }]);
     });
     test("null clears a column", async () => {
       await t.patch("/clients?id=eq.1", { email: null }, { ctx });
@@ -231,15 +177,8 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(r.headers.get("content-range")).toBe("0-1/2");
     });
     test("logic filters and embedded select on the result", async () => {
-      const r = await t.patch(
-        "/orders?or=(id.eq.1,id.eq.2)&select=id,clients(name)&order=id",
-        { status: "x" },
-        { ctx, headers: REP },
-      );
-      expect(r.json()).toEqual([
-        { id: 1, clients: { name: "Ada" } },
-        { id: 2, clients: { name: "Ada" } },
-      ]);
+      const r = await t.patch("/orders?or=(id.eq.1,id.eq.2)&select=id,clients(name)&order=id", { status: "x" }, { ctx, headers: REP });
+      expect(r.json()).toEqual([{ id: 1, clients: { name: "Ada" } }, { id: 2, clients: { name: "Ada" } }]);
     });
     test("no matching rows", async () => {
       expect((await t.patch("/orders?id=eq.99", { status: "x" }, { ctx })).status).toBe(204);
@@ -316,28 +255,18 @@ describe.skipIf(!hasDb)("writes", () => {
       }
     });
     test("limit / offset are PGRST114", async () => {
-      expect((await t.put("/products?id=eq.10&limit=1", { name: "x", price: 1 }, { ctx })).json().code).toBe(
-        "PGRST114",
-      );
+      expect((await t.put("/products?id=eq.10&limit=1", { name: "x", price: 1 }, { ctx })).json().code).toBe("PGRST114");
     });
   });
 
   describe("preferences", () => {
     test("max-affected is enforced with handling=strict and rolls back", async () => {
-      const r = await t.patch(
-        "/orders?status=in.(paid,new)",
-        { status: "x" },
-        { ctx, headers: { Prefer: "handling=strict, max-affected=1" } },
-      );
+      const r = await t.patch("/orders?status=in.(paid,new)", { status: "x" }, { ctx, headers: { Prefer: "handling=strict, max-affected=1" } });
       expect(r.status).toBe(400);
       expect(r.json().code).toBe("PGRST124");
       expect(r.json().details).toBe("The query affects 3 rows");
       expect((await t.get("/orders?status=eq.x")).json()).toEqual([]);
-      const ok = await t.patch(
-        "/orders?id=eq.1",
-        { status: "x" },
-        { ctx, headers: { Prefer: "handling=strict, max-affected=1" } },
-      );
+      const ok = await t.patch("/orders?id=eq.1", { status: "x" }, { ctx, headers: { Prefer: "handling=strict, max-affected=1" } });
       expect(ok.status).toBe(204);
       expect(ok.headers.get("preference-applied")).toBe("handling=strict, max-affected=1");
     });
@@ -358,20 +287,12 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(off.status).toBe(201);
       expect(off.headers.get("preference-applied")).toBeNull();
       expect(await count("clients")).toBe(4);
-      const strict = await t.post(
-        "/clients",
-        { name: "x" },
-        { ctx, headers: { Prefer: "handling=strict, tx=rollback" } },
-      );
+      const strict = await t.post("/clients", { name: "x" }, { ctx, headers: { Prefer: "handling=strict, tx=rollback" } });
       expect(strict.json().code).toBe("PGRST122");
 
       const on = await makeApi({ allowTxOverride: true });
       try {
-        const r = await on.post(
-          "/clients",
-          { name: "Gone" },
-          { ctx, headers: { Prefer: "return=representation, tx=rollback" } },
-        );
+        const r = await on.post("/clients", { name: "Gone" }, { ctx, headers: { Prefer: "return=representation, tx=rollback" } });
         expect(r.status).toBe(201);
         expect(r.json()[0].name).toBe("Gone");
         expect(r.headers.get("preference-applied")).toBe("tx=rollback, return=representation");
@@ -384,18 +305,11 @@ describe.skipIf(!hasDb)("writes", () => {
       }
     });
     test("a singular response that is not exactly one row rolls the write back", async () => {
-      const r = await t.post("/clients", [{ name: "P" }, { name: "Q" }], {
-        ctx,
-        headers: { ...REP, Accept: "application/vnd.pgrst.object+json" },
-      });
+      const r = await t.post("/clients", [{ name: "P" }, { name: "Q" }], { ctx, headers: { ...REP, Accept: "application/vnd.pgrst.object+json" } });
       expect(r.status).toBe(406);
       expect(r.json().code).toBe("PGRST116");
       expect(await count("clients")).toBe(3);
-      const one = await t.post(
-        "/clients",
-        { name: "Solo" },
-        { ctx, headers: { ...REP, Accept: "application/vnd.pgrst.object+json" } },
-      );
+      const one = await t.post("/clients", { name: "Solo" }, { ctx, headers: { ...REP, Accept: "application/vnd.pgrst.object+json" } });
       expect(one.status).toBe(201);
       expect(one.json().name).toBe("Solo");
     });
@@ -414,9 +328,7 @@ describe.skipIf(!hasDb)("writes", () => {
       const bob = authed("bob");
       await t.post("/notes", { body: "alice's note" }, { ctx: alice });
       await t.post("/notes", { body: "bob's note" }, { ctx: bob });
-      expect((await t.get("/notes?select=owner,body", { ctx: alice })).json()).toEqual([
-        { owner: "alice", body: "alice's note" },
-      ]);
+      expect((await t.get("/notes?select=owner,body", { ctx: alice })).json()).toEqual([{ owner: "alice", body: "alice's note" }]);
       expect((await t.get("/notes?select=owner", { ctx: bob })).json()).toEqual([{ owner: "bob" }]);
 
       // bob cannot update or delete alice's note: it is invisible to him
@@ -424,9 +336,7 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(upd.json()).toEqual([]);
       const del = await t.del("/notes?owner=eq.alice", { ctx: bob, headers: REP });
       expect(del.json()).toEqual([]);
-      expect((await t.get("/notes?select=body&owner=eq.alice", { ctx: alice })).json()).toEqual([
-        { body: "alice's note" },
-      ]);
+      expect((await t.get("/notes?select=body&owner=eq.alice", { ctx: alice })).json()).toEqual([{ body: "alice's note" }]);
     });
     test("WITH CHECK stops a user writing rows for someone else", async () => {
       const r = await t.post("/notes", { owner: "alice", body: "forged" }, { ctx: authed("bob") });

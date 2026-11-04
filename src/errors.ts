@@ -42,11 +42,7 @@ export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody;
   readonly headers: Readonly<Record<string, string>>;
-  constructor(fields: {
-    readonly status: number;
-    readonly body: ErrorBody;
-    readonly headers: Readonly<Record<string, string>>;
-  }) {
+  constructor(fields: { readonly status: number; readonly body: ErrorBody; readonly headers: Readonly<Record<string, string>> }) {
     super(fields.body.message);
     this.name = "ApiError";
     this.status = fields.status;
@@ -105,7 +101,7 @@ export const normalizeDbError = (e: unknown): unknown => {
  * SQLSTATE → HTTP status, following the PostgREST 16 table
  * (https://docs.postgrest.org/en/v14/references/errors.html).
  */
-const statusFromSqlState = (state: string, role: string, anon: string): number => {
+const statusFromSqlState = (state: string, role: string | undefined, anon: string | undefined): number => {
   if (/^PT\d{3}$/.test(state)) return Number(state.slice(2));
   switch (state) {
     case "23503":
@@ -161,7 +157,11 @@ const statusFromSqlState = (state: string, role: string, anon: string): number =
  * - `RAISE ... USING ERRCODE = 'PTxyz'` → HTTP status xyz
  * - `RAISE SQLSTATE 'PGRST'` with a JSON message/detail
  */
-export const dbErrorToApiError = (err: DbErrorInfo, role: string, anonymousRole: string): ApiError => {
+export const dbErrorToApiError = (
+  err: DbErrorInfo,
+  role: string | undefined,
+  anonymousRole: string | undefined,
+): ApiError => {
   if (err.sqlState === "PGRST") {
     try {
       const msg = JSON.parse(err.message) as Partial<ErrorBody>;
