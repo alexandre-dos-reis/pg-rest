@@ -131,12 +131,34 @@ all filter operators and `and/or/not`, JSON paths, casts, aggregates, ordering, 
 response GUC headers/status), CSV / singular / `nulls=stripped` representations, OpenAPI, PostgREST error codes
 and `PTxyz` / `RAISE ... SQLSTATE 'PGRST'` conventions.
 
-## Not supported (yet)
+## Not supported
 
-- Ordering by a related table column, spreading to-many, aggregates inside embeds → `PGRST127`
+Two different things are listed here. Don't confuse them.
+
+### By design: will not be implemented
+
+pg-rest is a library, not a server. Anything whose job is to run the process, authenticate the caller, or configure PostgREST from outside the
+code is handled by *your* application instead. These are not gaps: adding them would work against the goals of the project.
+
+| PostgREST feature | Why pg-rest doesn't do it | What to do instead |
+| --- | --- | --- |
+| JWT validation, JWKS, `jwt-secret`, audience, role claim path | The point of the project is that **you** decide who the caller is, by any means: a session cookie, an API key, Better Auth, mTLS. Baking JWT in would force one scheme and add crypto and key-rotation code (and dependencies) to the library. | `resolveContext(req)` or `handle(req, ctx)` returns `{ role, claims, settings }`. pg-rest applies it with `set_config`, so RLS and `current_setting('request.jwt.claims')` work as usual. See `examples/with-better-auth`. |
+| Standalone server, CLI, host/port, unix sockets, TLS, `log-level`, `server-timing` | `handle(Request) => Response` is web-standard and runs under `Bun.serve`, Hono (`@hono/node-server`), or any framework that gives you a `Request`... Owning the server would tie the library to one runtime and duplicate what your framework already does. | Mount `handle` in your own server. |
+| Admin server (`/live`, `/ready`, `/metrics`) | Health checks and metrics belong to the host process. | Expose them in your app. |
+| CORS headers | Policy depends on your deployment. | Set them in your server or middleware. |
+| Config file, environment variables, `PGRST_*` settings | Configuration is the `createPgRest(options)` call, which is typed and lives with the code. | Pass options; read env vars yourself. |
+| Connection pool and `db-uri` | The pool belongs to your driver, and the driver is your choice (`DbAdapter`). pg-rest never opens connections. | Create the pool, wrap it in an adapter. |
+| In-database configuration (`db-pre-config`, per-role `ALTER ROLE ... SET pgrst.*`) | Settings are options in code, not rows in the database, so they are versioned and visible with the application. | Use the options; `preRequest` can still call a SQL function if you want database-side logic. |
+| Schema cache refresh over SQL: `NOTIFY pgrst, 'reload schema'` / `db-channel`, `SIGUSR1`/`SIGUSR2`, DDL event triggers | They require a dedicated `LISTEN` connection and signal handling, which a library must not hold open or assume (serverless, PGlite and pooled connections can't `LISTEN`). The introspection itself (`pg_catalog`) is implemented. | Call `reloadSchema()` after migrations, or wire it to your own `LISTEN`. A failed reload keeps the old cache. |
+
+### Not yet: a gap you could fill
+
+These exist in PostgREST and are not implemented *yet*. Contributions welcome; the status of each is in [`PARITY.md`](PARITY.md).
+
+- Ordering by a related table column, spreading to-many, aggregates inside embeds (`PGRST127`)
 - Embedding through the foreign keys of views, computed relationships, `VARIADIC` functions
-- JWT, JWKS, config files, LISTEN-based reload, the standalone server (by design)
-- `params=single-object`
+- Bulk RPC calls, custom media type handlers (`geo+json`, `octet-stream`, `text/plain`), `application/vnd.pgrst.plan`
+- `WWW-Authenticate` on 401 (set it yourself via `PgRestError` headers)
 
 ## Security notes
 
