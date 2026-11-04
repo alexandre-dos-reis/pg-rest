@@ -19,7 +19,7 @@ fi
 check() { # description, expected, actual
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected [$2] got [$3]"; fail=1; fi
 }
-check "anon read with embed" '[{"id":1,"title":"Try pg-rest","tags":[{"label":"demo"},{"label":"bun"}]}]' "$(curl -s "$u/todos?select=id,title,tags(label)&id=eq.1" | tr -d '\n' | sed 's/, */,/g; s/\[ */[/; s/ *\]/]/g')"
+check "anon read with embed" '[{"id":1,"title":"Try pg-rest","tags":[{"label":"demo"},{"label":"bun"}]}]' "$(curl -s "$u/todos?select=id,title,tags(label)&id=eq.1" | tr -d '\n' | sed 's/, */,/g; s/": /":/g; s/\[ */[/; s/ *\]/]/g')"
 check "anon write is refused (401)" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$u/todos" -H 'Content-Type: application/json' -d '{"title":"nope"}')"
 created="$(curl -s -w '\n%{http_code}' "$u/todos" "${ALICE[@]}" -H 'Content-Type: application/json' -H 'Prefer: return=representation' -d '{"title":"Ship it"}')"
 check "alice creates a todo (201)" 201 "$(echo "$created" | tail -1)"
