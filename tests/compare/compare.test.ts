@@ -23,20 +23,37 @@ interface Seen {
 
 const identities = {
   anon: { token: undefined, ctx: undefined },
-  alice: { token: signJwt({ role: "authenticated", sub: "alice" }), ctx: { role: "authenticated", claims: { sub: "alice" } } },
-  bob: { token: signJwt({ role: "authenticated", sub: "bob" }), ctx: { role: "authenticated", claims: { sub: "bob" } } },
+  alice: {
+    token: signJwt({ role: "authenticated", sub: "alice" }),
+    ctx: { role: "authenticated", claims: { sub: "alice" } },
+  },
+  bob: {
+    token: signJwt({ role: "authenticated", sub: "bob" }),
+    ctx: { role: "authenticated", claims: { sub: "bob" } },
+  },
 } as const;
 
 /** Drop values that legitimately differ between two runs (now()-based timestamps). */
 const scrub = (v: unknown): unknown => {
   if (Array.isArray(v)) return v.map(scrub);
   if (v && typeof v === "object") {
-    return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => k !== "created_at").map(([k, x]) => [k, scrub(x)]));
+    return Object.fromEntries(
+      Object.entries(v as Record<string, unknown>)
+        .filter(([k]) => k !== "created_at")
+        .map(([k, x]) => [k, scrub(x)]),
+    );
   }
   if (typeof v === "string") return v.replace(/\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d+)?[+-]\d\d/g, "<timestamp>");
   return v;
 };
-const tokens = (v: string | null) => (v === null ? null : v.split(",").map((t) => t.trim()).sort().join(", "));
+const tokens = (v: string | null) =>
+  v === null
+    ? null
+    : v
+        .split(",")
+        .map((t) => t.trim())
+        .sort()
+        .join(", ");
 
 const normalize = async (res: Response, c: Case): Promise<Seen> => {
   const text = await res.text();
@@ -52,7 +69,12 @@ const normalize = async (res: Response, c: Case): Promise<Seen> => {
   }
   return {
     status: res.status,
-    contentType: ct ? ct.replace(/;\s*charset=utf-8/i, "").replace(/\s+/g, "").toLowerCase() : null,
+    contentType: ct
+      ? ct
+          .replace(/;\s*charset=utf-8/i, "")
+          .replace(/\s+/g, "")
+          .toLowerCase()
+      : null,
     contentRange: res.headers.get("content-range"),
     location: res.headers.get("location"),
     preferenceApplied: tokens(res.headers.get("preference-applied")),
@@ -102,7 +124,9 @@ describe.skipIf(!enabled)("pg-rest vs PostgREST 16", () => {
   const restore = async (snap: Awaited<ReturnType<typeof snapshot>>) => {
     for (const r of snap) {
       const name = String(r["name"]).replace(/'/g, "''");
-      await ours.db.adapter.query(r["v"] === null ? `SELECT setval('${name}', 1, false)` : `SELECT setval('${name}', ${Number(r["v"])}, true)`);
+      await ours.db.adapter.query(
+        r["v"] === null ? `SELECT setval('${name}', 1, false)` : `SELECT setval('${name}', ${Number(r["v"])}, true)`,
+      );
     }
   };
 

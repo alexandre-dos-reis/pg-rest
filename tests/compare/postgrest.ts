@@ -20,7 +20,12 @@ export interface RunningPostgrest {
   stop(): Promise<void>;
 }
 
-export const startPostgrest = async (dbUrl: string, port: number, schemas: string[], pool = 2): Promise<RunningPostgrest> => {
+export const startPostgrest = async (
+  dbUrl: string,
+  port: number,
+  schemas: string[],
+  pool = 2,
+): Promise<RunningPostgrest> => {
   if (!POSTGREST_BIN) throw new Error("POSTGREST_BIN is not set");
   const proc = Bun.spawn([POSTGREST_BIN], {
     env: {

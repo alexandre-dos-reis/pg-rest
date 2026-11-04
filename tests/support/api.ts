@@ -45,7 +45,10 @@ export const makeApi = async (options: Partial<PgRestOptions> = {}): Promise<Tes
         headers["Content-Type"] ??= "application/json";
       }
     }
-    const res = await api.handle(new Request(`http://localhost${path}`, { method, headers, ...(body !== undefined ? { body } : {}) }), opts.ctx);
+    const res = await api.handle(
+      new Request(`http://localhost${path}`, { method, headers, ...(body !== undefined ? { body } : {}) }),
+      opts.ctx,
+    );
     const text = await res.text();
     return { status: res.status, headers: res.headers, text, json: () => JSON.parse(text) };
   };

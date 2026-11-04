@@ -29,7 +29,6 @@ const SINGLE_BODY_TYPES = new Set(["json", "jsonb", "text", "bytea"]);
 const isSingleUnnamedParam = (fn: FunctionDef): boolean =>
   fn.args.length === 1 && fn.args[0]!.name === "" && SINGLE_BODY_TYPES.has(fn.args[0]!.type);
 
-
 /** PostgREST's spelling used in PGRST203: `schema.fn(a => integer, b => text)`. */
 const arrowSignature = (fn: FunctionDef): string =>
   `${fn.schema}.${fn.name}(${fn.args.map((a) => `${a.name} => ${a.type}`).join(", ")})`;
@@ -47,7 +46,8 @@ export const resolveFunction = (
 ): FunctionDef => {
   const candidates = cache.functions.get(relKey(schema, name)) ?? [];
   const names = [...provided].sort();
-  const params = names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
+  const params =
+    names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
   const notFound = () =>
     new PgRestError(
       404,
@@ -56,19 +56,24 @@ export const resolveFunction = (
         ? `Could not find the function ${schema}.${name} without parameters in the schema cache`
         : `Could not find the function ${schema}.${name}(${names.join(", ")}) in the schema cache`,
       `Searched for the function ${schema}.${name} ${params}${" or with a single unnamed json/jsonb parameter"}, but no matches were found in the schema cache.`,
-      candidates.length ? `Perhaps you meant to call the function ${schema}.${name}(${candidates[0]!.args.map((a) => a.name).join(", ")})` : null,
+      candidates.length
+        ? `Perhaps you meant to call the function ${schema}.${name}(${candidates[0]!.args.map((a) => a.name).join(", ")})`
+        : null,
     );
 
   if (candidates.length === 0) throw notFound();
 
   const named = candidates.filter((fn) => {
-    const names = new Set(fn.args.map((a) => a.name));
-    for (const p of provided) if (!names.has(p)) return false;
+    const argNames = new Set(fn.args.map((a) => a.name));
+    for (const p of provided) if (!argNames.has(p)) return false;
     return fn.args.every((a) => a.hasDefault || provided.has(a.name));
   });
   const single = hasBody ? candidates.filter(isSingleUnnamedParam) : [];
 
-  const matches = provided.size === 0 && hasBody && single.length > 0 ? single : [...named, ...single.filter((s) => !named.includes(s))];
+  const matches =
+    provided.size === 0 && hasBody && single.length > 0
+      ? single
+      : [...named, ...single.filter((s) => !named.includes(s))];
   if (matches.length === 0) throw notFound();
   if (matches.length === 1) return matches[0]!;
 

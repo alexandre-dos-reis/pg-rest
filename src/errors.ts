@@ -42,7 +42,11 @@ export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody;
   readonly headers: Readonly<Record<string, string>>;
-  constructor(fields: { readonly status: number; readonly body: ErrorBody; readonly headers: Readonly<Record<string, string>> }) {
+  constructor(fields: {
+    readonly status: number;
+    readonly body: ErrorBody;
+    readonly headers: Readonly<Record<string, string>>;
+  }) {
     super(fields.body.message);
     this.name = "ApiError";
     this.status = fields.status;
@@ -157,11 +161,7 @@ const statusFromSqlState = (state: string, role: string, anon: string): number =
  * - `RAISE ... USING ERRCODE = 'PTxyz'` → HTTP status xyz
  * - `RAISE SQLSTATE 'PGRST'` with a JSON message/detail
  */
-export const dbErrorToApiError = (
-  err: DbErrorInfo,
-  role: string,
-  anonymousRole: string,
-): ApiError => {
+export const dbErrorToApiError = (err: DbErrorInfo, role: string, anonymousRole: string): ApiError => {
   if (err.sqlState === "PGRST") {
     try {
       const msg = JSON.parse(err.message) as Partial<ErrorBody>;

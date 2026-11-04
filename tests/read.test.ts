@@ -162,7 +162,13 @@ describe.skipIf(!hasDb)("reads", () => {
   describe("embedding", () => {
     test("to-many and to-one", async () => {
       const r = (await t.get("/clients?select=name,orders(id,total)&order=id")).json();
-      expect(r[0]).toEqual({ name: "Ada", orders: [{ id: 1, total: 250 }, { id: 2, total: 40.5 }] });
+      expect(r[0]).toEqual({
+        name: "Ada",
+        orders: [
+          { id: 1, total: 250 },
+          { id: 2, total: 40.5 },
+        ],
+      });
       expect(r[1]).toEqual({ name: "Linus", orders: [{ id: 3, total: 99.99 }] });
       const o = (await t.get("/orders?select=id,clients(name)&order=id")).json();
       expect(o.map((x: any) => x.clients.name)).toEqual(["Ada", "Ada", "Linus", "Grace"]);
@@ -218,9 +224,13 @@ describe.skipIf(!hasDb)("reads", () => {
       expect(left).toHaveLength(3);
     });
     test("!inner with count", async () => {
-      const r = await t.get("/clients?select=name,orders!inner(id)&orders.status=eq.shipped", { headers: { Prefer: "count=exact" } });
+      const r = await t.get("/clients?select=name,orders!inner(id)&orders.status=eq.shipped", {
+        headers: { Prefer: "count=exact" },
+      });
       expect(r.headers.get("content-range")).toBe("0-0/1");
-      const lim = await t.get("/clients?select=name,orders!inner(id)&orders.status=eq.paid&limit=1&order=id", { headers: { Prefer: "count=exact" } });
+      const lim = await t.get("/clients?select=name,orders!inner(id)&orders.status=eq.paid&limit=1&order=id", {
+        headers: { Prefer: "count=exact" },
+      });
       expect(lim.headers.get("content-range")).toBe("0-0/2");
     });
     test("embedding with no selected columns filters only", async () => {
@@ -234,7 +244,10 @@ describe.skipIf(!hasDb)("reads", () => {
     });
     test("spread of a to-one embed", async () => {
       const r = (await t.get("/orders?select=id,...clients(client:name)&order=id&limit=2")).json();
-      expect(r).toEqual([{ id: 1, client: "Ada" }, { id: 2, client: "Ada" }]);
+      expect(r).toEqual([
+        { id: 1, client: "Ada" },
+        { id: 2, client: "Ada" },
+      ]);
       const s = (await t.get("/clients?select=name,...profiles(bio)&id=eq.1")).json();
       expect(s).toEqual([{ name: "Ada", bio: "First programmer" }]);
     });
@@ -267,13 +280,18 @@ describe.skipIf(!hasDb)("reads", () => {
 
   describe("representations", () => {
     test("singular object", async () => {
-      const r = await t.get("/clients?id=eq.1&select=name", { headers: { Accept: "application/vnd.pgrst.object+json" } });
+      const r = await t.get("/clients?id=eq.1&select=name", {
+        headers: { Accept: "application/vnd.pgrst.object+json" },
+      });
       expect(r.status).toBe(200);
       expect(r.headers.get("content-type")).toContain("application/vnd.pgrst.object+json");
       expect(r.json()).toEqual({ name: "Ada" });
     });
     test("singular fails with 406 PGRST116 for 0 or many rows", async () => {
-      for (const [q, n] of [["id=gt.0", 3], ["id=eq.99", 0]] as const) {
+      for (const [q, n] of [
+        ["id=gt.0", 3],
+        ["id=eq.99", 0],
+      ] as const) {
         const r = await t.get(`/clients?${q}`, { headers: { Accept: "application/vnd.pgrst.object+json" } });
         expect(r.status).toBe(406);
         expect(r.json().code).toBe("PGRST116");
@@ -281,7 +299,9 @@ describe.skipIf(!hasDb)("reads", () => {
       }
     });
     test("nulls=stripped", async () => {
-      const r = await t.get("/clients?id=eq.3&select=name,email,meta", { headers: { Accept: "application/vnd.pgrst.object+json;nulls=stripped" } });
+      const r = await t.get("/clients?id=eq.3&select=name,email,meta", {
+        headers: { Accept: "application/vnd.pgrst.object+json;nulls=stripped" },
+      });
       expect(r.json()).toEqual({ name: "Grace", email: "grace@example.com" });
     });
     test("csv", async () => {
@@ -311,7 +331,10 @@ describe.skipIf(!hasDb)("reads", () => {
     test("default schema and Accept-Profile", async () => {
       expect((await t.get("/things")).status).toBe(404);
       const r = await t.get("/things", { headers: { "Accept-Profile": "v2" } });
-      expect(r.json()).toEqual([{ id: 1, label: "one" }, { id: 2, label: "two" }]);
+      expect(r.json()).toEqual([
+        { id: 1, label: "one" },
+        { id: 2, label: "two" },
+      ]);
     });
     test("a schema that is not exposed is 406 PGRST106", async () => {
       const r = await t.get("/clients", { headers: { "Accept-Profile": "pg_catalog" } });
@@ -339,7 +362,9 @@ describe.skipIf(!hasDb)("reads", () => {
       expect(r.status).toBe(200);
       const doc = r.json();
       expect(doc.swagger).toBe("2.0");
-      expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(["/clients", "/orders", "/rpc/add", "/rpc/whoami"]));
+      expect(Object.keys(doc.paths)).toEqual(
+        expect.arrayContaining(["/clients", "/orders", "/rpc/add", "/rpc/whoami"]),
+      );
       expect(doc.definitions.clients.properties.id.description).toContain("Primary Key");
       expect(doc.definitions.clients.properties.name.type).toBe("string");
       expect(doc.definitions.clients.required).toContain("name");

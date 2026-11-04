@@ -1,12 +1,5 @@
 import { safeType } from "../quote";
-import {
-  type FieldRef,
-  parseError,
-  parseField,
-  scanTopLevel,
-  splitTopLevel,
-  unquote,
-} from "./field";
+import { type FieldRef, parseError, parseField, scanTopLevel, splitTopLevel, unquote } from "./field";
 
 export type AggregateFn = "count" | "sum" | "avg" | "max" | "min";
 const AGGREGATES: ReadonlySet<string> = new Set(["count", "sum", "avg", "max", "min"]);

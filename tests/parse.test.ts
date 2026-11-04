@@ -49,7 +49,17 @@ describe("select parsing", () => {
     expect(code(() => parseSelect('a::"text"'))).toBe("PGRST100");
   });
   test("accepts legitimate cast targets", () => {
-    for (const t of ["text", "int4", "numeric(10,2)", "text[]", "double precision", "timestamp with time zone", "timestamp(3) without time zone", "public.my_type", "character varying(20)"]) {
+    for (const t of [
+      "text",
+      "int4",
+      "numeric(10,2)",
+      "text[]",
+      "double precision",
+      "timestamp with time zone",
+      "timestamp(3) without time zone",
+      "public.my_type",
+      "character varying(20)",
+    ]) {
       expect((parseSelect(`a::${t}`)[0] as any).cast).toBe(t);
     }
   });
@@ -110,7 +120,7 @@ describe("filters", () => {
     expect(code(() => f("eq"))).toBe("PGRST100");
   });
   test("logic trees", () => {
-    const t = parseLogic("or", false, "(a.eq.1,and(b.gt.2,c.lt.3),not.or(d.is.null,e.eq.\"x,y\"))");
+    const t = parseLogic("or", false, '(a.eq.1,and(b.gt.2,c.lt.3),not.or(d.is.null,e.eq."x,y"))');
     expect(t.children).toHaveLength(3);
     expect((t.children[1] as any).op).toBe("and");
     const not = t.children[2] as any;
@@ -128,13 +138,19 @@ describe("order", () => {
       { field: { name: "c" }, dir: "asc", nulls: "first" },
       { field: { name: "meta" }, dir: "desc", nulls: "last" },
     ]);
-    expect(parseOrder("clients(name).desc")[0]).toMatchObject({ relation: "clients", field: { name: "name" }, dir: "desc" });
+    expect(parseOrder("clients(name).desc")[0]).toMatchObject({
+      relation: "clients",
+      field: { name: "name" },
+      dir: "desc",
+    });
   });
 });
 
 describe("query strings", () => {
   test("root filters, order and paging", () => {
-    const p = q("select=id,name&id=gt.1&id=lt.10&order=name.desc&limit=5&offset=2&or=(a.eq.1,b.eq.2)&not.and=(c.eq.1,d.eq.2)");
+    const p = q(
+      "select=id,name&id=gt.1&id=lt.10&order=name.desc&limit=5&offset=2&or=(a.eq.1,b.eq.2)&not.and=(c.eq.1,d.eq.2)",
+    );
     expect(p.root.filters).toHaveLength(4);
     expect(p.root.order).toHaveLength(1);
     expect(p.root.limit).toBe(5);
@@ -142,7 +158,9 @@ describe("query strings", () => {
     expect((p.root.filters[3] as any).negate).toBe(true);
   });
   test("embedded resource params, by alias and legacy table name", () => {
-    const p = q("select=id,o:orders(id,items(*))&o.status=eq.paid&o.order=id.desc&o.limit=2&o.items.qty=gt.1&orders.total=gt.5");
+    const p = q(
+      "select=id,o:orders(id,items(*))&o.status=eq.paid&o.order=id.desc&o.limit=2&o.items.qty=gt.1&orders.total=gt.5",
+    );
     expect(p.embeds.get("o")!.filters).toHaveLength(2);
     expect(p.embeds.get("o")!.limit).toBe(2);
     expect(p.embeds.get("o.items")!.filters).toHaveLength(1);
@@ -170,7 +188,11 @@ describe("query strings", () => {
 
 describe("headers and routing", () => {
   test("Prefer", () => {
-    expect(parsePrefer("return=representation, count=exact")).toMatchObject({ return: "representation", count: "exact", invalid: [] });
+    expect(parsePrefer("return=representation, count=exact")).toMatchObject({
+      return: "representation",
+      count: "exact",
+      invalid: [],
+    });
     expect(parsePrefer("resolution=merge-duplicates,max-affected=3,tx=rollback,timezone=Europe/Paris")).toMatchObject({
       resolution: "merge-duplicates",
       maxAffected: 3,
@@ -188,7 +210,10 @@ describe("headers and routing", () => {
   test("Accept", () => {
     expect(parseAccept(null, false)).toEqual({ kind: "json", stripNulls: false });
     expect(parseAccept("text/csv", false)).toEqual({ kind: "csv" });
-    expect(parseAccept("application/vnd.pgrst.object+json;nulls=stripped", false)).toEqual({ kind: "object", stripNulls: true });
+    expect(parseAccept("application/vnd.pgrst.object+json;nulls=stripped", false)).toEqual({
+      kind: "object",
+      stripNulls: true,
+    });
     expect(parseAccept("text/html;q=0.5, application/json", false)).toEqual({ kind: "json", stripNulls: false });
     expect(parseAccept("*/*", true)).toEqual({ kind: "openapi" });
     expect(code(() => parseAccept("image/png", false))).toBe("PGRST107");
@@ -204,7 +229,10 @@ describe("headers and routing", () => {
     expect(parseTarget("/odd%20name")).toEqual({ type: "table", name: "odd name" });
   });
   test("csv", () => {
-    expect(parseCsv('a,b\n1,"x,y"\n2,\n')).toEqual([{ a: "1", b: "x,y" }, { a: "2", b: null }]);
+    expect(parseCsv('a,b\n1,"x,y"\n2,\n')).toEqual([
+      { a: "1", b: "x,y" },
+      { a: "2", b: null },
+    ]);
     expect(parseCsv('a\n"he said ""hi"""')).toEqual([{ a: 'he said "hi"' }]);
   });
 });

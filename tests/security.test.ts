@@ -69,7 +69,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
     for (const p of PAYLOADS) {
       const ins = await t.post("/notes", { [p]: 1 });
       expect(ins.status).toBe(400);
-      const up = await t.post(`/clients?on_conflict=${encodeURIComponent(p)}`, { name: p }, { headers: { Prefer: "resolution=merge-duplicates" } });
+      const up = await t.post(
+        `/clients?on_conflict=${encodeURIComponent(p)}`,
+        { name: p },
+        { headers: { Prefer: "resolution=merge-duplicates" } },
+      );
       expect(up.status).toBe(400);
       const cols = await t.post(`/clients?columns=${encodeURIComponent(p)}`, { name: p });
       expect(cols.status).toBe(400);
@@ -79,7 +83,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
 
   test("a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x`;
-    const created = await t.post("/clients", { name }, { headers: { Prefer: "return=representation" }, ctx: { role: "authenticated" } });
+    const created = await t.post(
+      "/clients",
+      { name },
+      { headers: { Prefer: "return=representation" }, ctx: { role: "authenticated" } },
+    );
     expect(created.status).toBe(201);
     expect(created.json()[0].name).toBe(name);
     const found = await t.get(`/clients?select=name&name=eq.${encodeURIComponent(name)}`);

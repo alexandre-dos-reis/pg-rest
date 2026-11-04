@@ -35,6 +35,8 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run fmt:check
       - run: bun run typecheck
       - run: bun run build
       - name: Unit and integration tests

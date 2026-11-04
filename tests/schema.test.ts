@@ -78,7 +78,9 @@ describe.skipIf(!hasDb)("schema introspection", () => {
     expect(rels).toHaveLength(1);
     const hinted = resolveRelationship(cache, getRelation(cache, "api", "orders"), "clients", "orders_client_id_fkey");
     expect(hinted.kind).toBe("m2o");
-    expect(() => resolveRelationship(cache, getRelation(cache, "api", "orders"), "clients", "nope")).toThrow(/Could not find a relationship/);
+    expect(() => resolveRelationship(cache, getRelation(cache, "api", "orders"), "clients", "nope")).toThrow(
+      /Could not find a relationship/,
+    );
   });
 
   test("unrelated tables give PGRST200", () => {
@@ -89,7 +91,10 @@ describe.skipIf(!hasDb)("schema introspection", () => {
   test("loads functions with args, defaults and return shapes", () => {
     const fns = cache.functions;
     const add = fns.get("api.add")![0]!;
-    expect(add.args.map((a) => [a.name, a.type])).toEqual([["a", "integer"], ["b", "integer"]]);
+    expect(add.args.map((a) => [a.name, a.type])).toEqual([
+      ["a", "integer"],
+      ["b", "integer"],
+    ]);
     expect(add.returnsSet).toBe(false);
     expect(add.returnsComposite).toBe(false);
     const greet = fns.get("api.greet")![0]!;

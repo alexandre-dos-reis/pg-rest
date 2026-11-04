@@ -1,6 +1,6 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
-import { ApiError, PgRestError, normalizeDbError } from "./errors";
+import { ApiError, normalizeDbError } from "./errors";
 import type { SchemaCache } from "./schema";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 

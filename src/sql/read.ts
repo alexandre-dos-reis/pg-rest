@@ -54,8 +54,7 @@ interface Ctx {
   readonly aliases: Aliases;
 }
 
-const notImplemented = (what: string) =>
-  new PgRestError(400, "PGRST127", `${what} is not implemented`, null, null);
+const notImplemented = (what: string) => new PgRestError(400, "PGRST127", `${what} is not implemented`, null, null);
 
 const fieldExpr = (item: FieldItem, alias: string): string => {
   const base = fieldSql(alias, item.field);

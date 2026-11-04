@@ -44,8 +44,7 @@ const FTS_FUNCTIONS: Partial<Record<Operator, string>> = {
 const columnType = (rel: Relation | undefined, field: FieldRef): string | undefined =>
   field.json.length === 0 ? rel?.columns.find((c) => c.name === field.name)?.type : undefined;
 
-const patternValue = (op: Operator, v: string): string =>
-  op === "like" || op === "ilike" ? v.replace(/\*/g, "%") : v;
+const patternValue = (op: Operator, v: string): string => (op === "like" || op === "ilike" ? v.replace(/\*/g, "%") : v);
 
 /** SQL boolean expression for one filter. */
 export const filterSql = (f: Filter, alias: string, rel?: Relation): string => {
@@ -128,8 +127,5 @@ export const orderSql = (terms: ReadonlyArray<OrderTerm>, alias: string): string
   return `ORDER BY ${parts.join(", ")}`;
 };
 
-export const whereSql = (
-  nodes: ReadonlyArray<FilterNode>,
-  alias: string,
-  rel?: Relation,
-): string[] => nodes.map((n) => nodeSql(n, alias, rel));
+export const whereSql = (nodes: ReadonlyArray<FilterNode>, alias: string, rel?: Relation): string[] =>
+  nodes.map((n) => nodeSql(n, alias, rel));
