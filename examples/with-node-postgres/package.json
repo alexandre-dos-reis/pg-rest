@@ -9,5 +9,9 @@
     "@hono/node-server": "^1.13.0",
     "pg": "^8.0.0",
     "pg-rest": "^0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1"
   }
 }
