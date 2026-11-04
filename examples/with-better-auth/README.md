@@ -9,8 +9,13 @@ npm install
 node server.ts            # Node >= 22.18 runs TypeScript natively
 ```
 
-The `pg-rest` dependency points at the repository root (`file:../..`), so build it once first: `bun run build` in the repository root.
-In your own project install it from npm instead.
+`pg-rest` is an ordinary versioned dependency, so once this folder is copied out of the repository the
+install above is all you need. Inside the repository that version is not on the registry yet and will not
+resolve, so link the local build instead -- from the repository root:
+
+```sh
+bun run link:examples with-better-auth   # builds pg-rest, then symlinks it into node_modules
+```
 
 ## How it fits together
 
@@ -26,14 +31,14 @@ resolveContext: async (req) => {
 - No session → `undefined` → pg-rest runs the request as the `anon` role (read-only in `2-api.sql`).
 - Session → role `authenticated`, and `claims.sub` is the Better Auth user id, which the RLS policies read through `auth.uid()` (a small SQL function in `2-api.sql` over
   `current_setting('request.jwt.claims')`).
-- Requests under `/api/auth/*` go to Better Auth; everything else goes to pg-rest. Both share one `pg.Pool`.
+- A Hono app routes `/api/auth/*` to Better Auth and `/api/rest/*` to pg-rest (anything else is a 404). Both share one `pg.Pool`.
 - Two SQL files, run in order: `1-better-auth.sql` creates Better Auth's tables (`"user"`, `session`, `account`, `verification`, the same DDL its
   own migrations generate), then `2-api.sql` creates the `api` schema. That order lets `api.todos.owner_id` be a real foreign key to
   `public."user"(id)` (deleting a user deletes their todos). The two seeded todos have no owner: readable by all, writable by nobody.
 - Better Auth's tables live in the `public` schema; pg-rest only exposes `api`, so users and sessions are not reachable through the REST API.
 
 pg-rest has no CSRF protection of its own. If browsers call it with cookies, apply your usual CSRF defences (SameSite cookies, an `Origin` check)
-in the `fetch` handler or in `resolveContext`.
+in middleware on the Hono app or in `resolveContext`.
 
 ## Try it
 

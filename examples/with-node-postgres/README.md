@@ -9,7 +9,13 @@ npm install
 node server.ts      # Node >= 22.18 runs TypeScript natively
 ```
 
-The `pg-rest` dependency points at the repository root (`file:../..`), so build it once first: `bun run build` in the repository root. In your own project install it from npm instead.
+`pg-rest` is an ordinary versioned dependency, so once this folder is copied out of the repository the
+install above is all you need. Inside the repository that version is not on the registry yet and will not
+resolve, so link the local build instead -- from the repository root:
+
+```sh
+bun run link:examples with-node-postgres   # builds pg-rest, then symlinks it into node_modules
+```
 
 `server.ts` is the whole integration: create the driver, wrap it in the adapter from `pg-rest/adapters/...`, give `createPgRest` a way to resolve the caller
 (`resolveContext`), and hand `pgRest.handle` to any server that speaks `Request`/`Response`.

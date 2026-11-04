@@ -37,7 +37,8 @@ const app = new Hono();
 app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
 app.all("/api/rest/*", (c) => pgRest.handle(c.req.raw));
 
-const server = serve(app);
+// `serve(app)` would read the app as the options object and silently listen on the default port.
+const server = serve({ fetch: app.fetch, port });
 
 console.log(`Better Auth listening on http://localhost:${port}/api/auth`);
 console.log(`pg-rest listening on http://localhost:${port}/api/rest`);
