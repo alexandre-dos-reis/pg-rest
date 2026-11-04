@@ -19,8 +19,8 @@ npm i @adrdp/pg-rest pg         # or: bun add @adrdp/pg-rest (Bun.sql is built i
 
 ```ts
 import pg from "pg";
-import { createPgRest } from "pg-rest";
-import { nodePostgresAdapter } from "pg-rest/adapters/node-postgres";
+import { createPgRest } from "@adrdp/pg-rest";
+import { nodePostgresAdapter } from "@adrdp/pg-rest/adapters/node-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -64,12 +64,12 @@ interface DbAdapter {
 }
 ```
 
-| import                                                         | wraps                       | peer dependency        |
-| -------------------------------------------------------------- | --------------------------- | ---------------------- |
-| `pg-rest/adapters/bun` → `bunSqlAdapter(sql)`                  | `new SQL(url)` from `"bun"` | none (built into Bun)  |
-| `pg-rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(...)`          | `pg` ≥ 8               |
-| `pg-rest/adapters/postgres-js` → `postgresJsAdapter(sql)`      | `postgres(url)`             | `postgres` ≥ 3         |
-| `pg-rest/adapters/pglite` → `pgliteAdapter(db)`                | `new PGlite()`              | `@electric-sql/pglite` |
+| import                                                                | wraps                       | peer dependency        |
+| --------------------------------------------------------------------- | --------------------------- | ---------------------- |
+| `@adrdp/pg-rest/adapters/bun` → `bunSqlAdapter(sql)`                  | `new SQL(url)` from `"bun"` | none (built into Bun)  |
+| `@adrdp/pg-rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(...)`          | `pg` ≥ 8               |
+| `@adrdp/pg-rest/adapters/postgres-js` → `postgresJsAdapter(sql)`      | `postgres(url)`             | `postgres` ≥ 3         |
+| `@adrdp/pg-rest/adapters/pglite` → `pgliteAdapter(db)`                | `new PGlite()`              | `@electric-sql/pglite` |
 
 The adapters are structural (they never import the driver; you pass the client in), so a project only loads the code it imports.
 To support another driver, implement the interface above (about 20 lines) — the adapter sources in `src/adapters` are good templates.
