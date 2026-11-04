@@ -118,7 +118,10 @@ export const buildInsert = (o: InsertOptions): string => {
 
   // A merge-duplicates upsert flags which rows were really inserted (xmax = 0), so the
   // response can be 200 instead of 201 when it only updated existing rows.
-  const flag = o.flagInserted && o.resolution === "merge-duplicates" ? `, (${quoteIdent(ROOT_ALIAS)}.xmax = 0) AS pgrst_inserted` : "";
+  const flag =
+    o.flagInserted && o.resolution === "merge-duplicates"
+      ? `, (${quoteIdent(ROOT_ALIAS)}.xmax = 0) AS pgrst_inserted`
+      : "";
   const ret = flag && returning === "1" ? "1 AS pgrst_one" : returning;
   return `INSERT INTO ${target} (${colList}) ${select}${conflict} RETURNING ${ret}${flag}`;
 };

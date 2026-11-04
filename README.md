@@ -109,7 +109,8 @@ Numbers from one run on a small 2-vCPU sandbox (indicative only; see the benchma
 | --- | --- |
 | `db` | a `DbAdapter` built from your driver (see [Database adapters](#database-adapters)) |
 | `schemas` | exposed schemas; selected with `Accept-Profile` / `Content-Profile` |
-| `anonymousRole` | role when no context is resolved (`PGRST302` if unset and none given) |
+| `anonymousRole` | role when no context is resolved (`PGRST302` if unset and none given); `false` refuses anonymous requests |
+| `planEnabled` | allow `Accept: application/vnd.pgrst.plan` (EXPLAIN output); off by default, like `db-plan-enabled` |
 | `resolveContext(req)` | return `{ role, claims, settings }`; throw `PgRestError` to reject (e.g. 401) |
 | `handle(req, ctx?)` | an explicit context overrides `resolveContext` |
 | `maxRows` | cap on rows returned |
@@ -126,9 +127,10 @@ Also returned: `reloadSchema()` (call after migrations), `schemaCache()`, `close
 
 Reads with embedding (m2o, o2m, o2o, m2m, aliases, hints, `!inner`, spread of to-one, nested, filters/order/limit on embeds),
 all filter operators and `and/or/not`, JSON paths, casts, aggregates, ordering, `Range`/`limit`/`offset`,
+spread of to-many, order by related column, embedding through views and computed relationships, aggregates in embeds,
 `Prefer: count=exact|planned|estimated`, inserts (bulk, `columns`, `missing=default`), upsert, PATCH, PUT, DELETE,
-`return=` / `handling=` / `max-affected` / `timezone` / `tx`, RPC (GET/POST, overloads, set/scalar/void, unnamed json arg,
-response GUC headers/status), CSV / singular / `nulls=stripped` representations, OpenAPI, PostgREST error codes
+`return=` / `handling=` / `max-affected` / `timezone` / `tx`, RPC (GET/POST, overloads, `VARIADIC`, bulk calls, set/scalar/void, unnamed json arg,
+response GUC headers/status), CSV / singular / `nulls=stripped` / plan representations, `WWW-Authenticate` on 401, OpenAPI, PostgREST error codes
 and `PTxyz` / `RAISE ... SQLSTATE 'PGRST'` conventions.
 
 ## Not supported
@@ -155,10 +157,8 @@ code is handled by *your* application instead. These are not gaps: adding them w
 
 These exist in PostgREST and are not implemented *yet*. Contributions welcome; the status of each is in [`PARITY.md`](PARITY.md).
 
-- Ordering by a related table column, spreading to-many, aggregates inside embeds (`PGRST127`)
-- Embedding through the foreign keys of views, computed relationships, `VARIADIC` functions
-- Bulk RPC calls, custom media type handlers (`geo+json`, `octet-stream`, `text/plain`), `application/vnd.pgrst.plan`
-- `WWW-Authenticate` on 401 (set it yourself via `PgRestError` headers)
+- Custom media type handlers (`geo+json`, `octet-stream`, `text/plain`, `*/*` handlers)
+- Limited-write validation on `PATCH`/`DELETE` (`limit`/`offset`/`order`), PostgREST's exact parse-error wording
 
 ## Security notes
 

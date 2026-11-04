@@ -29,7 +29,6 @@ const SINGLE_BODY_TYPES = new Set(["json", "jsonb", "text", "bytea"]);
 export const isSingleUnnamedParam = (fn: FunctionDef): boolean =>
   fn.args.length === 1 && fn.args[0]!.name === "" && SINGLE_BODY_TYPES.has(fn.args[0]!.type);
 
-
 /** PostgREST's spelling used in PGRST203: `schema.fn(a => integer, b => text)`. */
 const arrowSignature = (fn: FunctionDef): string =>
   `${fn.schema}.${fn.name}(${fn.args.map((a) => `${a.name} => ${a.type}`).join(", ")})`;
@@ -40,7 +39,13 @@ const similarity = (a: string, b: string): number =>
 const SUGGEST_AT = 0.75;
 
 /** The "Perhaps you meant ..." hint of PGRST202. */
-const functionHint = (cache: SchemaCache, schema: string, name: string, candidates: ReadonlyArray<FunctionDef>, provided: ReadonlySet<string>): string | null => {
+const functionHint = (
+  cache: SchemaCache,
+  schema: string,
+  name: string,
+  candidates: ReadonlyArray<FunctionDef>,
+  provided: ReadonlySet<string>,
+): string | null => {
   if (candidates.length > 0) {
     // same name, different parameters: suggest the signature sharing the most parameter names
     let best: { fn: FunctionDef; score: number } | undefined;
@@ -52,7 +57,12 @@ const functionHint = (cache: SchemaCache, schema: string, name: string, candidat
       }
       if (score > 0 && (!best || score > best.score)) best = { fn, score };
     }
-    return best ? `Perhaps you meant to call the function ${schema}.${name}(${best.fn.args.map((a) => a.name).sort().join(", ")})` : null;
+    return best
+      ? `Perhaps you meant to call the function ${schema}.${name}(${best.fn.args
+          .map((a) => a.name)
+          .sort()
+          .join(", ")})`
+      : null;
   }
   // no such function: suggest a similarly named one
   let best: { name: string; score: number } | undefined;
@@ -80,7 +90,8 @@ export const resolveFunction = (
 ): FunctionDef => {
   const candidates = cache.functions.get(relKey(schema, name)) ?? [];
   const names = [...provided].sort();
-  const params = names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
+  const params =
+    names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
   const notFound = () =>
     new PgRestError(
       404,
@@ -95,13 +106,16 @@ export const resolveFunction = (
   if (candidates.length === 0) throw notFound();
 
   const named = candidates.filter((fn) => {
-    const names = new Set(fn.args.map((a) => a.name));
-    for (const p of provided) if (!names.has(p)) return false;
+    const argNames = new Set(fn.args.map((a) => a.name));
+    for (const p of provided) if (!argNames.has(p)) return false;
     return fn.args.every((a) => a.hasDefault || provided.has(a.name));
   });
   const single = hasBody ? candidates.filter(isSingleUnnamedParam) : [];
 
-  const matches = provided.size === 0 && hasBody && single.length > 0 ? single : [...named, ...single.filter((s) => !named.includes(s))];
+  const matches =
+    provided.size === 0 && hasBody && single.length > 0
+      ? single
+      : [...named, ...single.filter((s) => !named.includes(s))];
   if (matches.length === 0) throw notFound();
   if (matches.length === 1) return matches[0]!;
 
@@ -166,7 +180,9 @@ export const buildRpc = (
     usesBody = true;
   } else {
     const used = fn.args.filter((a) => provided.includes(a.name));
-    args = used.map((a) => `${a.variadic ? "VARIADIC " : ""}${quoteIdent(a.name)} := _args.${quoteIdent(a.name)}`).join(", ");
+    args = used
+      .map((a) => `${a.variadic ? "VARIADIC " : ""}${quoteIdent(a.name)} := _args.${quoteIdent(a.name)}`)
+      .join(", ");
     if (used.length > 0) {
       usesBody = true;
       from = `json_to_record(($1::text)::json) AS _args(${used.map((a) => `${quoteIdent(a.name)} ${a.type}`).join(", ")}) CROSS JOIN LATERAL `;

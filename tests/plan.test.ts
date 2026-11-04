@@ -21,7 +21,9 @@ describe.skipIf(!hasDb)("execution plan (Accept: application/vnd.pgrst.plan)", (
     t = await makeApi({ planEnabled: true });
     const text = await t.get("/clients?id=eq.1", { headers: { Accept: "application/vnd.pgrst.plan" } });
     expect(text.status).toBe(200);
-    expect(text.headers.get("content-type")).toBe('application/vnd.pgrst.plan+text; for="application/json"; charset=utf-8');
+    expect(text.headers.get("content-type")).toBe(
+      'application/vnd.pgrst.plan+text; for="application/json"; charset=utf-8',
+    );
     expect(text.text).toContain("clients");
 
     const json = await t.get("/clients?id=eq.1", {
@@ -36,7 +38,11 @@ describe.skipIf(!hasDb)("execution plan (Accept: application/vnd.pgrst.plan)", (
   test("a write is explained, not executed", async () => {
     t = await makeApi({ planEnabled: true });
     const before = (await t.get("/clients")).json().length;
-    const r = await t.post("/clients", { name: "Planned" }, { headers: { Accept: "application/vnd.pgrst.plan+json" }, ctx: { role: "authenticated" } });
+    const r = await t.post(
+      "/clients",
+      { name: "Planned" },
+      { headers: { Accept: "application/vnd.pgrst.plan+json" }, ctx: { role: "authenticated" } },
+    );
     expect(r.status).toBe(200);
     expect((await t.get("/clients")).json().length).toBe(before);
   });

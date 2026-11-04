@@ -189,7 +189,11 @@ export const parseAccept = (accept: string | null, isRoot: boolean, planEnabled 
   if (entries.length === 0) entries.push({ type: "*/*", q: 1, stripNulls: false, forType: undefined, options: [] });
 
   for (const { type, stripNulls, forType, options } of entries) {
-    if (type === "application/vnd.pgrst.plan" || type === "application/vnd.pgrst.plan+json" || type === "application/vnd.pgrst.plan+text") {
+    if (
+      type === "application/vnd.pgrst.plan" ||
+      type === "application/vnd.pgrst.plan+json" ||
+      type === "application/vnd.pgrst.plan+text"
+    ) {
       if (!planEnabled || isRoot) continue;
       const inner = parseAccept(forType ?? "application/json", false, false);
       return {

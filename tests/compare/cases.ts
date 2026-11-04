@@ -17,7 +17,13 @@ export interface Case {
 }
 
 const get = (path: string, extra: Partial<Case> = {}): Case => ({ name: `GET ${path}`, path, ...extra });
-const post = (path: string, body: unknown, extra: Partial<Case> = {}): Case => ({ name: `POST ${path} ${JSON.stringify(body)}`, method: "POST", path, body, ...extra });
+const post = (path: string, body: unknown, extra: Partial<Case> = {}): Case => ({
+  name: `POST ${path} ${JSON.stringify(body)}`,
+  method: "POST",
+  path,
+  body,
+  ...extra,
+});
 const write = (method: string, path: string, body: unknown, extra: Partial<Case> = {}): Case => ({
   name: `${method} ${path}${body === undefined ? "" : " " + JSON.stringify(body)}`,
   method,
@@ -53,7 +59,7 @@ const allCases: Case[] = [
   get("/clients?select=id&tags=cs.{vip}&order=id"),
   get("/clients?select=id&tags=cd.{vip,early,x}&order=id"),
   get("/clients?select=id&tags=ov.{oss,navy}&order=id"),
-  get("/clients?select=id&meta=cs.{\"tier\":\"gold\"}"),
+  get('/clients?select=id&meta=cs.{"tier":"gold"}'),
   get("/clients?select=id&or=(id.eq.1,id.eq.3)&order=id"),
   get("/clients?select=id&and=(id.gt.1,or(name.eq.Grace,name.eq.Linus))&order=id"),
   get("/clients?select=id&not.or=(id.eq.1,id.eq.2)"),
@@ -77,8 +83,14 @@ const allCases: Case[] = [
   get("/clients?select=id,name&order=id", { headers: { Accept: "text/csv" } }),
   get("/clients?select=id,name,tags&order=id", { headers: { Accept: "text/csv" }, name: "csv with array" }),
   get("/clients?select=id,name&id=eq.1", { headers: { Accept: "application/vnd.pgrst.object+json" } }),
-  get("/clients?select=id,name", { headers: { Accept: "application/vnd.pgrst.object+json" }, name: "singular with many rows" }),
-  get("/clients?select=id,name&id=eq.99", { headers: { Accept: "application/vnd.pgrst.object+json" }, name: "singular with no row" }),
+  get("/clients?select=id,name", {
+    headers: { Accept: "application/vnd.pgrst.object+json" },
+    name: "singular with many rows",
+  }),
+  get("/clients?select=id,name&id=eq.99", {
+    headers: { Accept: "application/vnd.pgrst.object+json" },
+    name: "singular with no row",
+  }),
   get("/clients?select=id,meta&order=id", { headers: { Accept: "application/vnd.pgrst.array+json;nulls=stripped" } }),
   get("/clients?select=id,meta&id=eq.3", { headers: { Accept: "application/vnd.pgrst.object+json;nulls=stripped" } }),
   get("/clients?select=id", { headers: { Accept: "application/xml" } }),
@@ -130,12 +142,20 @@ const allCases: Case[] = [
   get("/clients?select=id,orders(count)&order=id", { name: "embedded count" }),
   get("/orders?select=id&order=clients(name)", { name: "order by related column that is not embedded" }),
   get("/orders?select=id,clients(name)&order=clients(name).desc,id", { name: "order by related column" }),
-  get("/orders?select=id,c:clients(name)&order=c(name).desc.nullsfirst&limit=3", { name: "order by aliased related column" }),
-  get("/orders?select=id,clients(id)&order=clients(name)", { name: "order by related column that the embed does not select" }),
+  get("/orders?select=id,c:clients(name)&order=c(name).desc.nullsfirst&limit=3", {
+    name: "order by aliased related column",
+  }),
+  get("/orders?select=id,clients(id)&order=clients(name)", {
+    name: "order by related column that the embed does not select",
+  }),
   get("/clients?select=id,orders(id)&order=orders(id)", { name: "order by a to-many relation" }),
-  get("/order_items?select=qty,products(name),orders(clients(name))&order=products(name),qty", { name: "order by related column with other embeds" }),
+  get("/order_items?select=qty,products(name),orders(clients(name))&order=products(name),qty", {
+    name: "order by related column with other embeds",
+  }),
   get("/clients?select=id,...orders(total,status)&order=id", { name: "spread to-many" }),
-  get("/clients?select=id,...orders(total,status)&orders.order=total.desc&order=id", { name: "spread to-many with embedded order" }),
+  get("/clients?select=id,...orders(total,status)&orders.order=total.desc&order=id", {
+    name: "spread to-many with embedded order",
+  }),
   get("/clients?select=id,...orders!inner(total)&order=id", { name: "spread to-many inner" }),
   get("/clients?select=id,...orders(total,order_items(qty))&order=id", { name: "spread to-many with nested embed" }),
   get("/employees?select=id,...employees!manager_id(name)&order=id", { name: "spread self-referencing to-many" }),
@@ -143,33 +163,131 @@ const allCases: Case[] = [
   get("/orders?select=id,...clients(name.count())&order=id&limit=2", { name: "spread to-one with aggregate" }),
   get("/clients?select=name,orders(total.sum())&order=name", { name: "aggregate in embed" }),
   get("/clients?select=name,orders(status,total.sum())&order=name", { name: "aggregate in embed with group by" }),
-  get("/clients?select=id,orders(total.sum())&orders.status=eq.paid&id=eq.1", { name: "aggregate in embed with filter" }),
-  get("/clients?select=name,orders(status,total.sum(),order_items(qty))&name=eq.Ada", { name: "aggregate in embed with nested embed" }),
+  get("/clients?select=id,orders(total.sum())&orders.status=eq.paid&id=eq.1", {
+    name: "aggregate in embed with filter",
+  }),
+  get("/clients?select=name,orders(status,total.sum(),order_items(qty))&name=eq.Ada", {
+    name: "aggregate in embed with nested embed",
+  }),
   get("/clients?select=name.count(),orders(id)&order=name", { name: "aggregate with to-many embed" }),
   get("/orders?select=status,total.sum(),clients(name)&order=status", { name: "aggregate with to-one embed" }),
   get("/orders?select=status,total.sum(),clients(name),order_items(qty)", { name: "aggregate with several embeds" }),
-  get("/clients?select=id,created_at,tags,meta&order=id", { name: "csv of timestamps, arrays and json", headers: { Accept: "text/csv" } }),
-  get("/orders?select=id,total,placed_at,clients(name)&order=id", { name: "csv with numerics and an embed", headers: { Accept: "text/csv" } }),
-  get("/orders?select=status,total.sum()&order=status", { name: "csv of an aggregate", headers: { Accept: "text/csv" } }),
+  get("/clients?select=id,created_at,tags,meta&order=id", {
+    name: "csv of timestamps, arrays and json",
+    headers: { Accept: "text/csv" },
+  }),
+  get("/orders?select=id,total,placed_at,clients(name)&order=id", {
+    name: "csv with numerics and an embed",
+    headers: { Accept: "text/csv" },
+  }),
+  get("/orders?select=status,total.sum()&order=status", {
+    name: "csv of an aggregate",
+    headers: { Accept: "text/csv" },
+  }),
   get("/clients?select=id,name&id=eq.999", { name: "csv of no rows", headers: { Accept: "text/csv" } }),
   get("/rpc/hello", { name: "csv of a scalar function", headers: { Accept: "text/csv" } }),
   get("/rpc/nums", { name: "csv of a set of scalars", headers: { Accept: "text/csv" } }),
   get("/rpc/whoami", { name: "csv of a json function", headers: { Accept: "text/csv" } }),
   post("/rpc/orders_by_status", { s: "paid" }, { name: "csv of a table function", headers: { Accept: "text/csv" } }),
   get("/orders?select=id,clients(*)&order=id&limit=1", { name: "embed key order follows jsonb" }),
-  write("POST", "/clients?on_conflict=email", [{ name: "Ada2", email: "ada@example.com" }, { name: "New", email: "new@example.com" }], { headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J }, name: "upsert merge-duplicates inserting and updating" }),
-  write("POST", "/clients?on_conflict=email", { name: "Ada2", email: "ada@example.com" }, { headers: { Prefer: "resolution=merge-duplicates, return=minimal, tx=rollback", ...J }, name: "upsert merge-duplicates updating, minimal" }),
-  write("POST", "/clients?on_conflict=email", { name: "Ada2", email: "ada@example.com" }, { headers: { Prefer: "resolution=merge-duplicates, return=headers-only, tx=rollback", ...J }, name: "upsert merge-duplicates updating, headers-only" }),
-  write("POST", "/clients?on_conflict=email", [{ name: "Ada2", email: "ada@example.com" }, { name: "Linus2", email: "linus@example.com" }], { headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J }, name: "upsert merge-duplicates updating two rows" }),
-  write("POST", "/clients?on_conflict=email", { name: "Ada2", email: "ada@example.com" }, { headers: { Prefer: "resolution=ignore-duplicates, return=minimal, tx=rollback", ...J }, name: "upsert ignore-duplicates ignoring, minimal" }),
-  write("POST", "/clients?on_conflict=email", [{ name: "Ada2", email: "ada@example.com" }, { name: "New", email: "new@example.com" }], { headers: { Prefer: "resolution=ignore-duplicates, return=representation, tx=rollback", ...J }, name: "upsert ignore-duplicates inserting and ignoring" }),
-  get("/clients?id=eq.1", { name: "plan (default)", headers: { Accept: "application/vnd.pgrst.plan" }, ignoreBody: true }),
-  get("/clients?id=eq.1", { name: "plan as json", headers: { Accept: "application/vnd.pgrst.plan+json" }, ignoreBody: true }),
-  get("/clients?id=eq.1", { name: "plan as text with options", headers: { Accept: 'application/vnd.pgrst.plan+text; for="application/json"; options=verbose' }, ignoreBody: true }),
-  get("/clients?id=eq.1&select=id,orders(id)", { name: "plan for csv with embed", headers: { Accept: 'application/vnd.pgrst.plan+json; for="text/csv"' }, ignoreBody: true }),
-  get("/clients", { name: "plan with unknown option", headers: { Accept: "application/vnd.pgrst.plan; options=bogus" }, ignoreBody: true }),
-  get("/rpc/hello", { name: "plan of a function call", headers: { Accept: "application/vnd.pgrst.plan" }, ignoreBody: true }),
-  get("/clients?id=eq.1", { name: "plan with analyze", headers: { Accept: "application/vnd.pgrst.plan+json; options=analyze" }, ignoreBody: true }),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    [
+      { name: "Ada2", email: "ada@example.com" },
+      { name: "New", email: "new@example.com" },
+    ],
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J },
+      name: "upsert merge-duplicates inserting and updating",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "Ada2", email: "ada@example.com" },
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=minimal, tx=rollback", ...J },
+      name: "upsert merge-duplicates updating, minimal",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "Ada2", email: "ada@example.com" },
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=headers-only, tx=rollback", ...J },
+      name: "upsert merge-duplicates updating, headers-only",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    [
+      { name: "Ada2", email: "ada@example.com" },
+      { name: "Linus2", email: "linus@example.com" },
+    ],
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J },
+      name: "upsert merge-duplicates updating two rows",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "Ada2", email: "ada@example.com" },
+    {
+      headers: { Prefer: "resolution=ignore-duplicates, return=minimal, tx=rollback", ...J },
+      name: "upsert ignore-duplicates ignoring, minimal",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    [
+      { name: "Ada2", email: "ada@example.com" },
+      { name: "New", email: "new@example.com" },
+    ],
+    {
+      headers: { Prefer: "resolution=ignore-duplicates, return=representation, tx=rollback", ...J },
+      name: "upsert ignore-duplicates inserting and ignoring",
+    },
+  ),
+  get("/clients?id=eq.1", {
+    name: "plan (default)",
+    headers: { Accept: "application/vnd.pgrst.plan" },
+    ignoreBody: true,
+  }),
+  get("/clients?id=eq.1", {
+    name: "plan as json",
+    headers: { Accept: "application/vnd.pgrst.plan+json" },
+    ignoreBody: true,
+  }),
+  get("/clients?id=eq.1", {
+    name: "plan as text with options",
+    headers: { Accept: 'application/vnd.pgrst.plan+text; for="application/json"; options=verbose' },
+    ignoreBody: true,
+  }),
+  get("/clients?id=eq.1&select=id,orders(id)", {
+    name: "plan for csv with embed",
+    headers: { Accept: 'application/vnd.pgrst.plan+json; for="text/csv"' },
+    ignoreBody: true,
+  }),
+  get("/clients", {
+    name: "plan with unknown option",
+    headers: { Accept: "application/vnd.pgrst.plan; options=bogus" },
+    ignoreBody: true,
+  }),
+  get("/rpc/hello", {
+    name: "plan of a function call",
+    headers: { Accept: "application/vnd.pgrst.plan" },
+    ignoreBody: true,
+  }),
+  get("/clients?id=eq.1", {
+    name: "plan with analyze",
+    headers: { Accept: "application/vnd.pgrst.plan+json; options=analyze" },
+    ignoreBody: true,
+  }),
   get("/big_orders?select=id,clients(name)&order=id", { name: "view to-one embed through foreign key" }),
   get("/clients?select=name,big_orders(id)&order=name", { name: "table to view embed" }),
   get("/client_totals?select=revenue,clients(name)&order=revenue", { name: "aggregate view embed" }),
@@ -179,7 +297,9 @@ const allCases: Case[] = [
   get("/orders?select=id,order_client(name)&order=id", { name: "computed relationship to-one (ROWS 1)" }),
   get("/clients?select=name,recent_orders(id,total)&order=name", { name: "computed relationship to-many" }),
   get("/clients?select=name,client_profile(bio)&order=name", { name: "computed relationship returning a row" }),
-  get("/clients?select=name,recent_orders(id)&recent_orders.limit=1&order=name", { name: "computed relationship with limit" }),
+  get("/clients?select=name,recent_orders(id)&recent_orders.limit=1&order=name", {
+    name: "computed relationship with limit",
+  }),
   get("/clients?select=name,recent_orders!inner(id)&order=name", { name: "computed relationship inner" }),
   get("/orders?select=id,...order_client(name)&order=id", { name: "computed relationship spread" }),
   get("/orders?select=id,order_client(name)&order=order_client(name),id", { name: "order by computed relationship" }),
@@ -191,47 +311,126 @@ const allCases: Case[] = [
   get("/notes?select=body&order=id", { as: "alice", name: "notes as alice (RLS)" }),
   get("/notes?select=body&order=id", { name: "notes as anon" }),
   write("POST", "/notes", { body: "hello" }, { headers: { ...rep, ...J }, as: "alice" }),
-  write("POST", "/notes", { body: "hello" }, { headers: { ...rep, ...J }, as: "anon" , name: "anon insert is denied" }),
+  write("POST", "/notes", { body: "hello" }, { headers: { ...rep, ...J }, as: "anon", name: "anon insert is denied" }),
   get("/rpc/whoami", { as: "alice" }),
   get("/rpc/whoami", { as: "anon" }),
 
   // ── writes (always rolled back) ──────────────────────────
   write("POST", "/clients", { name: "Zed", email: "zed@example.com" }, { headers: { ...rep, ...J } }),
   write("POST", "/clients", { name: "Zed" }, { headers: { Prefer: "tx=rollback", ...J }, name: "insert minimal" }),
-  write("POST", "/clients", { name: "Zed" }, { headers: { Prefer: "return=headers-only, tx=rollback", ...J }, name: "insert headers-only" }),
-  write("POST", "/clients?select=id,name", [{ name: "A" }, { name: "B" }], { headers: { ...rep, ...J }, name: "bulk insert with select" }),
-  write("POST", "/clients", [{ name: "A", email: "a@x" }, { name: "B" }], { headers: { ...rep, ...J }, name: "bulk insert with missing keys" }),
-  write("POST", "/clients", [{ name: "A", email: "a@x" }, { name: "B" }], { headers: { Prefer: "return=representation, missing=default, tx=rollback", ...J } }),
+  write(
+    "POST",
+    "/clients",
+    { name: "Zed" },
+    { headers: { Prefer: "return=headers-only, tx=rollback", ...J }, name: "insert headers-only" },
+  ),
+  write("POST", "/clients?select=id,name", [{ name: "A" }, { name: "B" }], {
+    headers: { ...rep, ...J },
+    name: "bulk insert with select",
+  }),
+  write("POST", "/clients", [{ name: "A", email: "a@x" }, { name: "B" }], {
+    headers: { ...rep, ...J },
+    name: "bulk insert with missing keys",
+  }),
+  write("POST", "/clients", [{ name: "A", email: "a@x" }, { name: "B" }], {
+    headers: { Prefer: "return=representation, missing=default, tx=rollback", ...J },
+  }),
   write("POST", "/clients?columns=name", { name: "C", email: "ignored@x" }, { headers: { ...rep, ...J } }),
-  write("POST", "/clients?on_conflict=email", { name: "New", email: "new@example.com" }, { headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J }, name: "merge-duplicates inserting a new row" }),
-  write("POST", "/clients?columns=name,email&select=name,email", [{ name: "A", email: "a@x" }, { name: "B" }], { headers: { Prefer: "return=representation, missing=default, tx=rollback", ...J }, name: "bulk insert with columns + missing=default" }),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "New", email: "new@example.com" },
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J },
+      name: "merge-duplicates inserting a new row",
+    },
+  ),
+  write("POST", "/clients?columns=name,email&select=name,email", [{ name: "A", email: "a@x" }, { name: "B" }], {
+    headers: { Prefer: "return=representation, missing=default, tx=rollback", ...J },
+    name: "bulk insert with columns + missing=default",
+  }),
   write("POST", "/clients?columns=nope", { name: "C" }, { headers: { ...rep, ...J } }),
   write("POST", "/clients", { nope: 1 }, { headers: { ...rep, ...J }, name: "unknown column in body" }),
   write("POST", "/clients", { email: "x@x" }, { headers: { ...rep, ...J }, name: "not-null violation" }),
-  write("POST", "/clients", { name: "dup", email: "ada@example.com" }, { headers: { ...rep, ...J }, name: "unique violation" }),
+  write(
+    "POST",
+    "/clients",
+    { name: "dup", email: "ada@example.com" },
+    { headers: { ...rep, ...J }, name: "unique violation" },
+  ),
   write("POST", "/orders", { client_id: 999 }, { headers: { ...rep, ...J }, name: "foreign key violation" }),
-  write("POST", "/clients?on_conflict=email", { name: "Ada2", email: "ada@example.com" }, { headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J } , name: "upsert merge-duplicates on an existing row" }),
-  write("POST", "/clients?on_conflict=email", { name: "Ada2", email: "ada@example.com" }, { headers: { Prefer: "resolution=ignore-duplicates, return=representation, tx=rollback", ...J } , name: "upsert ignore-duplicates on an existing row" }),
-  write("POST", "/clients", "name,email\nCsv,csv@x\n", { headers: { ...rep, "Content-Type": "text/csv" }, name: "csv body" }),
-  write("POST", "/clients", "name=Form&email=form%40x", { headers: { ...rep, "Content-Type": "application/x-www-form-urlencoded" }, name: "urlencoded body" }),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "Ada2", email: "ada@example.com" },
+    {
+      headers: { Prefer: "resolution=merge-duplicates, return=representation, tx=rollback", ...J },
+      name: "upsert merge-duplicates on an existing row",
+    },
+  ),
+  write(
+    "POST",
+    "/clients?on_conflict=email",
+    { name: "Ada2", email: "ada@example.com" },
+    {
+      headers: { Prefer: "resolution=ignore-duplicates, return=representation, tx=rollback", ...J },
+      name: "upsert ignore-duplicates on an existing row",
+    },
+  ),
+  write("POST", "/clients", "name,email\nCsv,csv@x\n", {
+    headers: { ...rep, "Content-Type": "text/csv" },
+    name: "csv body",
+  }),
+  write("POST", "/clients", "name=Form&email=form%40x", {
+    headers: { ...rep, "Content-Type": "application/x-www-form-urlencoded" },
+    name: "urlencoded body",
+  }),
   write("POST", "/clients", "{not json", { headers: { ...rep, ...J }, name: "invalid json body" }),
   write("PATCH", "/clients?id=eq.1", { name: "Renamed" }, { headers: { ...rep, ...J } }),
-  write("PATCH", "/clients?id=eq.1", { name: "Renamed" }, { headers: { Prefer: "tx=rollback", ...J }, name: "patch minimal" }),
+  write(
+    "PATCH",
+    "/clients?id=eq.1",
+    { name: "Renamed" },
+    { headers: { Prefer: "tx=rollback", ...J }, name: "patch minimal" },
+  ),
   write("PATCH", "/clients?id=eq.99", { name: "x" }, { headers: { ...rep, ...J }, name: "patch no match" }),
   write("PATCH", "/clients?id=eq.1&select=id,name", { name: "x" }, { headers: { ...rep, ...J } }),
   write("PATCH", "/clients", { name: "all" }, { headers: { ...rep, ...J }, name: "patch without filter" }),
-  write("PATCH", "/clients?id=lt.3&order=id", { name: "two" }, { headers: { ...rep, ...J, Prefer: "return=representation, handling=strict, max-affected=1, tx=rollback" }, name: "max-affected exceeded" }),
+  write(
+    "PATCH",
+    "/clients?id=lt.3&order=id",
+    { name: "two" },
+    {
+      headers: { ...rep, ...J, Prefer: "return=representation, handling=strict, max-affected=1, tx=rollback" },
+      name: "max-affected exceeded",
+    },
+  ),
   write("PATCH", "/clients?id=eq.1", {}, { headers: { ...rep, ...J }, name: "patch empty body" }),
   write("DELETE", "/order_items?order_id=eq.1", undefined, { headers: { ...rep } }),
   write("DELETE", "/order_items?order_id=eq.1", undefined, { name: "delete minimal" }),
   write("DELETE", "/order_items", undefined, { headers: { ...rep }, name: "delete without filter" }),
   write("DELETE", "/orders?id=eq.1", undefined, { headers: { ...rep }, name: "delete cascade children (fk restrict)" }),
-  write("POST", "/client_totals", { client_id: 1 }, { headers: { ...rep, ...J }, name: "insert into non-updatable view" }),
-  write("POST", "/big_orders", { client_id: 1, status: "x", total: 500 }, { headers: { ...rep, ...J }, name: "insert through view" }),
+  write(
+    "POST",
+    "/client_totals",
+    { client_id: 1 },
+    { headers: { ...rep, ...J }, name: "insert into non-updatable view" },
+  ),
+  write(
+    "POST",
+    "/big_orders",
+    { client_id: 1, status: "x", total: 500 },
+    { headers: { ...rep, ...J }, name: "insert through view" },
+  ),
   write("PUT", "/clients?id=eq.1", { id: 1, name: "Put", email: "ada@example.com" }, { headers: { ...rep, ...J } }),
   write("PUT", "/clients?id=eq.1", { id: 2, name: "Put" }, { headers: { ...rep, ...J }, name: "put pk mismatch" }),
   write("PUT", "/clients", { id: 1, name: "Put" }, { headers: { ...rep, ...J }, name: "put without pk filter" }),
-  write("PUT", "/clients?id=eq.1&limit=1", { id: 1, name: "Put" }, { headers: { ...rep, ...J }, name: "put with limit" }),
+  write(
+    "PUT",
+    "/clients?id=eq.1&limit=1",
+    { id: 1, name: "Put" },
+    { headers: { ...rep, ...J }, name: "put with limit" },
+  ),
 
   // ── RPC ──────────────────────────────────────────────────
   get("/rpc/add?a=1&b=2"),
@@ -250,12 +449,22 @@ const allCases: Case[] = [
   get("/rpc/orders_by_status?s=paid&select=id,clients(name)&order=id", { name: "rpc with embed" }),
   get("/rpc/orders_by_status?s=paid&order=id&limit=1", { headers: { Prefer: "count=exact" } }),
   get("/rpc/orders_by_status?s=shipped", { headers: { Accept: "application/vnd.pgrst.object+json" } }),
-  get("/rpc/orders_by_status?s=paid", { headers: { Accept: "application/vnd.pgrst.object+json" }, name: "rpc singular many rows" }),
+  get("/rpc/orders_by_status?s=paid", {
+    headers: { Accept: "application/vnd.pgrst.object+json" },
+    name: "rpc singular many rows",
+  }),
   post("/rpc/client_summary", { cid: 1 }),
   post("/rpc/echo_unnamed", [{ a: 1 }, { b: [1, 2] }], { name: "rpc unnamed json param" }),
   post("/rpc/echo_unnamed", [{ a: 1 }, { a: [1, 2] }], { name: "rpc unnamed json param with matching keys" }),
   post("/rpc/echo_unnamed", [1, 2], { name: "rpc array body of non-objects" }),
-  post("/rpc/add", [{ a: 1, b: 2 }, { a: 3, b: 4 }], { name: "rpc bulk call uses the first object" }),
+  post(
+    "/rpc/add",
+    [
+      { a: 1, b: 2 },
+      { a: 3, b: 4 },
+    ],
+    { name: "rpc bulk call uses the first object" },
+  ),
   post("/rpc/add", [{ a: 1, b: 2 }, { a: 3 }], { name: "rpc bulk call with differing keys" }),
   post("/rpc/orders_by_status", [{ s: "paid" }, { s: "new" }], { name: "rpc bulk call of a set-returning function" }),
   post("/rpc/hello", [{ a: 1 }], { name: "rpc array body with unknown argument" }),
@@ -305,7 +514,8 @@ const allCases: Case[] = [
 const KNOWN: Record<string, string> = {
   "GET /clients?select=id&id=bogus.1": "parser error texts (details) differ: PostgREST quotes its parsec output",
   "GET /clients?select=id,,name": "parser error texts (message/details) differ: PostgREST quotes its parsec output",
-  "GET /clients?select=id::int4%20from%20x": "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
+  "GET /clients?select=id::int4%20from%20x":
+    "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
   "invalid json body": "details of the JSON parse error come from different parsers",
 };
 

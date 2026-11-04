@@ -76,7 +76,8 @@ const itemNames = (ctx: Ctx, items: ReadonlyArray<SelectItem>, rel: Relation): s
     if (it.kind === "star") out.push(...rel.columns.map((c) => c.name));
     else if (it.kind === "field" || it.kind === "aggregate") out.push(outputName(it));
     else if (it.items.length === 0) continue;
-    else if (it.spread) out.push(...itemNames(ctx, it.items, resolveRelationship(ctx.cache, rel, it.target, it.hint).to));
+    else if (it.spread)
+      out.push(...itemNames(ctx, it.items, resolveRelationship(ctx.cache, rel, it.target, it.hint).to));
     else out.push(it.alias ?? it.target);
   }
   return out;
@@ -116,8 +117,17 @@ const orderClause = (
     }
     // PostgREST orders by the embedded query's output, so the column has to be selected there
     const selected = embed.items.filter((i) => i.kind !== "embed");
-    if (selected.length > 0 && !selected.some((i) => i.kind === "star" || (i.kind === "field" && i.field.name === t.field.name))) {
-      throw new PgRestError(400, "42703", `column ${rel.name}_${embed.target}_1.${t.field.name} does not exist`, null, null);
+    if (
+      selected.length > 0 &&
+      !selected.some((i) => i.kind === "star" || (i.kind === "field" && i.field.name === t.field.name))
+    ) {
+      throw new PgRestError(
+        400,
+        "42703",
+        `column ${rel.name}_${embed.target}_1.${t.field.name} does not exist`,
+        null,
+        null,
+      );
     }
     const o = ctx.aliases.next("pgrst_o");
     if (r.computed) {

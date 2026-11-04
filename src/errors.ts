@@ -42,7 +42,11 @@ export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody;
   readonly headers: Readonly<Record<string, string>>;
-  constructor(fields: { readonly status: number; readonly body: ErrorBody; readonly headers: Readonly<Record<string, string>> }) {
+  constructor(fields: {
+    readonly status: number;
+    readonly body: ErrorBody;
+    readonly headers: Readonly<Record<string, string>>;
+  }) {
     super(fields.body.message);
     this.name = "ApiError";
     this.status = fields.status;

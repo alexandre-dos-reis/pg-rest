@@ -38,16 +38,17 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `any` / `all` quantifiers | ✅ | |
 | Full-text search `fts plfts phfts wfts` with language | ✅ | |
 | `order` (asc/desc, nulls first/last, JSON paths) | ✅ | |
-| `order` by related column (`order=rel(col)`) | ❌ | `PGRST127` |
+| `order` by related column (`order=rel(col)`) | ✅ | To-one relationships, including computed ones |
 | `limit`, `offset`, `Range` / `Range-Unit` headers | ✅ | `206` / `416` |
 | `Prefer: count=exact` | ✅ | `Content-Range` |
 | `count=planned` / `estimated` | ✅ | Via `EXPLAIN` |
 | Aggregate functions (`count() sum() avg() min() max()`) with implicit `GROUP BY` | ✅ | Always on; PostgREST needs `db-aggregates-enabled` |
-| Aggregates combined with embeds / inside embeds | ❌ | `PGRST127` |
+| Aggregates combined with embeds / inside embeds | ✅ | |
 | Views | ✅ | Read/write per `pg_relation_is_updatable` |
 | Materialized views, foreign tables, partitioned tables | 🟡 | Introspected as relations; not specifically tested |
+| Non-numeric `limit`/`offset` ignored, negative `limit` → `PGRST103`, unsupported methods → empty 405 | ✅ | |
 | `Accept: application/json`, `text/csv`, `application/vnd.pgrst.object+json` (+ `nulls=stripped`) | ✅ | Singular → `PGRST116` |
-| `application/vnd.pgrst.plan` (EXPLAIN output) | ❌ | |
+| `application/vnd.pgrst.plan` (EXPLAIN output) | ✅ | `for=` and `options=`; off unless `planEnabled` (like `db-plan-enabled`) |
 | `application/geo+json`, `octet-stream`, `text/plain`, custom media type handlers | ❌ | |
 | `Prefer: handling=strict/lenient` | ✅ | |
 | `Prefer: timezone=` | ✅ | |
@@ -65,11 +66,11 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Filters, `order`, `limit`, `offset` on embeds (`embed.col=…`) | ✅ | |
 | `embed=is.null` / `not.is.null` presence filters | ✅ | |
 | Spread `...rel(col)` of to-one | ✅ | |
-| Spread of to-many | ❌ | `PGRST127` |
-| Embedding through a view's underlying foreign keys | ❌ | Views are not linked to the base-table FKs |
-| Computed / function-based relationships | ❌ | |
+| Spread of to-many | ✅ | Per-column arrays; aggregates inside → `PGRST127` like PostgREST |
+| Embedding through a view's underlying foreign keys | ✅ | Resolved from the view definition, view↔table and view↔view |
+| Computed / function-based relationships | ✅ | |
 | Embedding on RPC results returning a table type | ✅ | |
-| Embedded `count` / spread aggregates | ❌ | |
+| Embedded `count` / spread aggregates | ✅ | |
 
 ## Writing
 
@@ -80,7 +81,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `columns=` | ✅ | `PGRST204` for unknown columns |
 | `Prefer: missing=default` | ✅ | |
 | `Prefer: return=minimal/headers-only/representation` | ✅ | `Location` header on insert |
-| Upsert: `resolution=merge-duplicates / ignore-duplicates`, `on_conflict` | ✅ | |
+| Upsert: `resolution=merge-duplicates / ignore-duplicates`, `on_conflict` | ✅ | Status 200 when only existing rows were updated, else 201 |
 | `PUT` single-row upsert | ✅ | `PGRST114` / `PGRST115` checks |
 | `PATCH` with filters | ✅ | Empty body handled |
 | `DELETE` with filters | ✅ | |
@@ -101,8 +102,8 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Single unnamed `json`/`jsonb` parameter takes the whole body | ✅ | |
 | Overloads, `PGRST202` / `PGRST203` | ✅ | |
 | `GET` only for non-volatile functions (read-only transaction) | ✅ | |
-| `VARIADIC` parameters | ❌ | |
-| Bulk call (array body) | ❌ | |
+| `VARIADIC` parameters | ✅ | |
+| Bulk call (array body) | ✅ | `PGRST102` when the objects' keys differ |
 | `response.headers` / `response.status` GUCs set by the function | ✅ | |
 | `Prefer: max-affected` on RPC | ✅ | `PGRST128` for non-set functions |
 | Scalar-function custom media types (`text/plain`, `application/octet-stream`, …) | ❌ | |
@@ -116,7 +117,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | SQLSTATE → HTTP status table | ✅ | |
 | `RAISE ... SQLSTATE 'PTxyz'` → HTTP status | ✅ | |
 | `RAISE ... SQLSTATE 'PGRST'` with JSON message / detail | ✅ | |
-| `WWW-Authenticate` header on 401 | ❌ | Add it yourself in `resolveContext`'s `PgRestError` headers |
+| `WWW-Authenticate` header on 401 | ✅ | `Bearer` |
 | Serialization failure retry | ✅ | Up to 2 retries on `40001` |
 
 ## Other

@@ -141,12 +141,26 @@ const viewForeignKeys = (fks: ReadonlyArray<ForeignKey>, rows: ReadonlyArray<Vie
 
   const out: ForeignKey[] = [];
   for (const fk of fks) {
-    const sources = [{ schema: fk.schema, name: fk.table, cols: [...fk.cols] }, ...exposing(relKey(fk.schema, fk.table), fk.cols)];
-    const targets = [{ schema: fk.fschema, name: fk.ftable, cols: [...fk.fcols] }, ...exposing(relKey(fk.fschema, fk.ftable), fk.fcols)];
+    const sources = [
+      { schema: fk.schema, name: fk.table, cols: [...fk.cols] },
+      ...exposing(relKey(fk.schema, fk.table), fk.cols),
+    ];
+    const targets = [
+      { schema: fk.fschema, name: fk.ftable, cols: [...fk.fcols] },
+      ...exposing(relKey(fk.fschema, fk.ftable), fk.fcols),
+    ];
     for (const [i, s] of sources.entries()) {
       for (const [j, t] of targets.entries()) {
         if (i === 0 && j === 0) continue;
-        out.push({ name: fk.name, schema: s.schema, table: s.name, cols: s.cols, fschema: t.schema, ftable: t.name, fcols: t.cols });
+        out.push({
+          name: fk.name,
+          schema: s.schema,
+          table: s.name,
+          cols: s.cols,
+          fschema: t.schema,
+          ftable: t.name,
+          fcols: t.cols,
+        });
       }
     }
   }
@@ -483,8 +497,24 @@ export const findRelationships = (
     if (f.argRelation?.schema !== from.schema || f.argRelation.name !== from.name || !f.returnRelation) continue;
     const to = rel(f.returnRelation.schema, f.returnRelation.name);
     if (!to) continue;
-    const fk: ForeignKey = { name: f.name, schema: from.schema, table: from.name, cols: [], fschema: to.schema, ftable: to.name, fcols: [] };
-    out.push({ kind: !f.returnsSet || f.rows === 1 ? "m2o" : "o2m", from, to, fromCols: [], toCols: [], fk, computed: f });
+    const fk: ForeignKey = {
+      name: f.name,
+      schema: from.schema,
+      table: from.name,
+      cols: [],
+      fschema: to.schema,
+      ftable: to.name,
+      fcols: [],
+    };
+    out.push({
+      kind: !f.returnsSet || f.rows === 1 ? "m2o" : "o2m",
+      from,
+      to,
+      fromCols: [],
+      toCols: [],
+      fk,
+      computed: f,
+    });
   }
 
   // many-to-many through a junction table
