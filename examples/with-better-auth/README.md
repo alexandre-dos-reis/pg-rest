@@ -27,6 +27,8 @@ resolveContext: async (req) => {
 - Session → role `authenticated`, and `claims.sub` is the Better Auth user id, which the RLS policies read through
   `current_setting('request.jwt.claims')`.
 - Requests under `/api/auth/*` go to Better Auth; everything else goes to pg-rest. Both share one `pg.Pool`.
+- `api.todos.owner_id` is a foreign key to Better Auth's `public."user"(id)` (deleting a user deletes their todos). `schema.sql` runs before Better Auth has
+  created its tables, so `server.ts` adds the constraint right after Better Auth's migrations (idempotent). The two seeded todos have no owner: readable by all, writable by nobody.
 - Better Auth's tables live in the `public` schema; pg-rest only exposes `api`, so users and sessions are not reachable through the REST API.
 
 pg-rest has no CSRF protection of its own. If browsers call it with cookies, apply your usual CSRF defences (SameSite cookies, an `Origin` check)

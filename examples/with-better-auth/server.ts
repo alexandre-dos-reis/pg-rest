@@ -17,6 +17,14 @@ const authOptions = {
   emailAndPassword: { enabled: true },
 };
 await (await getMigrations(authOptions)).runMigrations(); // creates the auth tables if missing
+// Link todos to the Better Auth user. It can only be created now that "user" exists (schema.sql runs first).
+await pool.query(`
+  DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'todos_owner_id_fkey' AND conrelid = 'api.todos'::regclass) THEN
+      ALTER TABLE api.todos ADD CONSTRAINT todos_owner_id_fkey
+        FOREIGN KEY (owner_id) REFERENCES public."user"(id) ON DELETE CASCADE;
+    END IF;
+  END $$`);
 const auth = betterAuth(authOptions);
 
 const pgRest = await createPgRest({
