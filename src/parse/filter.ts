@@ -1,6 +1,8 @@
 import { PgRestError } from "../errors";
 import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
 import { type SelectItem, parseSelect } from "./select";
+import { checkFilter, checkLogicTree, checkOrder, checkSelect } from "./grammar";
+import { IS_VALUES_ORDER, scanList } from "./syntax";
 
 export type Operator =
   | "eq"
@@ -133,6 +135,10 @@ const parseList = (raw: string, where: string): string[] => {
  * `unquoteValue` is true inside and()/or() trees where values may be quoted.
  */
 export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = false): Filter => {
+  if (!unquoteValue) {
+    const bad = checkFilter(expr);
+    if (bad) throw bad;
+  }
   let rest = expr;
   let negate = false;
   if (rest.startsWith("not.")) {
@@ -171,9 +177,12 @@ export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = 
 
   let value: string | string[] = unquoteValue ? unquote(rawValue) : rawValue;
   if (op === "in") {
-    value = parseList(rawValue, expr);
+    // PostgREST stops at the closing parenthesis and ignores what follows.
+    const end = unquoteValue ? undefined : scanList(rawValue, 0);
+    value = parseList(typeof end === "number" ? rawValue.slice(0, end) : rawValue, expr);
   } else if (op === "is") {
-    const v = String(value).toLowerCase();
+    const prefix = unquoteValue ? undefined : IS_VALUES_ORDER.find((w) => rawValue.startsWith(w));
+    const v = (prefix ?? String(value)).toLowerCase();
     if (!IS_VALUES.has(v)) {
       throw parseError(`failed to parse filter (${expr})`, "is only accepts null, not_null, true, false and unknown");
     }
@@ -219,7 +228,13 @@ export const parseLogic = (op: "and" | "or", negate: boolean, value: string): Lo
 // order / pagination
 // ---------------------------------------------------------------------------
 
-export const parseOrder = (input: string): OrderTerm[] =>
+export const parseOrder = (input: string): OrderTerm[] => {
+  const bad = checkOrder(input);
+  if (bad) throw bad;
+  return parseOrderTerms(input);
+};
+
+const parseOrderTerms = (input: string): OrderTerm[] =>
   splitTopLevel(input, ",").map((raw) => {
     const tokens = raw.trim().split(".");
     let nulls: "first" | "last" | undefined;
@@ -235,17 +250,19 @@ export const parseOrder = (input: string): OrderTerm[] =>
     }
     const expr = tokens.join(".");
     const related = /^([^()>-]+)\((.+)\)$/.exec(expr);
+    if (related && /[()]/.test(related[2]!)) {
+      throw parseError(`"failed to parse order (${input})"`, `unexpected '(' in "${expr}"`);
+    }
     const base = related
       ? { relation: unquote(related[1]!), field: parseField(related[2]!) }
       : { field: parseField(expr) };
     return { ...base, dir, ...(nulls ? { nulls } : {}) };
   });
 
-const parseCount = (name: string, v: string): number => {
-  if (!/^\d+$/.test(v)) {
-    throw parseError(`Failed to parse ${name}`, `${name} must be a non-negative integer, got "${v}"`);
-  }
-  return Number(v);
+/** PostgREST ignores a `limit`/`offset` that is not an integer; a negative limit is refused later. */
+const parseCount = (name: "limit" | "offset", v: string): number | undefined => {
+  const ok = name === "limit" ? /^-?\d+$/.test(v) : /^\d+$/.test(v);
+  return ok ? Number(v) : undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -276,8 +293,13 @@ export const parseQuery = (
   let onConflict: string[] | undefined;
   let columns: string[] | undefined;
   for (const [k, v] of params) {
-    if (k === "select") select = parseSelect(v);
-    else if (k === "on_conflict") onConflict = splitTopLevel(v, ",").map(unquote).filter(Boolean);
+    if (k === "select") {
+      // PostgREST's parser stops at the first thing it cannot continue with and ignores the rest.
+      const end = checkSelect(v);
+      if (end instanceof PgRestError) throw end;
+      const used = v.slice(0, end).trim();
+      select = used === "" ? [{ kind: "star" }] : parseSelect(used);
+    } else if (k === "on_conflict") onConflict = splitTopLevel(v, ",").map(unquote).filter(Boolean);
     else if (k === "columns") columns = splitTopLevel(v, ",").map(unquote).filter(Boolean);
   }
 
@@ -320,13 +342,17 @@ export const parseQuery = (
       if (last === "and" || last === "or") {
         const negate = path[path.length - 1] === "not";
         if (negate) path = path.slice(0, -1);
-        paramsFor(path, key).filters.push(parseLogic(last, negate, value));
+        const used = checkLogicTree(negate ? `not.${last}` : last, value);
+        if (used instanceof PgRestError) throw used;
+        paramsFor(path, key).filters.push(parseLogic(last, negate, value.slice(0, used)));
       } else if (last === "order") {
         paramsFor(path, key).order.push(...parseOrder(value));
       } else if (last === "limit") {
-        paramsFor(path, key).limit = parseCount("limit", value);
+        const n = parseCount("limit", value);
+        if (n !== undefined) paramsFor(path, key).limit = n;
       } else {
-        paramsFor(path, key).offset = parseCount("offset", value);
+        const n = parseCount("offset", value);
+        if (n !== undefined) paramsFor(path, key).offset = n;
       }
       continue;
     }

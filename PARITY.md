@@ -38,17 +38,19 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `any` / `all` quantifiers | ✅ | |
 | Full-text search `fts plfts phfts wfts` with language | ✅ | |
 | `order` (asc/desc, nulls first/last, JSON paths) | ✅ | |
-| `order` by related column (`order=rel(col)`) | ❌ | `PGRST127` |
+| `order` by related column (`order=rel(col)`) | ✅ | To-one relationships, including computed ones |
 | `limit`, `offset`, `Range` / `Range-Unit` headers | ✅ | `206` / `416` |
 | `Prefer: count=exact` | ✅ | `Content-Range` |
 | `count=planned` / `estimated` | ✅ | Via `EXPLAIN` |
 | Aggregate functions (`count() sum() avg() min() max()`) with implicit `GROUP BY` | ✅ | Always on; PostgREST needs `db-aggregates-enabled` |
-| Aggregates combined with embeds / inside embeds | ❌ | `PGRST127` |
+| Aggregates combined with embeds / inside embeds | ✅ | |
 | Views | ✅ | Read/write per `pg_relation_is_updatable` |
 | Materialized views, foreign tables, partitioned tables | 🟡 | Introspected as relations; not specifically tested |
+| Non-numeric `limit`/`offset` ignored, negative `limit` → `PGRST103`, unsupported methods → empty 405 | ✅ | |
 | `Accept: application/json`, `text/csv`, `application/vnd.pgrst.object+json` (+ `nulls=stripped`) | ✅ | Singular → `PGRST116` |
-| `application/vnd.pgrst.plan` (EXPLAIN output) | ❌ | |
-| `application/geo+json`, `octet-stream`, `text/plain`, custom media type handlers | ❌ | |
+| `application/vnd.pgrst.plan` (EXPLAIN output) | ✅ | `for=` and `options=`; off unless `planEnabled` (like `db-plan-enabled`) |
+| Custom media type handlers: aggregates named after a media type (per table or `anyelement`, incl. the `*/*` catch-all) returning a domain | ✅ | `text/plain`, `text/xml`, `application/octet-stream`, … |
+| `application/geo+json` | ✅ | `FeatureCollection` via PostGIS `ST_AsGeoJSON(record)`; needs PostGIS in your database. Tested against PostgREST on a PostGIS image |
 | `Prefer: handling=strict/lenient` | ✅ | |
 | `Prefer: timezone=` | ✅ | |
 | Response `Preference-Applied`, `Vary`, `Location` | ✅ | |
@@ -65,11 +67,11 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Filters, `order`, `limit`, `offset` on embeds (`embed.col=…`) | ✅ | |
 | `embed=is.null` / `not.is.null` presence filters | ✅ | |
 | Spread `...rel(col)` of to-one | ✅ | |
-| Spread of to-many | ❌ | `PGRST127` |
-| Embedding through a view's underlying foreign keys | ❌ | Views are not linked to the base-table FKs |
-| Computed / function-based relationships | ❌ | |
+| Spread of to-many | ✅ | Per-column arrays; aggregates inside → `PGRST127` like PostgREST |
+| Embedding through a view's underlying foreign keys | ✅ | Resolved from the view definition, view↔table and view↔view |
+| Computed / function-based relationships | ✅ | |
 | Embedding on RPC results returning a table type | ✅ | |
-| Embedded `count` / spread aggregates | ❌ | |
+| Embedded `count` / spread aggregates | ✅ | |
 
 ## Writing
 
@@ -80,15 +82,15 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `columns=` | ✅ | `PGRST204` for unknown columns |
 | `Prefer: missing=default` | ✅ | |
 | `Prefer: return=minimal/headers-only/representation` | ✅ | `Location` header on insert |
-| Upsert: `resolution=merge-duplicates / ignore-duplicates`, `on_conflict` | ✅ | |
+| Upsert: `resolution=merge-duplicates / ignore-duplicates`, `on_conflict` | ✅ | Status 200 when only existing rows were updated, else 201 |
 | `PUT` single-row upsert | ✅ | `PGRST114` / `PGRST115` checks |
 | `PATCH` with filters | ✅ | Empty body handled |
 | `DELETE` with filters | ✅ | |
-| `limit`/`offset`/`order` on `PATCH`/`DELETE` | 🟡 | Limited-write validation is not fully ported |
+| `limit`/`offset`/`order` on `PATCH`/`DELETE` | ✅ | Ignored, as in PostgREST v16 (`PUT` with limit/offset → `PGRST114`) |
 | `Prefer: max-affected` (`PGRST124`) | ✅ | |
 | Write response `select`, embeds and filters | ✅ | |
 | Write through updatable views | ✅ | |
-| `Prefer: params=single-object` | ❌ | Removed |
+| `Prefer: params=single-object` | ➖ | Removed from PostgREST v16 itself |
 
 ## Functions (RPC)
 
@@ -101,22 +103,25 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Single unnamed `json`/`jsonb` parameter takes the whole body | ✅ | |
 | Overloads, `PGRST202` / `PGRST203` | ✅ | |
 | `GET` only for non-volatile functions (read-only transaction) | ✅ | |
-| `VARIADIC` parameters | ❌ | |
-| Bulk call (array body) | ❌ | |
+| `VARIADIC` parameters | ✅ | |
+| Bulk call (array body) | ✅ | `PGRST102` when the objects' keys differ |
 | `response.headers` / `response.status` GUCs set by the function | ✅ | |
 | `Prefer: max-affected` on RPC | ✅ | `PGRST128` for non-set functions |
-| Scalar-function custom media types (`text/plain`, `application/octet-stream`, …) | ❌ | |
+| Scalar-function custom media types (a domain named `text/plain`, `application/octet-stream`, … as return type) | ✅ | Text and `bytea` bodies |
 
 ## Errors
 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | PostgREST error body `{code, message, details, hint}` | ✅ | |
+| Parse errors of filters and `order` (`unexpected "f" expecting …`, line/column) | ✅ | Same wording as PostgREST's Parsec parser |
+| Parse errors of `select` and `and()`/`or()` | ✅ | Ported PostgREST's Parsec grammar: same wording, and the same leniency (the select parse stops where it cannot continue, `select=id)` works) |
+| Invalid / odd payloads (`[]`, scalars, arrays of scalars, array on `PATCH`) | ✅ | Same status and message as PostgREST |
 | `PGRST1xx`–`PGRST3xx` codes (parsing, schema cache, auth) | ✅ | Most; `PGRST3xx` JWT codes are replaced by whatever `resolveContext` throws |
 | SQLSTATE → HTTP status table | ✅ | |
 | `RAISE ... SQLSTATE 'PTxyz'` → HTTP status | ✅ | |
 | `RAISE ... SQLSTATE 'PGRST'` with JSON message / detail | ✅ | |
-| `WWW-Authenticate` header on 401 | ❌ | Add it yourself in `resolveContext`'s `PgRestError` headers |
+| `WWW-Authenticate` header on 401 | ✅ | `Bearer` |
 | Serialization failure retry | ✅ | Up to 2 retries on `40001` |
 
 ## Other
@@ -127,7 +132,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `OPTIONS` / CORS | 🟡 | `OPTIONS` handled with `Allow`; CORS headers are the host's responsibility |
 | Schema cache from `pg_catalog` | ✅ | Tables, views, columns, PK/UK/FK, functions, comments |
 | Domain types, enums, range/array/composite types | 🟡 | Passed through as Postgres returns them; only common types tested |
-| Hot-reloading on DDL | ❌ | Call `reloadSchema()` after migrations |
+| Hot-reloading on DDL | ➖ | Needs a dedicated `LISTEN` connection (see the README); call `reloadSchema()` after migrations |
 
 ## Verification status
 
@@ -152,7 +157,6 @@ The comparison only covers what the cases exercise; it is not exhaustive. Anythi
 | --- | --- | --- |
 | CSV output of array columns | PostgreSQL text syntax `{a,b}` | JSON text `["a","b"]` |
 | `limit=abc` | ignored (200) | `400 PGRST100` |
-| Query-string parse error texts (`id=bogus.1`, `select=id,,name`) | parsec output in `message`/`details` | different wording, same `PGRST100` code and status |
 | Invalid cast target (`select=id::int4 from x`) | forwarded to PostgreSQL → `42601` | rejected up front: `400 PGRST100` (SQL-injection hardening) |
 | `order=rel(col)` | supported for embedded to-one; `PGRST108` when not embedded | `PGRST127` not implemented |
 | `merge-duplicates` upsert that only updates rows | `200` | `201` |

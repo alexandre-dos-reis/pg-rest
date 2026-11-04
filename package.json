@@ -46,6 +46,8 @@
     "prepublishOnly": "bun run build",
     "test:compare": "bun test tests/compare",
     "bench": "bun bench/run.ts",
+    "check:examples": "bun run scripts/check-example-versions.ts",
+    "link:examples": "scripts/link-examples.sh",
     "lint": "oxlint src tests",
     "fmt": "oxfmt src tests",
     "fmt:check": "oxfmt --check src tests"

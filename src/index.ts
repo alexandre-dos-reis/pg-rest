@@ -20,8 +20,11 @@ export interface PgRestOptions {
   readonly db: DbAdapter;
   /** Schemas to expose. The first one is the default. Default `["public"]`. */
   readonly schemas?: ReadonlyArray<string>;
-  /** Role used when the request context has none. Default `"anon"`. */
-  readonly anonymousRole?: string;
+  /**
+   * Role used when the request context has none. Default `"anon"`. `false` refuses anonymous requests
+   * with `401 PGRST302` (like PostgREST without `db-anon-role`).
+   */
+  readonly anonymousRole?: string | false;
   /**
    * Decide who is calling. Return the role and claims (what RLS policies read
    * from `request.jwt.claims`). There is no JWT: use a session cookie, an API
@@ -39,6 +42,11 @@ export interface PgRestOptions {
   readonly extraSearchPath?: ReadonlyArray<string>;
   /** Honor `Prefer: tx=rollback` (PostgREST `db-tx-end`). Default `false`. */
   readonly allowTxOverride?: boolean;
+  /**
+   * Answer `Accept: application/vnd.pgrst.plan` requests with the query plan (PostgREST `db-plan-enabled`).
+   * A plan reveals the structure of the database: keep it off, or restrict it, in production. Default `false`.
+   */
+  readonly planEnabled?: boolean;
   /** Serve the OpenAPI document at `/`. Default `true`. */
   readonly openApi?: boolean;
   /** Expose `request.headers`, `request.cookies`, `request.method`, `request.path` to SQL. Default `true`. */
@@ -94,11 +102,12 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
 
   const config: CoreConfig = {
     schemas,
-    anonymousRole: options.anonymousRole ?? "anon",
+    anonymousRole: options.anonymousRole === false ? undefined : (options.anonymousRole ?? "anon"),
     maxRows: options.maxRows,
     basePath: options.basePath ?? "",
     extraSearchPath: options.extraSearchPath ?? ["public"],
     allowTxOverride: options.allowTxOverride ?? false,
+    planEnabled: options.planEnabled ?? false,
     openApi: options.openApi ?? true,
     requestSettings: options.requestSettings ?? true,
     preRequest: options.preRequest,

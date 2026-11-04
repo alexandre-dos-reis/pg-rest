@@ -35,7 +35,8 @@ export const startPostgrest = async (
       PGRST_DB_ANON_ROLE: "anon",
       PGRST_DB_TX_END: "commit-allow-override",
       PGRST_DB_POOL: String(pool),
-      PGRST_DB_AGGREGATES_ENABLED: "true", // off by default in v16; pg-rest always allows aggregates
+      PGRST_DB_AGGREGATES_ENABLED: "true", // off by default in v16; pg-rest allows aggregates unless turned off
+      PGRST_DB_PLAN_ENABLED: "true", // off by default; pg-rest needs the planEnabled option
       PGRST_JWT_SECRET: JWT_SECRET,
       PGRST_SERVER_HOST: "127.0.0.1",
       PGRST_SERVER_PORT: String(port),

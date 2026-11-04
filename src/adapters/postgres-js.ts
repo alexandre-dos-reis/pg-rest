@@ -1,13 +1,18 @@
 import type { DbAdapter, DbSession, Row } from "../adapter";
 
-/** The subset of postgres.js (`postgres`) that is used. */
-interface PostgresJsLike {
+/** All that is needed to run a query, inside a transaction or outside one. */
+interface PostgresJsQueryable {
   unsafe(query: string, params?: any[]): PromiseLike<any>;
-  begin<T>(fn: (tx: PostgresJsLike) => Promise<T>): Promise<T>;
+}
+
+/** The subset of postgres.js (`postgres`) that is used. */
+interface PostgresJsLike extends PostgresJsQueryable {
+  // Not PostgresJsLike: postgres.js passes a TransactionSql here, which has no `end`.
+  begin<T>(fn: (tx: PostgresJsQueryable) => Promise<T>): Promise<T>;
   end(): Promise<void>;
 }
 
-const session = (sql: PostgresJsLike): DbSession => ({
+const session = (sql: PostgresJsQueryable): DbSession => ({
   async query(text, params) {
     return Array.from((await sql.unsafe(text, params ? [...params] : [])) as Iterable<Row>);
   },

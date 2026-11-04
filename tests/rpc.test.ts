@@ -78,9 +78,13 @@ describe.skipIf(!hasDb)("rpc", () => {
   });
 
   test("a single unnamed json parameter receives the whole body", async () => {
-    const body = [{ a: 1 }, { b: [1, 2, 3] }];
+    const body = [{ a: 1 }, { a: [1, 2, 3] }];
     const r = await t.post("/rpc/echo_unnamed", body);
     expect(r.json()).toEqual(body);
+    // like PostgREST, the objects of an array body must agree on their keys
+    const mismatch = await t.post("/rpc/echo_unnamed", [{ a: 1 }, { b: 2 }]);
+    expect(mismatch.status).toBe(400);
+    expect(mismatch.json().code).toBe("PGRST102");
     expect(
       (await t.post("/rpc/echo_unnamed", "just a string", { headers: { "Content-Type": "application/json" } })).status,
     ).toBe(400);

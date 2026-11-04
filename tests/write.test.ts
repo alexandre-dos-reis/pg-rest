@@ -159,7 +159,7 @@ describe.skipIf(!hasDb)("writes", () => {
         { id: 1, name: "Ada Lovelace" },
         { ctx, headers: { Prefer: "return=representation, resolution=merge-duplicates" } },
       );
-      expect(r.status).toBe(201);
+      expect(r.status).toBe(200); // only an existing row was updated
       expect(r.json()).toEqual([{ id: 1, name: "Ada Lovelace" }]);
       expect(await count("clients")).toBe(3);
     });
@@ -253,14 +253,21 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(r.json()).toEqual([]);
     });
     test("bad payloads", async () => {
-      expect((await t.patch("/orders", [{ status: "x" }], { ctx })).json().code).toBe("PGRST102");
+      // an array payload uses its first element, a scalar one sets nothing (as in PostgREST)
+      expect((await t.patch("/orders?id=eq.1", [{ status: "x" }], { ctx })).status).toBe(204);
+      expect((await t.patch("/orders?id=eq.1", 1, { ctx })).status).toBe(204);
       expect((await t.patch("/orders", { nope: 1 }, { ctx })).json().code).toBe("PGRST204");
       expect((await t.call("PATCH", "/orders", { ctx })).json().code).toBe("PGRST102");
     });
-    test("limit and offset are not supported on writes", async () => {
-      const r = await t.patch("/orders?limit=1", { status: "x" }, { ctx });
-      expect(r.status).toBe(400);
-      expect(r.json().code).toBe("PGRST100");
+    test("limit, offset and order are ignored on PATCH and DELETE (as in PostgREST v16)", async () => {
+      const before = (await t.get("/orders?select=id&status=neq.x", { ctx })).json().length;
+      const r = await t.patch(
+        "/orders?limit=1&offset=1&order=id&select=id",
+        { status: "x" },
+        { ctx, headers: { Prefer: "return=representation" } },
+      );
+      expect(r.status).toBe(200);
+      expect(r.json().length).toBe(before);
     });
     test("views that are not updatable fail in the database (class 55 is a 500, like PostgREST)", async () => {
       const r = await t.patch("/client_totals", { revenue: 1 }, { ctx });

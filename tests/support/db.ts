@@ -41,3 +41,17 @@ export const createTestDb = async (): Promise<TestDb> => {
     },
   };
 };
+
+/** True when the test server has the PostGIS extension available (GeoJSON tests are skipped otherwise). */
+export const hasPostgis: boolean = await (async () => {
+  if (!ADMIN_URL) return false;
+  const admin = new SQL(ADMIN_URL);
+  try {
+    const rows = await admin.unsafe("SELECT 1 FROM pg_available_extensions WHERE name = 'postgis'");
+    return rows.length > 0;
+  } catch {
+    return false;
+  } finally {
+    await admin.close();
+  }
+})();

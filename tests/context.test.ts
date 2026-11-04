@@ -168,4 +168,18 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
     expect(((await res.json()) as { code: string }).code).toBe("PGRST001");
     await api.close();
   });
+
+  test("anonymous access can be refused (PGRST302), and every 401 asks for credentials", async () => {
+    t = await makeApi({ anonymousRole: false });
+    const anon = await t.get("/clients");
+    expect(anon.status).toBe(401);
+    expect(anon.json()).toEqual({
+      code: "PGRST302",
+      message: "Anonymous access is disabled",
+      details: null,
+      hint: null,
+    });
+    expect(anon.headers.get("www-authenticate")).toBe("Bearer");
+    expect((await t.get("/clients", { ctx: { role: "authenticated" } })).status).toBe(200);
+  });
 });

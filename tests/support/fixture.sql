@@ -116,6 +116,18 @@ BEGIN
   END IF;
 END $$;
 
+CREATE FUNCTION api.sum_all(VARIADIC nums int[]) RETURNS int LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(sum(n), 0)::int FROM unnest(nums) n $$;
+CREATE FUNCTION api.join_all(sep text, VARIADIC parts text[]) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT array_to_string(parts, sep) $$;
+CREATE FUNCTION api.blob() RETURNS bytea LANGUAGE sql IMMUTABLE AS $$ SELECT '\x68656c6c6f'::bytea $$;
+
+-- Computed relationships: functions taking a table row and returning related rows.
+CREATE FUNCTION api.order_client(api.orders) RETURNS SETOF api.clients ROWS 1 LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.clients WHERE id = $1.client_id $$;
+CREATE FUNCTION api.recent_orders(api.clients) RETURNS SETOF api.orders LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.orders WHERE client_id = $1.id ORDER BY id DESC $$;
+CREATE FUNCTION api.client_profile(api.clients) RETURNS api.profiles LANGUAGE sql STABLE AS $$
+  SELECT * FROM api.profiles WHERE client_id = $1.id $$;
+
 -- Data
 INSERT INTO api.clients (name, email, meta, tags) VALUES
   ('Ada',   'ada@example.com',   '{"tier":"gold","address":{"city":"London"}}', '{vip,early}'),
@@ -138,3 +150,33 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA api, v2 TO authenti
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA api, v2 TO authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA api TO anon, authenticated;
 REVOKE EXECUTE ON FUNCTION api.nothing() FROM anon;
+
+-- custom media type handlers
+CREATE DOMAIN api."text/plain" AS text;
+CREATE DOMAIN api."application/octet-stream" AS bytea;
+CREATE DOMAIN api."text/xml" AS text;
+CREATE FUNCTION api.plain_hi() RETURNS api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT 'hi there' $$;
+CREATE FUNCTION api.bin_hi() RETURNS api."application/octet-stream" LANGUAGE sql IMMUTABLE AS $$ SELECT '\x68656c6c6f'::bytea $$;
+CREATE FUNCTION api.xml_hi() RETURNS api."text/xml" LANGUAGE sql IMMUTABLE AS $$ SELECT '<a>1</a>' $$;
+CREATE FUNCTION api.nums_plain() RETURNS SETOF api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT generate_series(1,3)::text $$;
+CREATE FUNCTION api.clients_txt_t(state text, c api.clients) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(state,'') || c.name || ';' $$;
+CREATE FUNCTION api.clients_fin(state text) RETURNS api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT state $$;
+CREATE AGGREGATE api."text/plain"(api.clients) (sfunc = api.clients_txt_t, stype = text, finalfunc = api.clients_fin);
+
+-- GeoJSON (application/geo+json) needs PostGIS: only created when the extension is available
+DO $do$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS postgis;
+  CREATE TABLE api.places (id int PRIMARY KEY, name text, geom geometry(Point,4326), area geometry(Polygon,4326));
+  INSERT INTO api.places VALUES
+    (1, 'a', ST_SetSRID(ST_MakePoint(1,2),4326), ST_GeomFromText('POLYGON((0 0,1 0,1 1,0 0))',4326)),
+    (2, 'b', ST_SetSRID(ST_MakePoint(3.5,4),4326), NULL),
+    (3, 'c', NULL, NULL);
+  GRANT SELECT ON api.places TO anon, authenticated;
+  CREATE FUNCTION api.all_places() RETURNS SETOF api.places LANGUAGE sql STABLE AS 'SELECT * FROM api.places';
+  CREATE VIEW api.place_names AS SELECT id, name FROM api.places;
+  GRANT SELECT ON api.place_names TO anon, authenticated;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'PostGIS not available: skipping the GeoJSON fixture (%)', SQLERRM;
+END
+$do$;

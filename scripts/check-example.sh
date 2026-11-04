@@ -3,23 +3,28 @@
 #   scripts/check-example.sh with-node-postgres postgres://user:pw@host:5432/dbname
 set -euo pipefail
 name="$1"; export DATABASE_URL="${2:-}"; port="${PORT:-3101}"; export PORT="$port"
-dir="$(cd "$(dirname "$0")/../examples/$name" && pwd)"
-cd "$dir"
-if [ "$name" = with-bun ]; then bun install >/dev/null; bun run server.ts >/tmp/$name.log 2>&1 & else npm install --no-audit --no-fund >/dev/null; node server.ts >/tmp/$name.log 2>&1 & fi
+root="$(cd "$(dirname "$0")/.." && pwd)"
+# pg-rest is a version dependency that is not on the registry yet, so the example runs against the local build.
+"$root/scripts/link-examples.sh" "$name" >/dev/null
+cd "$root/examples/$name"
+if [ "$name" = with-bun ]; then bun run server.ts >/tmp/$name.log 2>&1 & else node server.ts >/tmp/$name.log 2>&1 & fi
 pid=$!; trap 'kill $pid 2>/dev/null || true' EXIT
-for i in $(seq 1 60); do curl -fs "localhost:$port/todos?limit=1" >/dev/null 2>&1 && break; sleep 0.5; done
-u="localhost:$port"; fail=0
+# with-better-auth mounts pg-rest under a basePath, to share the port with Better Auth.
+base=""
+if [ "$name" = with-better-auth ]; then base="/api/rest"; fi
+u="localhost:$port$base"; fail=0
+for i in $(seq 1 60); do curl -fs "$u/todos?limit=1" >/dev/null 2>&1 && break; sleep 0.5; done
 # how "alice" identifies herself: a header in most examples, a real session cookie with Better Auth
 ALICE=(-H 'X-User: alice')
 if [ "$name" = with-better-auth ]; then
   jar="$(mktemp)"
-  curl -s -c "$jar" "$u/api/auth/sign-up/email" -H 'Content-Type: application/json' -d '{"name":"Alice","email":"alice@example.com","password":"correct horse battery"}' >/dev/null
+  curl -s -c "$jar" "localhost:$port/api/auth/sign-up/email" -H 'Content-Type: application/json' -d '{"name":"Alice","email":"alice@example.com","password":"correct horse battery"}' >/dev/null
   ALICE=(-b "$jar")
 fi
 check() { # description, expected, actual
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected [$2] got [$3]"; fail=1; fi
 }
-check "anon read with embed" '[{"id":1,"title":"Try pg-rest","tags":[{"label":"demo"},{"label":"bun"}]}]' "$(curl -s "$u/todos?select=id,title,tags(label)&id=eq.1" | tr -d '\n' | sed 's/, */,/g; s/\[ */[/; s/ *\]/]/g')"
+check "anon read with embed" '[{"id":1,"title":"Try pg-rest","tags":[{"label":"demo"},{"label":"bun"}]}]' "$(curl -s "$u/todos?select=id,title,tags(label)&id=eq.1" | tr -d '\n' | sed 's/, */,/g; s/": /":/g; s/\[ */[/; s/ *\]/]/g')"
 check "anon write is refused (401)" 401 "$(curl -s -o /dev/null -w '%{http_code}' "$u/todos" -H 'Content-Type: application/json' -d '{"title":"nope"}')"
 created="$(curl -s -w '\n%{http_code}' "$u/todos" "${ALICE[@]}" -H 'Content-Type: application/json' -H 'Prefer: return=representation' -d '{"title":"Ship it"}')"
 check "alice creates a todo (201)" 201 "$(echo "$created" | tail -1)"

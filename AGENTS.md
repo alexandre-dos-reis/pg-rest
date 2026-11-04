@@ -45,7 +45,7 @@ bun run test:compare   # needs POSTGREST_BIN and TEST_DATABASE_URL
 bun run bench          # see bench/README.md
 ```
 
-- Integration tests are **skipped** (not failed) without `TEST_DATABASE_URL`: a superuser URL of a throwaway PostgreSQL 16 server. Each test
+- Integration tests are **skipped** (not failed) without `TEST_DATABASE_URL`: a superuser URL of a throwaway PostgreSQL 16 server (with PostGIS to run the `application/geo+json` tests, otherwise they are skipped). Each test
   suite creates and drops its own database, so never point it at data you care about. A green `bun test` with no database proves little: run it
   with one.
 - The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.0** static binary; CI downloads it from the GitHub release).

@@ -45,6 +45,8 @@ export interface InsertOptions {
   readonly onConflict?: ReadonlyArray<string> | undefined;
   readonly resolution?: "merge-duplicates" | "ignore-duplicates" | undefined;
   readonly missingDefault?: boolean | undefined;
+  /** Flag really-inserted rows (`pgrst_inserted`) of a merge-duplicates upsert; see `upsertColumns`. */
+  readonly flagInserted?: boolean | undefined;
   readonly returning: Returning;
 }
 
@@ -62,6 +64,13 @@ export const buildInsert = (o: InsertOptions): string => {
     throw new PgRestError(400, "PGRST102", "All object keys must match");
   }
   checkColumns(rel, cols);
+
+  if (o.rows.length === 0) {
+    // An empty array inserts nothing.
+    const first = rel.columns[0];
+    if (!first) throw new PgRestError(400, "PGRST102", "Cannot insert into a relation without columns");
+    return `INSERT INTO ${target} (${quoteIdent(first.name)}) SELECT NULL WHERE FALSE RETURNING ${returning}`;
+  }
 
   if (cols.length === 0) {
     // Only empty objects: insert default rows.
@@ -114,7 +123,21 @@ export const buildInsert = (o: InsertOptions): string => {
     // on_conflict without a resolution preference has no effect (as in PostgREST).
   }
 
-  return `INSERT INTO ${target} (${colList}) ${select}${conflict} RETURNING ${returning}`;
+  // A merge-duplicates upsert flags which rows were really inserted (xmax = 0), so the
+  // response can be 200 instead of 201 when it only updated existing rows.
+  const flag =
+    o.flagInserted && o.resolution === "merge-duplicates"
+      ? `, (${quoteIdent(ROOT_ALIAS)}.xmax = 0) AS pgrst_inserted`
+      : "";
+  const ret = flag && returning === "1" ? "1 AS pgrst_one" : returning;
+  return `INSERT INTO ${target} (${colList}) ${select}${conflict} RETURNING ${ret}${flag}`;
+};
+
+/** Columns of `buildInsert`'s output without the `pgrst_inserted` marker, for a merge-duplicates upsert. */
+export const upsertColumns = (rel: Relation, returning: Returning): string[] => {
+  if (returning === "representation") return rel.columns.map((c) => quoteIdent(c.name));
+  if (returning === "pk" && rel.pk.length > 0) return rel.pk.map(quoteIdent);
+  return ["pgrst_one"];
 };
 
 export interface UpdateOptions {
