@@ -1,5 +1,11 @@
 # pg-rest
 
+## 0.1.3
+
+### Patch Changes
+
+- d870849: fix package name ref is docs and examples
+
 ## 0.1.2
 
 ### Patch Changes
