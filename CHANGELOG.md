@@ -1,5 +1,11 @@
 # pg-rest
 
+## 0.1.1
+
+### Patch Changes
+
+- confirm trust between github and npm
+
 ## 0.1.0
 
 ### Minor Changes
