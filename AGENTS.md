@@ -78,8 +78,13 @@ merging that PR publishes to npm and tags a GitHub release. `bun run version` is
 writes `CHANGELOG.md`, and points the examples at the new version, since they depend on `pg-rest` by version and would
 otherwise ask npm for one that does not exist.
 
-A change with nothing to release (tests, docs, CI) needs no changeset. Publishing needs an `NPM_TOKEN` repository secret;
-provenance is on (`id-token: write`), so releases are attested to the workflow that built them.
+A change with nothing to release (tests, docs, CI) needs no changeset.
+
+There is **no npm token**: publishing authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers),
+where the npm CLI exchanges the workflow's OIDC token for a short-lived credential — hence `id-token: write`, and hence no
+`NODE_AUTH_TOKEN` (it would take precedence and defeat it). Configure it once at *npmjs.com → Packages → pg-rest → Settings
+→ Trusted publishing*, naming `release.yml`; a new configuration expires if its first publish does not happen within 2 days.
+Releases carry provenance, so they are attested to the workflow that built them.
 
 ## Conventions and gotchas
 
