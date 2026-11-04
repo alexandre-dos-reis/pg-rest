@@ -137,7 +137,21 @@ export const parseRange = (range: string | null, unit: string | null): RangeSpec
   return { offset: start, limit: end - start + 1 };
 };
 
+/** A custom media type the target can answer with (see `src/media.ts`). */
+export interface MediaChoice {
+  readonly mediaType: string;
+  /** `Content-Type` of the response. */
+  readonly contentType: string;
+  /** The body is binary (a `bytea` domain). */
+  readonly bytea: boolean;
+  /** Aggregate that renders the rows (`"schema"."media/type"(…)`), or `undefined` when the body is the scalar result itself. */
+  readonly aggregate?: string;
+  /** Cast the row to this table type before aggregating (the aggregate takes a table row, not `anyelement`). */
+  readonly rowType?: string;
+}
+
 export type OutputFormat =
+  | { readonly kind: "handler"; readonly choice: MediaChoice }
   | { readonly kind: "json"; readonly stripNulls: boolean }
   | { readonly kind: "object"; readonly stripNulls: boolean }
   | { readonly kind: "csv" }
@@ -179,7 +193,12 @@ const describeEntry = (e: { type: string; forType: string | undefined; options: 
 };
 
 /** Pick an output format from the `Accept` header. */
-export const parseAccept = (accept: string | null, isRoot: boolean, planEnabled = false): OutputFormat => {
+export const parseAccept = (
+  accept: string | null,
+  isRoot: boolean,
+  planEnabled = false,
+  choices: ReadonlyArray<MediaChoice> = [],
+): OutputFormat => {
   const entries = (accept ?? "*/*")
     .split(",")
     .map((e) => e.trim())
@@ -204,6 +223,8 @@ export const parseAccept = (accept: string | null, isRoot: boolean, planEnabled 
         inner,
       };
     }
+    const custom = choices.find((c) => c.mediaType === type);
+    if (custom && !isRoot) return { kind: "handler", choice: custom };
     switch (type) {
       case "*/*":
       case "application/*":

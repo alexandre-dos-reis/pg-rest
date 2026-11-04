@@ -130,7 +130,7 @@ all filter operators and `and/or/not`, JSON paths, casts, aggregates, ordering, 
 spread of to-many, order by related column, embedding through views and computed relationships, aggregates in embeds,
 `Prefer: count=exact|planned|estimated`, inserts (bulk, `columns`, `missing=default`), upsert, PATCH, PUT, DELETE,
 `return=` / `handling=` / `max-affected` / `timezone` / `tx`, RPC (GET/POST, overloads, `VARIADIC`, bulk calls, set/scalar/void, unnamed json arg,
-response GUC headers/status), CSV / singular / `nulls=stripped` / plan representations, `WWW-Authenticate` on 401, OpenAPI, PostgREST error codes
+response GUC headers/status), CSV / singular / `nulls=stripped` / plan representations, custom media type handlers (domains and aggregates named after a media type), `WWW-Authenticate` on 401, OpenAPI, PostgREST error codes
 and `PTxyz` / `RAISE ... SQLSTATE 'PGRST'` conventions.
 
 ## Not supported
@@ -157,7 +157,7 @@ code is handled by *your* application instead. These are not gaps: adding them w
 
 These exist in PostgREST and are not implemented *yet*. Contributions welcome; the status of each is in [`PARITY.md`](PARITY.md).
 
-- Custom media type handlers (`geo+json`, `octet-stream`, `text/plain`, `*/*` handlers)
+- `application/geo+json` (needs PostGIS)
 - Limited-write validation on `PATCH`/`DELETE` (`limit`/`offset`/`order`), PostgREST's exact parse-error wording
 
 ## Security notes

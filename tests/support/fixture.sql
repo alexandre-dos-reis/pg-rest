@@ -150,3 +150,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA api, v2 TO authenti
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA api, v2 TO authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA api TO anon, authenticated;
 REVOKE EXECUTE ON FUNCTION api.nothing() FROM anon;
+
+-- custom media type handlers
+CREATE DOMAIN api."text/plain" AS text;
+CREATE DOMAIN api."application/octet-stream" AS bytea;
+CREATE DOMAIN api."text/xml" AS text;
+CREATE FUNCTION api.plain_hi() RETURNS api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT 'hi there' $$;
+CREATE FUNCTION api.bin_hi() RETURNS api."application/octet-stream" LANGUAGE sql IMMUTABLE AS $$ SELECT '\x68656c6c6f'::bytea $$;
+CREATE FUNCTION api.xml_hi() RETURNS api."text/xml" LANGUAGE sql IMMUTABLE AS $$ SELECT '<a>1</a>' $$;
+CREATE FUNCTION api.nums_plain() RETURNS SETOF api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT generate_series(1,3)::text $$;
+CREATE FUNCTION api.clients_txt_t(state text, c api.clients) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(state,'') || c.name || ';' $$;
+CREATE FUNCTION api.clients_fin(state text) RETURNS api."text/plain" LANGUAGE sql IMMUTABLE AS $$ SELECT state $$;
+CREATE AGGREGATE api."text/plain"(api.clients) (sfunc = api.clients_txt_t, stype = text, finalfunc = api.clients_fin);

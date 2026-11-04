@@ -64,9 +64,23 @@ export interface FunctionDef {
   readonly returnRelation?: { readonly schema: string; readonly name: string };
   /** Planner row estimate; 1 on a set-returning function makes a computed relationship to-one. */
   readonly rows: number;
+  /** Scalar functions returning a domain named like a media type (`"text/plain"`, …): the raw value is the body. */
+  readonly returnMediaType?: { readonly name: string; readonly bytea: boolean };
+}
+
+/** A custom media type handler: an aggregate named after the media type that returns a domain (see PostgREST's "custom media types"). */
+export interface MediaHandler {
+  readonly schema: string;
+  /** The aggregate's name, i.e. the media type (for example `text/plain`, or the catch-all). */
+  readonly mediaType: string;
+  /** The table whose rows it aggregates, or `undefined` for `anyelement`. */
+  readonly argRelation?: { readonly schema: string; readonly name: string };
+  /** True when the domain wraps `bytea` (the body is binary). */
+  readonly bytea: boolean;
 }
 
 export interface SchemaCache {
+  readonly mediaHandlers: ReadonlyArray<MediaHandler>;
   readonly schemas: ReadonlyArray<string>;
   readonly relations: ReadonlyMap<string, Relation>;
   readonly foreignKeys: ReadonlyArray<ForeignKey>;
@@ -293,6 +307,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     rows: number;
     arg_rel: { schema: string; name: string } | null;
     ret_rel: { schema: string; name: string } | null;
+    ret_media: { name: string; bytea: boolean } | null;
     args: Array<{ name: string; type: string; mode: string }>;
   }>(
     db,
@@ -304,6 +319,8 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
             p.pronargdefaults AS n_defaults,
             obj_description(p.oid, 'pg_proc') AS comment,
             p.prorows::float8 AS rows,
+            CASE WHEN rt.typtype = 'd' AND rt.typname LIKE '%/%'
+                 THEN json_build_object('name', rt.typname, 'bytea', rt.typbasetype = 'bytea'::regtype) END AS ret_media,
             (SELECT json_build_object('schema', n2.nspname, 'name', c2.relname)
                FROM pg_type t2 JOIN pg_class c2 ON c2.oid = t2.typrelid JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
               WHERE p.pronargs = 1 AND t2.oid = p.proargtypes[0] AND c2.relkind IN ('r','v','m','f','p')) AS arg_rel,
@@ -325,6 +342,34 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
       ORDER BY 1, 2`,
   );
+
+  const handlerRows = await run<{
+    schema: string;
+    name: string;
+    arg_rel: { schema: string; name: string } | null;
+    bytea: boolean;
+  }>(
+    db,
+    `SELECT n.nspname AS schema, p.proname AS name,
+            (SELECT json_build_object('schema', n2.nspname, 'name', c2.relname)
+               FROM pg_type t2 JOIN pg_class c2 ON c2.oid = t2.typrelid JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+              WHERE t2.oid = p.proargtypes[0] AND c2.relkind IN ('r','v','m','f','p')) AS arg_rel,
+            rt.typbasetype = 'bytea'::regtype AS bytea
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       JOIN pg_type rt ON rt.oid = p.prorettype AND rt.typtype = 'd'
+      WHERE n.nspname = ANY(${S})
+        AND p.prokind = 'a' AND p.pronargs = 1 AND p.proname LIKE '%/%'
+        AND (p.proargtypes[0] = 'anyelement'::regtype
+             OR EXISTS (SELECT 1 FROM pg_type t3 JOIN pg_class c3 ON c3.oid = t3.typrelid WHERE t3.oid = p.proargtypes[0]))
+      ORDER BY 1, 2`,
+  );
+  const mediaHandlers: MediaHandler[] = handlerRows.map((h) => ({
+    schema: h.schema,
+    mediaType: h.name.toLowerCase(),
+    ...(h.arg_rel ? { argRelation: h.arg_rel } : {}),
+    bytea: h.bytea,
+  }));
 
   // ---- assemble ----
   const pk = new Map<string, string[]>();
@@ -405,12 +450,13 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       rows: f.rows,
       ...(f.arg_rel ? { argRelation: f.arg_rel } : {}),
       ...(f.ret_rel ? { returnRelation: f.ret_rel } : {}),
+      ...(f.ret_media && !f.returns_set ? { returnMediaType: f.ret_media } : {}),
     };
     const key = relKey(f.schema, f.name);
     functions.set(key, [...(functions.get(key) ?? []), def]);
   }
 
-  return { schemas, relations, foreignKeys, functions };
+  return { schemas, relations, foreignKeys, functions, mediaHandlers };
 };
 
 // ---------------------------------------------------------------------------

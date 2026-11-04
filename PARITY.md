@@ -49,7 +49,8 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Non-numeric `limit`/`offset` ignored, negative `limit` → `PGRST103`, unsupported methods → empty 405 | ✅ | |
 | `Accept: application/json`, `text/csv`, `application/vnd.pgrst.object+json` (+ `nulls=stripped`) | ✅ | Singular → `PGRST116` |
 | `application/vnd.pgrst.plan` (EXPLAIN output) | ✅ | `for=` and `options=`; off unless `planEnabled` (like `db-plan-enabled`) |
-| `application/geo+json`, `octet-stream`, `text/plain`, custom media type handlers | ❌ | |
+| Custom media type handlers: aggregates named after a media type (per table or `anyelement`, incl. the `*/*` catch-all) returning a domain | ✅ | `text/plain`, `text/xml`, `application/octet-stream`, … |
+| `application/geo+json` | ❌ | Needs PostGIS; not tested (no PostGIS in the test image) |
 | `Prefer: handling=strict/lenient` | ✅ | |
 | `Prefer: timezone=` | ✅ | |
 | Response `Preference-Applied`, `Vary`, `Location` | ✅ | |
@@ -106,7 +107,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Bulk call (array body) | ✅ | `PGRST102` when the objects' keys differ |
 | `response.headers` / `response.status` GUCs set by the function | ✅ | |
 | `Prefer: max-affected` on RPC | ✅ | `PGRST128` for non-set functions |
-| Scalar-function custom media types (`text/plain`, `application/octet-stream`, …) | ❌ | |
+| Scalar-function custom media types (a domain named `text/plain`, `application/octet-stream`, … as return type) | ✅ | Text and `bytea` bodies |
 
 ## Errors
 

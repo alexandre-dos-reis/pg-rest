@@ -6,6 +6,8 @@
  * - `scalar`:      a single JSON value (scalar RPC)
  * - `none`:        empty body
  */
+import type { MediaChoice } from "../parse/request";
+
 export type BodyShape = "array" | "object" | "scalar-array" | "scalar" | "none";
 
 export interface StatementOptions {
@@ -19,6 +21,8 @@ export interface StatementOptions {
   readonly stripNulls?: boolean | undefined;
   /** Render the body as CSV, the way PostgREST does: header from the first row, then PostgreSQL's record text. */
   readonly csv?: boolean | undefined;
+  /** Render the body with a custom media type handler; binary bodies come back hex-encoded. */
+  readonly handler?: MediaChoice | undefined;
   /**
    * `source` flags inserted rows in a `pgrst_inserted` column (merge-duplicates upsert). These are the
    * source's other columns; the status becomes 200 when rows were returned but none was inserted.
@@ -31,7 +35,18 @@ const CSV_BODY =
   `(SELECT row_to_json(hh) AS r FROM pgrst_body AS hh LIMIT 1) s) a), '') || E'\\n' || ` +
   `coalesce(string_agg(substring(_t::text, 2, length(_t::text) - 2), E'\\n'), '')`;
 
-const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean): string => {
+const handlerBody = (h: MediaChoice): string => {
+  if (h.aggregate) {
+    const call = `${h.aggregate}(${h.rowType ? `ROW(_t.*)::${h.rowType}` : "_t"})`;
+    return h.bytea ? `coalesce(encode(${call}::bytea, 'hex'), '')` : `coalesce(${call}::text, '')`;
+  }
+  return h.bytea
+    ? `coalesce(encode((array_agg(_t.pgrst_scalar::bytea))[1], 'hex'), '')`
+    : `coalesce((array_agg(_t.pgrst_scalar::text))[1], '')`;
+};
+
+const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean, handler?: MediaChoice): string => {
+  if (handler && shape !== "none") return handlerBody(handler);
   if (csv && shape !== "none") return CSV_BODY;
   const wrap = (e: string) => (strip ? `json_strip_nulls(${e})` : e);
   switch (shape) {
@@ -68,7 +83,7 @@ export const buildStatement = (o: StatementOptions): string => {
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
     `count(*)::text AS page_total, ` +
-    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv))} AS body, ` +
+    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv), o.handler)} AS body, ` +
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
     `nullif(current_setting('response.headers', true), '') AS response_headers, ` +
     (up

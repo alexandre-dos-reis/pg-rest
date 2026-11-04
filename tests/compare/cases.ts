@@ -82,6 +82,21 @@ const allCases: Case[] = [
   get("/clients?select=id&order=id", { headers: { Prefer: "count=none" } }),
   get("/clients?select=id,name&order=id", { headers: { Accept: "text/csv" } }),
   get("/clients?select=id,name,tags&order=id", { headers: { Accept: "text/csv" }, name: "csv with array" }),
+  // custom media type handlers
+  get("/rpc/plain_hi", { name: "handler: scalar domain, default Accept" }),
+  get("/rpc/plain_hi", { headers: { Accept: "text/plain" }, name: "handler: scalar domain text/plain" }),
+  get("/rpc/bin_hi", { headers: { Accept: "application/octet-stream" }, name: "handler: bytea domain" }),
+  get("/rpc/xml_hi", { headers: { Accept: "text/xml" }, name: "handler: text/xml domain" }),
+  get("/rpc/xml_hi", { headers: { Accept: "text/plain" }, name: "handler: media type not offered" }),
+  get("/rpc/nums_plain", { headers: { Accept: "text/plain" }, name: "handler: set of domain is not a handler" }),
+  get("/clients?order=id", { headers: { Accept: "text/plain" }, name: "handler: aggregate over a table" }),
+  get("/clients?order=id&limit=1", { headers: { Accept: "text/plain" }, name: "handler: aggregate with limit" }),
+  get("/clients?id=eq.99", { headers: { Accept: "text/plain" }, name: "handler: aggregate over no rows" }),
+  get("/clients?select=id&order=id", {
+    headers: { Accept: "text/plain" },
+    name: "handler: aggregate needs whole rows",
+  }),
+  get("/orders?order=id", { headers: { Accept: "text/plain" }, name: "handler: no aggregate for another table" }),
   get("/clients?select=id,name&id=eq.1", { headers: { Accept: "application/vnd.pgrst.object+json" } }),
   get("/clients?select=id,name", {
     headers: { Accept: "application/vnd.pgrst.object+json" },

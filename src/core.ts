@@ -13,6 +13,7 @@ import {
   parseRange,
   parseTarget,
 } from "./parse/request";
+import { mediaChoices } from "./media";
 import { literal, quoteIdent } from "./quote";
 import { buildOpenApi } from "./openapi";
 import { getRelation, type Relation, type SchemaCache } from "./schema";
@@ -67,6 +68,12 @@ export interface Env {
   readonly config: CoreConfig;
   readonly cache: SchemaCache;
 }
+
+/** Statement options that depend on the negotiated output format. */
+const formatOptions = (format: OutputFormat) => ({
+  csv: format.kind === "csv",
+  handler: format.kind === "handler" ? format.choice : undefined,
+});
 
 const JSON_CT = "application/json; charset=utf-8";
 
@@ -340,7 +347,12 @@ export const handleRequest = async (env: Env, request: Request, ctx: RequestCont
     });
   }
 
-  const requested = parseAccept(request.headers.get("accept"), false, env.config.planEnabled);
+  const requested = parseAccept(
+    request.headers.get("accept"),
+    false,
+    env.config.planEnabled,
+    mediaChoices(env.cache, schema, target, url.searchParams.has("select")),
+  );
   const format = requested.kind === "plan" ? requested.inner : requested;
   const wantsPlan = requested.kind === "plan" ? requested : undefined;
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
@@ -407,7 +419,7 @@ const planTable = (
         count: needCount && paged ? read.count : undefined,
         shape,
         stripNulls: strip,
-        csv: format.kind === "csv",
+        ...formatOptions(format),
       }),
     };
   }
@@ -462,7 +474,7 @@ const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        csv: format.kind === "csv",
+        ...formatOptions(format),
         upsertColumns: insertSql.includes("pgrst_inserted") ? upsertColumns(rel, returning) : undefined,
       }),
     };
@@ -494,7 +506,7 @@ const planTable = (
           source: "SELECT 1 WHERE FALSE",
           rows: "SELECT * FROM pgrst_source",
           shape: emptyShape,
-          csv: format.kind === "csv",
+          ...formatOptions(format),
         }),
       };
     }
@@ -509,7 +521,7 @@ const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        csv: format.kind === "csv",
+        ...formatOptions(format),
       }),
     };
   }
@@ -528,7 +540,7 @@ const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        csv: format.kind === "csv",
+        ...formatOptions(format),
       }),
     };
   }
@@ -588,7 +600,7 @@ const planTable = (
     returning,
     params: [JSON.stringify([full])],
     shape,
-    statement: buildStatement({ source: putSql, rows: outRows, shape, stripNulls: strip, csv: format.kind === "csv" }),
+    statement: buildStatement({ source: putSql, rows: outRows, shape, stripNulls: strip, ...formatOptions(format) }),
   };
 };
 
@@ -711,13 +723,13 @@ const planRpc = (
         count: needCount && paged ? read.count : undefined,
         shape,
         stripNulls: strip,
-        csv: format.kind === "csv",
+        ...formatOptions(format),
       }),
     };
   }
 
   const shape: BodyShape = call.shape === "void" ? "none" : call.shape === "scalar" ? "scalar" : "scalar-array";
-  return { ...base, shape, statement: buildStatement({ rows: call.source, shape, csv: format.kind === "csv" }) };
+  return { ...base, shape, statement: buildStatement({ rows: call.source, shape, ...formatOptions(format) }) };
 };
 
 // ---------------------------------------------------------------------------
@@ -977,7 +989,9 @@ const buildResponse = (
 
   if (plan.kind === "insert" && (plan.returning ?? "minimal") !== "representation") text = "";
 
-  if (format.kind === "csv") {
+  if (format.kind === "handler") {
+    contentType = format.choice.contentType;
+  } else if (format.kind === "csv") {
     contentType = "text/csv; charset=utf-8";
   } else if (format.kind === "object") {
     contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;
@@ -989,7 +1003,17 @@ const buildResponse = (
   if (r.responseStatus !== undefined) status = r.responseStatus;
 
   const noBody = status === 204 || status === 304 || text === "" || method === "HEAD";
-  if (!(status === 204 || status === 304 || (text === "" && method !== "HEAD"))) headers["Content-Type"] = contentType;
+  if (
+    !(
+      status === 204 ||
+      status === 304 ||
+      (text === "" && method !== "HEAD" && !(format.kind === "handler" && plan.kind === "read"))
+    )
+  )
+    headers["Content-Type"] = contentType;
+  if (!noBody && format.kind === "handler" && format.choice.bytea) {
+    return new Response(Buffer.from(text, "hex"), { status, headers });
+  }
   return new Response(noBody ? null : text, { status, headers });
 };
 
