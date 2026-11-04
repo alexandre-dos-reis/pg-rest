@@ -6,8 +6,8 @@
     "start": "node server.ts"
   },
   "dependencies": {
-    "pg-rest": "file:../..",
     "@hono/node-server": "^1.13.0",
+    "pg-rest": "^0.0.0",
     "postgres": "^4.0.0"
   }
 }

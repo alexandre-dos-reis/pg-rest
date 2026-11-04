@@ -43,12 +43,12 @@ curl -c cookies.txt localhost:3000/api/auth/sign-up/email -H 'Content-Type: appl
      -d '{"name":"Alice","email":"alice@example.com","password":"correct horse battery"}'
 
 # anonymous: read-only
-curl 'localhost:3000/todos?select=id,title,tags(label)'
-curl 'localhost:3000/todos' -H 'Content-Type: application/json' -d '{"title":"nope"}'      # 401, code 42501
+curl 'localhost:3000/api/rest/todos?select=id,title,tags(label)'
+curl 'localhost:3000/api/rest/todos' -H 'Content-Type: application/json' -d '{"title":"nope"}'      # 401, code 42501
 
 # signed in: rows you create are owned by your Better Auth user id
-curl -b cookies.txt 'localhost:3000/todos' -H 'Content-Type: application/json' \
+curl -b cookies.txt 'localhost:3000/api/rest/todos' -H 'Content-Type: application/json' \
      -H 'Prefer: return=representation' -d '{"title":"Ship it"}'
-curl -b cookies.txt -X PATCH 'localhost:3000/todos?id=eq.2' -H 'Content-Type: application/json' \
+curl -b cookies.txt -X PATCH 'localhost:3000/api/rest/todos?id=eq.2' -H 'Content-Type: application/json' \
      -H 'Prefer: return=representation' -d '{"done":true}'                                 # [] : not your row (RLS)
 ```
