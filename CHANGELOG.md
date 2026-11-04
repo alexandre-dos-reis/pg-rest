@@ -1,5 +1,11 @@
 # pg-rest
 
+## 0.1.2
+
+### Patch Changes
+
+- 4de8a7d: confirm github and npm trust
+
 ## 0.1.1
 
 ### Patch Changes
