@@ -59,11 +59,27 @@ bun run link:examples  # point the examples at the local build, without touching
 - The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.5** static binary; `mise install` fetches it, CI downloads the same
   release). Run them whenever you touch parsing, SQL generation, error codes or response headers.
 - Examples depend on `pg-rest` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
-  Use `bun run link:examples [name]`; `scripts/githooks/pre-commit` (enable with `git config core.hooksPath scripts/githooks`) keeps the versions
-  in step with the root `package.json`.
+  Use `bun run link:examples [name]`. `bun run version` moves them onto each new release, and `scripts/githooks/pre-commit` (wired up by the
+  `prepare` script on `bun install`) refuses a commit that leaves them out of step with the root `package.json`.
 - CI (`.github/workflows/ci.yml`): typecheck + build + tests on PostgreSQL 16, a Node job (`scripts/node-smoke.ts` against the built `dist`),
   an examples matrix (`scripts/check-example.sh`), and the PostgREST differential test.
 - Typecheck runs before the build in CI, so `src`/`tests` code must not import from `dist`.
+
+## Releasing
+
+Releases are driven by [changesets](https://github.com/changesets/changesets); nothing is published by hand.
+
+```bash
+bun run changeset      # a note saying patch/minor/major and what changed; commit it with the change
+```
+
+`.github/workflows/release.yml` runs after CI passes on `main`: pending notes become a **"chore: version packages"** PR, and
+merging that PR publishes to npm and tags a GitHub release. `bun run version` is what the PR runs -- it bumps `package.json`,
+writes `CHANGELOG.md`, and points the examples at the new version, since they depend on `pg-rest` by version and would
+otherwise ask npm for one that does not exist.
+
+A change with nothing to release (tests, docs, CI) needs no changeset. Publishing needs an `NPM_TOKEN` repository secret;
+provenance is on (`id-token: write`), so releases are attested to the workflow that built them.
 
 ## Conventions and gotchas
 
