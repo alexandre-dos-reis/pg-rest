@@ -24,8 +24,8 @@ resolveContext: async (req) => {
 ```
 
 - No session → `undefined` → pg-rest runs the request as the `anon` role (read-only in `2-api.sql`).
-- Session → role `authenticated`, and `claims.sub` is the Better Auth user id, which the RLS policies read through
-  `current_setting('request.jwt.claims')`.
+- Session → role `authenticated`, and `claims.sub` is the Better Auth user id, which the RLS policies read through `auth.uid()` (a small SQL function in `2-api.sql` over
+  `current_setting('request.jwt.claims')`).
 - Requests under `/api/auth/*` go to Better Auth; everything else goes to pg-rest. Both share one `pg.Pool`.
 - Two SQL files, run in order: `1-better-auth.sql` creates Better Auth's tables (`"user"`, `session`, `account`, `verification`, the same DDL its
   own migrations generate), then `2-api.sql` creates the `api` schema. That order lets `api.todos.owner_id` be a real foreign key to

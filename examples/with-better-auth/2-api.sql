@@ -5,13 +5,21 @@ DO $$ BEGIN  -- roles are cluster-wide: create them only once
 END $$;
 GRANT anon, authenticated TO CURRENT_USER;  -- lets the connecting user SET ROLE to them
 
+-- Who is calling: the Better Auth user id that server.ts puts in the claims (`sub`). NULL when anonymous.
+-- It lives in its own schema, which pg-rest does not expose, so it is not reachable as /rpc/uid.
+CREATE SCHEMA auth;
+GRANT USAGE ON SCHEMA auth TO anon, authenticated;
+CREATE FUNCTION auth.uid() RETURNS text
+  LANGUAGE sql STABLE AS $$ SELECT current_setting('request.jwt.claims', true)::json ->> 'sub' $$;
+GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated;
+
 CREATE SCHEMA api;
 GRANT USAGE ON SCHEMA api TO anon, authenticated;
 
 CREATE TABLE api.todos (
   id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   -- the Better Auth user who owns the row (the session's user id, taken from the JWT claims by default)
-  owner_id text DEFAULT (current_setting('request.jwt.claims', true)::json ->> 'sub')
+  owner_id text DEFAULT auth.uid()
            REFERENCES public."user"(id) ON DELETE CASCADE,
   title    text NOT NULL,
   done     boolean NOT NULL DEFAULT false,
@@ -28,8 +36,8 @@ CREATE TABLE api.tags (
 ALTER TABLE api.todos ENABLE ROW LEVEL SECURITY;
 CREATE POLICY todos_read  ON api.todos FOR SELECT USING (true);
 CREATE POLICY todos_write ON api.todos FOR ALL TO authenticated
-  USING (owner_id = current_setting('request.jwt.claims', true)::json ->> 'sub')
-  WITH CHECK (owner_id = current_setting('request.jwt.claims', true)::json ->> 'sub');
+  USING (owner_id = auth.uid())
+  WITH CHECK (owner_id = auth.uid());
 
 GRANT SELECT ON api.todos, api.tags TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON api.todos, api.tags TO authenticated;
