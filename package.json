@@ -1,7 +1,7 @@
 {
   "name": "pg-rest",
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) \u2014 no JWT required.",
   "author": "Alexandre Dos Reis",
   "license": "MIT",
