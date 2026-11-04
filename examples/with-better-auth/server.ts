@@ -2,8 +2,8 @@ import { serve } from "@hono/node-server"; // only used to turn Node's http into
 import { Hono } from "hono";
 import { betterAuth } from "better-auth";
 import pg from "pg";
-import { createPgRest } from "pg-rest";
-import { nodePostgresAdapter } from "pg-rest/adapters/node-postgres";
+import { createPgRest } from "@adrdp/pg-rest";
+import { nodePostgresAdapter } from "@adrdp/pg-rest/adapters/node-postgres";
 
 const port = Number(process.env.PORT ?? 3000);
 

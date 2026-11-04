@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { serve } from "@hono/node-server"; // only used to turn Node's http into Request/Response
 import { PGlite } from "@electric-sql/pglite";
-import { createPgRest } from "pg-rest";
-import { pgliteAdapter } from "pg-rest/adapters/pglite";
+import { createPgRest } from "@adrdp/pg-rest";
+import { pgliteAdapter } from "@adrdp/pg-rest/adapters/pglite";
 
 // Postgres running in-process (WebAssembly): no server, no Docker. Data lives in memory.
 const db = new PGlite();

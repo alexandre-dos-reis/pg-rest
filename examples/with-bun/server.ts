@@ -1,6 +1,6 @@
 import { SQL } from "bun";
-import { createPgRest } from "pg-rest";
-import { bunSqlAdapter } from "pg-rest/adapters/bun";
+import { createPgRest } from "@adrdp/pg-rest";
+import { bunSqlAdapter } from "@adrdp/pg-rest/adapters/bun";
 
 const sql = new SQL(process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres");
 

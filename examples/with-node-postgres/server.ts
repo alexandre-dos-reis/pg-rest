@@ -1,9 +1,11 @@
 import { serve } from "@hono/node-server"; // only used to turn Node's http into Request/Response
 import pg from "pg";
-import { createPgRest } from "pg-rest";
-import { nodePostgresAdapter } from "pg-rest/adapters/node-postgres";
+import { createPgRest } from "@adrdp/pg-rest";
+import { nodePostgresAdapter } from "@adrdp/pg-rest/adapters/node-postgres";
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres" });
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres",
+});
 
 const pgRest = await createPgRest({
   db: nodePostgresAdapter(pool),
