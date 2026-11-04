@@ -1,6 +1,6 @@
 # Parity with PostgREST v16
 
-Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope by design.
+Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope **by design** (it is a library: the host app owns it, see the README's *Not supported* section), as opposed to ❌, which is simply not done yet.
 
 pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgREST are replaced by
 `createPgRest(options)` and `resolveContext`. Everything below is about the request/response behaviour of `handle()`.
@@ -22,7 +22,8 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `db-tx-end` (rollback) / `Prefer: tx=` | ✅ | Off unless `allowTxOverride` |
 | `openapi-mode`, `openapi-server-proxy-uri` | 🟡 | One mode; `serverUrl` option |
 | `server-timing`, `log-level`, `server-host/port`, unix sockets | ➖ | Host concern |
-| Connection pool tuning, `db-uri`, `db-channel` (NOTIFY reload), `SIGUSR1/2` | 🟡 | Bring your own pool via the adapter; reload with `reloadSchema()` (no LISTEN) |
+| Connection pool tuning, `db-uri` | ➖ | Bring your own pool via the adapter |
+| `db-channel` (NOTIFY reload), `SIGUSR1/2`, `db-pre-config` | ➖ | Reload with `reloadSchema()`, or wire your own `LISTEN` to it; options replace in-database config |
 | Admin server (`/live`, `/ready`, `/metrics`) | ➖ | |
 | Automatic schema cache reload with retry on connection loss | 🟡 | Manual `reloadSchema()`; old cache is kept if a reload fails; DB outages → `503 PGRST001` |
 | Database driver | 🟡 | Driver-agnostic `DbAdapter`; adapters for Bun.sql, node-postgres, postgres.js and PGlite ship as `pg-rest/adapters/*` (drivers are optional peer dependencies; the core contains none). Verified on Bun (full suite) and Node 22 (smoke test); each adapter is exercised by an example in CI |
