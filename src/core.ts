@@ -252,21 +252,14 @@ interface Plan {
   readonly pagedRead: boolean;
 }
 
-const asRows = (body: unknown, what: string): JsonObject[] => {
-  const bad = () =>
-    new PgRestError(
-      400,
-      "PGRST102",
-      "Empty or invalid json",
-      `${what} must be a JSON object or an array of JSON objects`,
-    );
+const asRows = (body: unknown): JsonObject[] => {
   const isObj = (v: unknown): v is JsonObject => v !== null && typeof v === "object" && !Array.isArray(v);
   if (Array.isArray(body)) {
-    if (!body.every(isObj)) throw bad();
+    if (!body.every(isObj)) throw new PgRestError(400, "PGRST102", "All object keys must match");
     return body as JsonObject[];
   }
-  if (isObj(body)) return [body];
-  throw bad();
+  // PostgREST inserts nothing for a scalar payload.
+  return isObj(body) ? [body] : [];
 };
 
 const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; limit?: number } | undefined) => {
@@ -451,7 +444,7 @@ const planTable = (
 
   if (method === "POST") {
     if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
-    const rows = asRows(body.value, "The payload");
+    const rows = asRows(body.value);
     const insertSql = buildInsert({
       rel,
       rows,
@@ -482,15 +475,10 @@ const planTable = (
 
   if (method === "PATCH") {
     if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
-    const obj = body.value;
-    if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-      throw new PgRestError(
-        400,
-        "PGRST102",
-        "Empty or invalid json",
-        "The payload of a PATCH request must be a JSON object",
-      );
-    }
+    // PostgREST uses the first element of an array and treats other payloads as "no columns".
+    const first = Array.isArray(body.value) ? body.value[0] : body.value;
+    const obj: JsonObject =
+      first !== null && typeof first === "object" && !Array.isArray(first) ? (first as JsonObject) : {};
     const updateSql = buildUpdate({ rel, body: obj as JsonObject, filters: query.root.filters, returning });
     const { rows: outRows, shape } = rowsFor(returning);
     if (updateSql === null) {
@@ -548,6 +536,9 @@ const planTable = (
   // PUT: single-row upsert addressed by primary key.
   if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
   const row = body.value;
+  if (Array.isArray(row) && !row.every((r) => r !== null && typeof r === "object" && !Array.isArray(r))) {
+    throw new PgRestError(400, "PGRST102", "All object keys must match");
+  }
   if (row === null || typeof row !== "object" || Array.isArray(row)) {
     throw new PgRestError(
       400,

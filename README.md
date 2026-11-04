@@ -158,7 +158,7 @@ code is handled by *your* application instead. These are not gaps: adding them w
 These exist in PostgREST and are not implemented *yet*. Contributions welcome; the status of each is in [`PARITY.md`](PARITY.md).
 
 - `application/geo+json` (needs PostGIS)
-- Limited-write validation on `PATCH`/`DELETE` (`limit`/`offset`/`order`), PostgREST's exact parse-error wording
+- PostgREST's exact Parsec error wording for `select` and `and()`/`or()` syntax errors (filters and `order` match; the error codes and status already do)
 
 ## Security notes
 

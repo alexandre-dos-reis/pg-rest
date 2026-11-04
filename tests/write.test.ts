@@ -253,7 +253,9 @@ describe.skipIf(!hasDb)("writes", () => {
       expect(r.json()).toEqual([]);
     });
     test("bad payloads", async () => {
-      expect((await t.patch("/orders", [{ status: "x" }], { ctx })).json().code).toBe("PGRST102");
+      // an array payload uses its first element, a scalar one sets nothing (as in PostgREST)
+      expect((await t.patch("/orders?id=eq.1", [{ status: "x" }], { ctx })).status).toBe(204);
+      expect((await t.patch("/orders?id=eq.1", 1, { ctx })).status).toBe(204);
       expect((await t.patch("/orders", { nope: 1 }, { ctx })).json().code).toBe("PGRST204");
       expect((await t.call("PATCH", "/orders", { ctx })).json().code).toBe("PGRST102");
     });

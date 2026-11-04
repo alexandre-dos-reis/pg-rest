@@ -114,6 +114,9 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Feature | Status | Notes |
 | --- | --- | --- |
 | PostgREST error body `{code, message, details, hint}` | ✅ | |
+| Parse errors of filters and `order` (`unexpected "f" expecting …`, line/column) | ✅ | Same wording as PostgREST's Parsec parser |
+| Parse errors of `select` and `and()`/`or()` | 🟡 | `PGRST100`, but the details text differs; `select=id)` / `select=(id)` are rejected where PostgREST is lenient |
+| Invalid / odd payloads (`[]`, scalars, arrays of scalars, array on `PATCH`) | ✅ | Same status and message as PostgREST |
 | `PGRST1xx`–`PGRST3xx` codes (parsing, schema cache, auth) | ✅ | Most; `PGRST3xx` JWT codes are replaced by whatever `resolveContext` throws |
 | SQLSTATE → HTTP status table | ✅ | |
 | `RAISE ... SQLSTATE 'PTxyz'` → HTTP status | ✅ | |

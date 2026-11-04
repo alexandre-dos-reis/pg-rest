@@ -265,8 +265,8 @@ export const parseBody = async (
     if (text.trim() === "") return undefined;
     try {
       return { kind: "json", value: JSON.parse(text) };
-    } catch (e) {
-      throw new PgRestError(400, "PGRST102", "Empty or invalid json", e instanceof Error ? e.message : null);
+    } catch {
+      throw new PgRestError(400, "PGRST102", "Empty or invalid json");
     }
   }
   if (ct === "application/x-www-form-urlencoded") {

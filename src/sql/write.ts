@@ -65,6 +65,13 @@ export const buildInsert = (o: InsertOptions): string => {
   }
   checkColumns(rel, cols);
 
+  if (o.rows.length === 0) {
+    // An empty array inserts nothing.
+    const first = rel.columns[0];
+    if (!first) throw new PgRestError(400, "PGRST102", "Cannot insert into a relation without columns");
+    return `INSERT INTO ${target} (${quoteIdent(first.name)}) SELECT NULL WHERE FALSE RETURNING ${returning}`;
+  }
+
   if (cols.length === 0) {
     // Only empty objects: insert default rows.
     const first = rel.columns[0];

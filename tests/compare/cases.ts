@@ -431,6 +431,15 @@ const allCases: Case[] = [
     name: "urlencoded body",
   }),
   write("POST", "/clients", "{not json", { headers: { ...rep, ...J }, name: "invalid json body" }),
+  write("POST", "/clients", [1], { headers: { ...J }, name: "body: array of scalars" }),
+  write("POST", "/clients", 1, { headers: { ...J }, name: "body: scalar" }),
+  write("POST", "/clients", [], { headers: { ...rep, ...J }, name: "body: empty array" }),
+  write("PATCH", "/clients?id=eq.1", [{ name: "zz" }, { name: "yy" }], {
+    headers: { ...rep, ...J },
+    name: "PATCH with an array uses the first element",
+  }),
+  write("PATCH", "/clients?id=eq.1", 1, { headers: { ...J }, name: "PATCH with a scalar" }),
+  write("PUT", "/clients?id=eq.1", [1], { headers: { ...J }, name: "PUT with an array of scalars" }),
   write("PATCH", "/clients?id=eq.1", { name: "Renamed" }, { headers: { ...rep, ...J } }),
   write(
     "PATCH",
@@ -574,7 +583,6 @@ const KNOWN: Record<string, string> = {
   "GET /clients?select=id,,name": "parser error texts (message/details) differ: PostgREST quotes its parsec output",
   "GET /clients?select=id::int4%20from%20x":
     "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
-  "invalid json body": "details of the JSON parse error come from different parsers",
 };
 
 export const cases: Case[] = allCases.map((c) => {
