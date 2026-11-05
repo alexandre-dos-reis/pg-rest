@@ -184,10 +184,37 @@ catalog says so of every view column (a `NOT NULL` source says nothing about a `
 `Record<string, unknown>` because the catalog does not carry its output columns, which is exactly how much the request
 path knows too.
 
-Today those types are the result types: `query<DatabasePgRest["schemas"]["api"]["relations"]["todos"]["row"][]>({ … })`.
-Typing the *input* from them — `table` restricted to real relations, `select` to real columns, the result inferred from
-the `select` — is the next step; it needs the schema on `createPgRest`, because TypeScript stops inferring the remaining
-type arguments as soon as one is given explicitly.
+### A typed instance
+
+Hand the generated type to `createPgRest` and the queries check themselves:
+
+```ts
+const pgRest = await createPgRest<DatabasePgRest>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const { data } = await pgRest.query({
+  table: "todos", //                        only a relation that exists
+  select: ["id", "title", { tags: ["label"] }], //  only real columns and real relationships
+  where: { done: false }, //                only its own columns, with the right value type
+  order: [{ column: "created", desc: true }],
+  limit: 10,
+});
+// data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
+```
+
+`data` is inferred from the `select`, down to the nesting: a to-one embed is an object or `null` (not null with
+`inner: true`), a to-many embed is an array, `as` renames the key, `spread` merges the columns into the parent row — and
+turns each of them into an array when it spreads a to-many. `single: true` returns the object alone,
+`returning: "minimal"` returns `null`, a function's arguments and result come from its signature, overloads included, and
+a misspelled field that the runtime would silently drop is refused.
+
+The type argument goes on `createPgRest`, not on the call: TypeScript stops inferring the remaining type arguments as
+soon as one is given explicitly, so `query<DatabasePgRest>({ … })` would check the input and then hand you `unknown`.
+
+What the typed path does not describe, because the type would have to lie: casts (`total::text`), JSON paths
+(`meta->>tier`) and aggregates (`total.sum()`). They change or invent a column, and reading that back out of a string
+literal costs more than it gives. `createPgRest(options)` without a type argument is unchanged — same loose input, and
+`query<Todo[]>(…)` to name the result yourself — so an untyped instance remains the escape hatch, and `handle` is
+untouched either way: an HTTP request is a string from outside.
 
 ## Examples
 

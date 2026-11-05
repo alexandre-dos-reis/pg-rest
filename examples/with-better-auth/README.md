@@ -69,6 +69,12 @@ Same role, same claims, same RLS policies as the REST route: `anon` without a se
 rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and the errors throw, with
 the PostgREST `code` on them. See [In-process queries](../../README.md#in-process-queries).
 
+Generate the types for this schema once (`generateTypes(await pgRest.schemaCache())`, from `@adrdp/pg-rest/types`), pass them
+to `createPgRest<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
+relationship, `done` as a boolean — with `data` inferred as
+`Array<{ id: number; title: string; done: boolean; tags: Array<{ label: string }> }>`. See
+[Generated types](../../README.md#generated-types).
+
 ## Try it
 
 ```sh

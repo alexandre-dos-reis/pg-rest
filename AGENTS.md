@@ -28,6 +28,7 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`) |
 | `src/schema.ts` | schema introspection and cache |
 | `src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `pg-rest/types` |
+| `src/typed.ts` | types only: `createPgRest<Db>` input and result inference over a generated database type |
 | `src/service.ts` | schema store (serialized reload), error mapping, `handleSafely` |
 | `src/errors.ts` | `ApiError`, PostgREST error codes (`PGRSTxxx`), `normalizeDbError` (maps SQLSTATE) |
 | `src/openapi.ts` | OpenAPI document |
