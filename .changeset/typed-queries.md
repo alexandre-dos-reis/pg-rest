@@ -34,6 +34,9 @@ runtime one.
 The type argument goes on `createPgRest`, not on the call: TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<Db>({ … })` could check the input but would then return `unknown`.
 
+`as` and `spread` on an embed are exclusive, because PostgREST's grammar has no way to write both (`...alias:table(*)`
+is a `PGRST100`), so a type that accepted it would promise something the request cannot express.
+
 Casts (`total::text`), JSON paths (`meta->>tier`) and aggregates (`total.sum()`) are not described by the typed input:
 they change or invent a column, and reading that back out of a string literal would cost more than it gives.
 `createPgRest(options)` without a type argument is unchanged — the loose input and `query<Todo[]>(…)` still work — and

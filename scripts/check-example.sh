@@ -7,8 +7,9 @@ set -euo pipefail
 name="$1"; export DATABASE_URL="${2:-}"; port="${PORT:-3101}"; export PORT="$port"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 # pg-rest is a version dependency, and the version in package.json is usually not on the registry
-# yet, so the example runs against the local build.
-"$root/scripts/link-examples.sh" "$name" >/dev/null
+# yet, so the example runs against the local build. SKIP_LINK=1 when the caller already linked them
+# all (CI does, once, so the loop does not rebuild per example).
+if [ "${SKIP_LINK:-0}" != 1 ]; then "$root/scripts/link-examples.sh" "$name" >/dev/null; fi
 cd "$root/examples/$name"
 
 check() { # description, expected, actual

@@ -45,6 +45,15 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 With a generated database type — `createPgRest<Database>(options)` — `query` and `querySafe` are typed by it and
 everything else is unchanged.
 
+`handle` is a plain `fetch`, which is all a PostgREST client library needs: hand it one and the exchange never touches a
+socket.
+
+```ts ignore
+const client = new PostgrestClient("http://pg-rest", {
+  fetch: (input, init) => pgRest.handle(new Request(input, init), ctx),
+});
+```
+
 ## Errors
 
 Everything the library throws carries a PostgREST body (`code`, `message`, `details`, `hint`):
