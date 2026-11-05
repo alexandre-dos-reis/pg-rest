@@ -6,6 +6,17 @@ export interface Column {
   readonly name: string;
   /** Result of `format_type`, e.g. `integer`, `character varying(10)`, `text[]`. */
   readonly type: string;
+  /**
+   * Labels of the enum type, in declaration order, when the column is an enum or an array of one.
+   * Domains over an enum are not unwrapped.
+   */
+  readonly enumLabels?: ReadonlyArray<string> | undefined;
+  /**
+   * For a view column read straight from a table column, that column -- followed through
+   * view-over-view chains. `nullable` still reports what the catalog says of the *view*, which is
+   * always true: a `NOT NULL` source says nothing about a `LEFT JOIN` in the view's own query.
+   */
+  readonly source?: { readonly schema: string; readonly table: string; readonly column: string } | undefined;
   readonly nullable: boolean;
   readonly hasDefault: boolean;
   /** SQL text of the default expression, when there is one. */
@@ -45,6 +56,8 @@ export interface FunctionArg {
   readonly type: string;
   readonly hasDefault: boolean;
   readonly variadic: boolean;
+  /** Labels of the enum type, when the argument is an enum or an array of one. */
+  readonly enumLabels?: ReadonlyArray<string> | undefined;
 }
 
 export interface FunctionDef {
@@ -52,6 +65,8 @@ export interface FunctionDef {
   readonly name: string;
   readonly args: ReadonlyArray<FunctionArg>;
   readonly returnType: string;
+  /** Labels of the enum type, when the function returns an enum or an array of one. */
+  readonly returnEnumLabels?: ReadonlyArray<string> | undefined;
   readonly returnsSet: boolean;
   /** True if the function returns a composite / record / TABLE(...) row type. */
   readonly returnsComposite: boolean;
@@ -215,10 +230,14 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     generated: boolean;
     comment: string | null;
     pos: number;
+    enum_labels: string[] | null;
   }>(
     db,
     `SELECT n.nspname AS schema, c.relname AS "table", a.attname AS name,
             format_type(a.atttypid, a.atttypmod) AS type,
+            (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
+              WHERE e.enumtypid = CASE WHEN bt.typtype = 'e' THEN bt.oid
+                                       WHEN et.typtype = 'e' THEN et.oid END) AS enum_labels,
             NOT a.attnotnull AS nullable,
             (a.atthasdef OR a.attidentity <> '') AS has_default,
             pg_get_expr(d.adbin, d.adrelid) AS default_expr,
@@ -229,6 +248,8 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        JOIN pg_class c ON c.oid = a.attrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       LEFT JOIN pg_type bt ON bt.oid = a.atttypid
+       LEFT JOIN pg_type et ON et.oid = bt.typelem
       WHERE n.nspname = ANY(${S})
         AND c.relkind IN ('r','v','m','f','p')
         AND NOT c.relispartition
@@ -308,12 +329,16 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     arg_rel: { schema: string; name: string } | null;
     ret_rel: { schema: string; name: string } | null;
     ret_media: { name: string; bytea: boolean } | null;
-    args: Array<{ name: string; type: string; mode: string }>;
+    return_enum: string[] | null;
+    args: Array<{ name: string; type: string; mode: string; enum: string[] | null }>;
   }>(
     db,
     `SELECT n.nspname AS schema, p.proname AS name,
             p.proretset AS returns_set, p.provolatile::text AS volatility,
             format_type(p.prorettype, NULL) AS return_type,
+            (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
+               WHERE e.enumtypid = CASE WHEN rt.typtype = 'e' THEN rt.oid
+                                        WHEN ret_el.typtype = 'e' THEN ret_el.oid END) AS return_enum,
             rt.typtype::text AS return_typtype,
             coalesce(p.proargmodes && ARRAY['o','b','t']::"char"[], false) AS has_out,
             p.pronargdefaults AS n_defaults,
@@ -330,6 +355,12 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
             (SELECT coalesce(json_agg(json_build_object(
                        'name', coalesce(p.proargnames[t.i], ''),
                        'type', format_type(t.typ, NULL),
+                       'enum', (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
+                                 WHERE e.enumtypid = (SELECT CASE WHEN at.typtype = 'e' THEN at.oid
+                                                                  WHEN ael.typtype = 'e' THEN ael.oid END
+                                                        FROM pg_type at
+                                                        LEFT JOIN pg_type ael ON ael.oid = at.typelem
+                                                       WHERE at.oid = t.typ)),
                        'mode', coalesce(p.proargmodes[t.i]::text, 'i')) ORDER BY t.i), '[]'::json)
                FROM unnest(coalesce(p.proallargtypes, string_to_array(p.proargtypes::text, ' ')::oid[]))
                     WITH ORDINALITY AS t(typ, i)
@@ -337,6 +368,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
        JOIN pg_type rt ON rt.oid = p.prorettype
+       LEFT JOIN pg_type ret_el ON ret_el.oid = rt.typelem
       WHERE n.nspname = ANY(${S})
         AND p.prokind = 'f'
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
@@ -394,13 +426,34 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
 
   foreignKeys.push(...viewForeignKeys(foreignKeys, viewRows));
 
+  // view column -> the table column it is read from, following view-over-view chains
+  const viewSource = new Map<string, { schema: string; table: string; column: string }>();
+  {
+    const direct = new Map<string, { key: string; col: string }>();
+    for (const r of viewRows)
+      direct.set(`${relKey(r.vschema, r.vname)}.${r.vcol}`, { key: relKey(r.tschema, r.tname), col: r.tcol });
+    for (const [from, first] of direct) {
+      let at = first;
+      for (let depth = 0; depth < 16; depth++) {
+        const next = direct.get(`${at.key}.${at.col}`);
+        if (!next) break;
+        at = next;
+      }
+      const [schema, ...rest] = at.key.split(".");
+      viewSource.set(from, { schema: schema!, table: rest.join("."), column: at.col });
+    }
+  }
+
   const colsByRel = new Map<string, Column[]>();
   for (const c of colRows) {
     const key = relKey(c.schema, c.table);
     const list = colsByRel.get(key) ?? [];
+    const source = viewSource.get(`${key}.${c.name}`);
     list.push({
       name: c.name,
       type: c.type,
+      ...(c.enum_labels ? { enumLabels: c.enum_labels } : {}),
+      ...(source ? { source } : {}),
       nullable: c.nullable,
       hasDefault: c.has_default,
       defaultExpr: c.default_expr,
@@ -436,12 +489,14 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       type: a.type,
       hasDefault: i >= f.args.length - nDefaults,
       variadic: a.mode === "v",
+      ...(a.enum ? { enumLabels: a.enum } : {}),
     }));
     const def: FunctionDef = {
       schema: f.schema,
       name: f.name,
       args,
       returnType: f.return_type,
+      ...(f.return_enum ? { returnEnumLabels: f.return_enum } : {}),
       returnsSet: f.returns_set,
       returnsComposite: f.has_out || f.return_typtype === "c" || f.return_type === "record",
       returnsVoid: f.return_type === "void",

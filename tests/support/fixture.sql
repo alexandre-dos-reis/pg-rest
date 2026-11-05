@@ -67,6 +67,15 @@ CREATE VIEW api.big_orders AS SELECT * FROM api.orders WHERE total > 100;
 -- An aggregate view is not auto-updatable.
 CREATE VIEW api.client_totals AS SELECT client_id, sum(total) AS revenue FROM api.orders GROUP BY client_id;
 
+-- An enum, and an array of it: introspected as labels (see Column.enumLabels).
+CREATE TYPE api.mood AS ENUM ('sad', 'ok', 'happy');
+CREATE TABLE api.moods (
+  id    serial PRIMARY KEY,
+  mood  api.mood NOT NULL DEFAULT 'ok',
+  seen  api.mood[],
+  note  text
+);
+
 CREATE TABLE v2.things (id serial PRIMARY KEY, label text NOT NULL);
 
 -- Functions
@@ -98,6 +107,8 @@ CREATE FUNCTION api.add_note(txt text) RETURNS int LANGUAGE sql AS $$
 CREATE FUNCTION api.echo_unnamed(json) RETURNS json LANGUAGE sql IMMUTABLE AS $$ SELECT $1 $$;
 CREATE FUNCTION api.ovl(a int) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'int' $$;
 CREATE FUNCTION api.ovl(a text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'text' $$;
+CREATE FUNCTION api.cheer_up(m api.mood) RETURNS api.mood LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE m WHEN 'sad' THEN 'ok' ELSE 'happy' END::api.mood $$;
 CREATE FUNCTION api.nums() RETURNS SETOF int LANGUAGE sql IMMUTABLE AS $$ SELECT generate_series(1, 3) $$;
 CREATE FUNCTION api.first_client() RETURNS api.clients LANGUAGE sql STABLE AS $$ SELECT * FROM api.clients ORDER BY id LIMIT 1 $$;
 CREATE FUNCTION api.req_info() RETURNS json LANGUAGE sql STABLE AS $$
@@ -142,6 +153,7 @@ INSERT INTO api.orders (client_id, status, total, placed_at) VALUES
 INSERT INTO api.products (name, price) VALUES ('Keyboard', 120), ('Mouse', 30), ('Monitor', 380);
 INSERT INTO api.order_items VALUES (1,1,1),(1,2,2),(2,2,1),(4,3,1),(4,1,1);
 INSERT INTO api.employees (name, manager_id) VALUES ('Boss', NULL), ('Alice', 1), ('Bob', 1), ('Carol', 2);
+INSERT INTO api.moods (mood, seen, note) VALUES ('happy', '{ok,happy}', 'first'), ('sad', NULL, NULL);
 INSERT INTO v2.things (label) VALUES ('one'), ('two');
 
 -- Privileges

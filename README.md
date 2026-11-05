@@ -125,6 +125,70 @@ It returns `{ data, error, count, status }` and nothing else differs — same `Q
 Content negotiation is the part that cannot leave HTTP: CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
 headers, `OPTIONS` and the OpenAPI document stay on `handle()`. Reads, writes, RPC and RLS are all here.
 
+### Generated types
+
+`schemaCache()` is the introspected catalog — the very thing the request path reads to decide what a query may do. So the
+types come from there, and what they allow is what the library accepts:
+
+```ts
+// scripts/gen-types.ts — run it after a migration
+import { writeFileSync } from "node:fs";
+import { generateTypes } from "@adrdp/pg-rest/types";
+
+writeFileSync("src/db.types.ts", generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" }));
+```
+
+No CLI and no second database connection: you already have a driver, and the library has no runtime dependency to spend
+on one. The output is a plain module with no imports — commit it, and add it to your formatter's ignore list so the file
+stays byte-for-byte what the generator produced.
+
+```ts
+type DatabasePgRestApiRelations = {
+  todos: {
+    row: { id: number; title: string; done: boolean; created: string; owner_id: string | null };
+    insert: { id?: number; title: string; done?: boolean; created?: string; owner_id?: string | null };
+    update: { id?: number; title?: string; done?: boolean; created?: string; owner_id?: string | null };
+    pk: ["id"];
+    insertable: true;
+    updatable: true;
+    deletable: true;
+    rel: { tags: { rel: "tags"; to: "many" } };
+  };
+  // …
+};
+
+type DatabasePgRestApiFunctions = {
+  open_todos: [{ args: {}; returns: DatabasePgRestApiRelations["todos"]["row"]; set: true }];
+};
+
+export type DatabasePgRest = {
+  default: "api";
+  schemas: { api: { relations: DatabasePgRestApiRelations; functions: DatabasePgRestApiFunctions } };
+};
+```
+
+What ends up in there:
+
+| | |
+| --- | --- |
+| `row` / `insert` / `update` | `insert` leaves out generated columns and makes a column optional when it has a default or is nullable; a relation that cannot be written gets `never` |
+| enums | the labels, as a union — `"sad" \| "ok" \| "happy"`, and `("sad" \| "ok")[]` for an array of them |
+| `rel` | every name you may embed, resolved by `findRelationships`, **the same function the request path uses** — so a `select` the types accept is one the library can resolve. `to: "one" \| "many"` distinguishes an object from an array, and an ambiguous pair carries `hints` (the request needs one, `PGRST201`) |
+| `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, `null` for `void` |
+| every exposed schema | `default` is the first one |
+
+And what it cannot know, deliberately reported as `unknown` rather than as a plausible `string`: `json`/`jsonb`, domains,
+composites, PostGIS and anything else unrecognised. Two more honest gaps: a view column is typed `| null` because the
+catalog says so of every view column (a `NOT NULL` source says nothing about a `LEFT JOIN` in the view's own query —
+`views: "like-source"` follows the source column instead, if you know your views), and a `TABLE(...)` function returns
+`Record<string, unknown>` because the catalog does not carry its output columns, which is exactly how much the request
+path knows too.
+
+Today those types are the result types: `query<DatabasePgRest["schemas"]["api"]["relations"]["todos"]["row"][]>({ … })`.
+Typing the *input* from them — `table` restricted to real relations, `select` to real columns, the result inferred from
+the `select` — is the next step; it needs the schema on `createPgRest`, because TypeScript stops inferring the remaining
+type arguments as soon as one is given explicitly.
+
 ## Examples
 
 Self-contained projects in [`examples/`](examples) (a todo API with Row Level Security; each has its own README, schema and `server.ts`):
