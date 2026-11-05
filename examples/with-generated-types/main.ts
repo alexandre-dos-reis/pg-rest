@@ -1,7 +1,7 @@
 // Step 2: use them. Every property below is checked against db.types.ts, and the result is inferred
 // from the select -- hover `todos` in your editor, or read the comments.
 //   node main.ts
-import { pgRest } from "./db.ts";
+import { close, pgRest } from "./client.ts";
 
 const { data: todos, count } = await pgRest.query({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
@@ -48,12 +48,11 @@ console.log("rpc open_todos:", open);
 
 const { data: one } = await pgRest.query({
   table: "todos",
-  select: ["title"],
+  select: ["title", { tags: { as: "some", select: ["label"] } }],
   where: { id: 1 },
   single: true, //                               one object instead of an array (406 PGRST116 if there is not exactly one)
 });
 // one: { title: string }
 console.log("single:", one.title);
 
-await pgRest.close();
-await pglite.close();
+await close();

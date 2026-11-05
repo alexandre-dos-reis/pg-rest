@@ -72,11 +72,13 @@ try {
   assert.equal(safe.error.body.code, "PGRST205");
   assert.equal((await api.querySafe({ table: "clients", select: ["name"], limit: 1 })).error, null);
 
-  // generateTypes on the built subpath: the generated module is plain text, with no imports
-  const { generateTypes } = await import("../dist/types.js");
-  const generated = generateTypes(await api.schemaCache(), { name: "Db" });
+  // generateTypes, both ways: the method (which loads the generator on demand, from the built
+  // chunk) and the standalone subpath. The generated module is plain text, with no imports.
+  const generated = await api.generateTypes({ name: "Db" });
   assert.match(generated, /export type Db = \{/);
   assert.match(generated, /name: string;/);
+  const { generateTypes } = await import("../dist/types.js");
+  assert.equal(generateTypes(await api.schemaCache(), { name: "Db" }), generated);
 
   // RPC + OpenAPI
   assert.equal((await call("/rpc/add?a=40&b=2")).body, 42);
