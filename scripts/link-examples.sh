@@ -11,6 +11,10 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 
+# The package name comes from package.json: hardcoding it meant a rename left the examples resolving
+# the published version from the registry, which has none of the unreleased API.
+pkg="$(node -p 'require("./package.json").name')"
+
 unlink=0
 if [ "${1:-}" = "--unlink" ]; then unlink=1; shift; fi
 if [ "$#" -gt 0 ]; then names=("$@"); else names=($(ls examples)); fi
@@ -28,7 +32,7 @@ for name in "${names[@]}"; do
   dir="examples/$name"
 
   if [ "$unlink" = 1 ]; then
-    (cd "$dir" && { bun unlink pg-rest >/dev/null 2>&1 || true; }; rm -rf "node_modules/pg-rest")
+    (cd "$dir" && { bun unlink "$pkg" >/dev/null 2>&1 || true; }; rm -rf "node_modules/$pkg")
     echo "unlinked $name"
     continue
   fi
@@ -40,14 +44,16 @@ for name in "${names[@]}"; do
 
   node -e '
     const fs = require("node:fs");
-    const f = process.argv[1];
+    const [f, name] = process.argv.slice(1);
     const pkg = JSON.parse(fs.readFileSync(f, "utf8"));
-    delete pkg.dependencies?.["pg-rest"];
+    delete pkg.dependencies?.[name];
     fs.writeFileSync(f, JSON.stringify(pkg, null, 2) + "\n");
-  ' "$dir/package.json"
+  ' "$dir/package.json" "$pkg"
 
   # A lockfile pinning the unpublished version would make bun try the registry again.
   rm -f "$dir/bun.lock"
+  # ... and so would a copy of the published package left over from an earlier install.
+  rm -rf "$dir/node_modules/$pkg"
   (cd "$dir" && bun install >/dev/null)
 
   cp "$backup" "$dir/package.json"
@@ -55,15 +61,15 @@ for name in "${names[@]}"; do
   trap - EXIT
 
   # Symlinks over the version dependency; package.json is left alone.
-  (cd "$dir" && bun link pg-rest >/dev/null)
+  (cd "$dir" && bun link "$pkg" >/dev/null)
 
   # `bun link` can report success while leaving nothing usable behind (a stale global registration points
   # somewhere else, or the link lands but dist/ is absent), so the result is checked rather than assumed.
-  link="$dir/node_modules/pg-rest"
+  link="$dir/node_modules/$pkg"
   [ -L "$link" ] || { echo "FAIL $name: $link is not a symlink -- is 'bun link' registered at the repo root?" >&2; exit 1; }
   [ -f "$link/package.json" ] || { echo "FAIL $name: $link -> $(readlink "$link") is dangling" >&2; exit 1; }
   [ -f "$link/dist/index.js" ] || { echo "FAIL $name: $link has no dist/index.js -- run 'bun run build'" >&2; exit 1; }
-  (cd "$dir" && node -e 'import("pg-rest")' 2>/dev/null) ||
-    { echo "FAIL $name: pg-rest is linked but does not resolve" >&2; exit 1; }
+  (cd "$dir" && node -e "import(\"$pkg\")" 2>/dev/null) ||
+    { echo "FAIL $name: $pkg is linked but does not resolve" >&2; exit 1; }
   echo "linked   $name -> $(readlink "$link")"
 done

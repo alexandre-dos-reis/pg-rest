@@ -45,6 +45,8 @@ const pgRest = await createPgRest({
 
 ## In-process queries
 
+> Reference with an example for every field: **[`docs/query.md`](docs/query.md)**.
+
 Your own code often needs the same data as your HTTP clients — in a server component, a job, a webhook handler. Behind a
 PostgREST server you would have to call yourself over the network, or write the SQL twice. pg-rest runs inside your process,
 so it answers an object instead:
@@ -184,10 +186,50 @@ catalog says so of every view column (a `NOT NULL` source says nothing about a `
 `Record<string, unknown>` because the catalog does not carry its output columns, which is exactly how much the request
 path knows too.
 
-Today those types are the result types: `query<DatabasePgRest["schemas"]["api"]["relations"]["todos"]["row"][]>({ … })`.
-Typing the *input* from them — `table` restricted to real relations, `select` to real columns, the result inferred from
-the `select` — is the next step; it needs the schema on `createPgRest`, because TypeScript stops inferring the remaining
-type arguments as soon as one is given explicitly.
+### A typed instance
+
+Hand the generated type to `createPgRest` and the queries check themselves:
+
+```ts
+const pgRest = await createPgRest<DatabasePgRest>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const { data } = await pgRest.query({
+  table: "todos", //                        only a relation that exists
+  select: ["id", "title", { tags: ["label"] }], //  only real columns and real relationships
+  where: { done: false }, //                only its own columns, with the right value type
+  order: [{ column: "created", desc: true }],
+  limit: 10,
+});
+// data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
+```
+
+`data` is inferred from the `select`, down to the nesting: a to-one embed is an object or `null` (not null with
+`inner: true`), a to-many embed is an array, `as` renames the key, `spread` merges the columns into the parent row — and
+turns each of them into an array when it spreads a to-many. `single: true` returns the object alone,
+`returning: "minimal"` returns `null`, a function's arguments and result come from its signature, overloads included, and
+a misspelled field that the runtime would silently drop is refused.
+
+**The table restricts the columns in your editor too**, not only when the compiler runs: inside `select` on `tags`, the
+completion offers that table's three columns and nothing from `todos`. That is not free — TypeScript narrows the
+contextual type of a nested property only when the discriminant picks exactly one member of the union, so the query type
+keeps one member per table (reads and writes merged, each action's payload required by `WriteRules`) and every member
+declares `table`, function calls included (`table?: never`). `tests/completions.test.ts` asks the language service and
+pins the answer, because both are easy to undo by accident.
+
+The type argument goes on `createPgRest`, not on the call: TypeScript stops inferring the remaining type arguments as
+soon as one is given explicitly, so `query<DatabasePgRest>({ … })` would check the input and then hand you `unknown`.
+
+**The types describe the schema, not the caller.** `insertable` and its two siblings come from
+`pg_relation_is_updatable`, which is structural -- an aggregate view can never be written, whoever asks -- and say
+nothing about `GRANT`. An insert as `anon` therefore compiles, and Postgres answers `42501` → 401, which is the point:
+the role is chosen per call (usually from a cookie, so the compiler never sees it), one schema serves every role, and row
+level security is a predicate over rows that no type can express. Privileges and RLS stay where they are enforced.
+
+What the typed path does not describe, because the type would have to lie: casts (`total::text`), JSON paths
+(`meta->>tier`) and aggregates (`total.sum()`). They change or invent a column, and reading that back out of a string
+literal costs more than it gives. `createPgRest(options)` without a type argument is unchanged — same loose input, and
+`query<Todo[]>(…)` to name the result yourself — so an untyped instance remains the escape hatch, and `handle` is
+untouched either way: an HTTP request is a string from outside.
 
 ## Examples
 
@@ -200,6 +242,10 @@ Self-contained projects in [`examples/`](examples) (a todo API with Row Level Se
 | [`with-postgres-js`](examples/with-postgres-js)     | Node.js ≥ 22.18 | `postgres`                                             | yes (docker-compose included) |
 | [`with-pglite`](examples/with-pglite)               | Node.js ≥ 22.18 | `@electric-sql/pglite`                                 | no (Postgres in WebAssembly)  |
 | [`with-better-auth`](examples/with-better-auth)     | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) sessions | yes (docker-compose included) |
+
+And one that is not a server at all: [`with-generated-types`](examples/with-generated-types) — two tables, an enum, and
+typed queries checked against types generated from the database (`npm run gen:types && npm start`). It runs on PGlite, so
+there is nothing to install or start.
 
 ## Database adapters
 

@@ -28,6 +28,9 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`) |
 | `src/schema.ts` | schema introspection and cache |
 | `src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `pg-rest/types` |
+| `src/typed.ts` | types only: `createPgRest<Db>` input and result inference over a generated database type |
+| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
+| `docs/query.md` | the `query()` reference, one example per field. **Every `ts` block is compiled** by `tests/docs.test.ts` against `tests/support/fixture.types.ts`, so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`. Write new examples against the fixture schema, and mark a block ```` ```ts ignore ```` only when it cannot compile |
 | `src/service.ts` | schema store (serialized reload), error mapping, `handleSafely` |
 | `src/errors.ts` | `ApiError`, PostgREST error codes (`PGRSTxxx`), `normalizeDbError` (maps SQLSTATE) |
 | `src/openapi.ts` | OpenAPI document |
@@ -96,6 +99,12 @@ Releases carry provenance, so they are attested to the workflow that built them.
 
 ## Conventions and gotchas
 
+- **One union member per table** in `src/typed.ts`. TypeScript narrows the contextual type of a nested property (the items
+  of `select`, the keys of `where`) only when the discriminant picks exactly one member, so reads and writes share one
+  member per table -- each action's payload is required, and refused on the others, by `WriteRules` rather than by the
+  shape -- and *every* member declares `table`, function calls included (`table?: never`). Split them again, or add a
+  member without `table`, and the editor silently starts offering every table's columns while the compiler stays right.
+  `tests/completions.test.ts` asks the language service and pins it.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
   check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type

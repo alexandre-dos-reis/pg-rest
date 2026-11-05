@@ -20,7 +20,9 @@ and the functions with their arguments, optionality, overloads and result type. 
 imports: commit it, and add it to your formatter's ignore list.
 
 Unrecognised types become `unknown` rather than a plausible `string`. A view column is typed `| null` because that is
-what the catalog says of every view column; `views: "like-source"` follows the source column instead.
+what the catalog says of every view column; `views: "like-source"` follows the source column instead. A column the
+database refuses to be given a value -- generated, or `GENERATED ALWAYS AS IDENTITY` -- is left out of `insert` and
+`update` entirely, so `rows: { id: 42, … }` is a compile error instead of a `428C9` from Postgres.
 
 Two additions to the introspection, which the generator needed and which are useful on their own:
 
@@ -30,3 +32,4 @@ Two additions to the introspection, which the generator needed and which are use
 - `Column.source`: for a view column read straight from a table column, that column, followed through view-over-view
   chains. `nullable` is unchanged (the catalog reports every view column as nullable, and a `NOT NULL` source says
   nothing about a `LEFT JOIN` in the view's own query).
+- `Column.identity`: `"always"` or `"by-default"`, which `hasDefault` alone could not tell apart.

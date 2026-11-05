@@ -1,0 +1,119 @@
+# pg-rest with generated types
+
+The smallest example there is: no server, no HTTP, no auth. Two tables, an enum and a function, and queries that
+**check themselves** against types generated from the database. This folder is self-contained: copy it anywhere.
+
+```sh
+npm install
+npm run gen:types   # 1. read the catalog, write db.types.ts
+npm start           # 2. run typed queries
+npm run typecheck   # and see that the mistakes in mistakes.ts really are mistakes
+```
+
+Two steps, because that is the real workflow: the types are a file you generate after a migration and commit, like any
+other artefact your editor and CI need to see.
+
+`pg-rest` is an ordinary versioned dependency, so once this folder is copied out of the repository the install above is
+all you need. Inside the repository that version is not on the registry yet and will not resolve, so link the local
+build instead -- from the repository root:
+
+```sh
+bun run link:examples with-generated-types   # builds pg-rest, then symlinks it into node_modules
+```
+
+## The three files
+
+**`db.ts`** -- Postgres in WebAssembly (PGlite), `schema.sql` loaded in memory. Nothing to install, nothing to start.
+
+**`gen-types.ts`** -- the generator, which is one call:
+
+```ts
+const types = generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" });
+writeFileSync(new URL("./db.types.ts", import.meta.url), types);
+```
+
+`schemaCache()` is the introspected catalog -- the same one the library reads to answer a request -- so the types
+describe exactly what it accepts. No CLI and no second connection: you already have a driver.
+
+**`main.ts`** -- the queries. Hand the generated type to `createPgRest` and everything inside follows:
+
+```ts
+const pgRest = await createPgRest<DatabasePgRest>(options);
+
+const { data: todos } = await pgRest.query({
+  table: "todos", //                                  only a relation of the exposed schema
+  select: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
+  where: { done: false }, //                          its own columns, with the right value type
+  order: [{ column: "priority", desc: true }],
+  limit: 10,
+});
+```
+
+`todos` is inferred, nesting included:
+
+```ts
+Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Array<{ label: string }> }>
+```
+
+## What the generated file looks like
+
+67 lines for this schema, with no imports. The enum became a union, `id` is absent from `insert` because
+`GENERATED ALWAYS AS IDENTITY` refuses a value, `title` is required and the columns with a default are optional:
+
+```ts
+type DatabasePgRestApiRelations = {
+  todos: {
+    row: { id: number; title: string; done: boolean; priority: "low" | "normal" | "high"; due: string | null };
+    insert: { title: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
+    update: { title?: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
+    pk: ["id"];
+    insertable: true;
+    updatable: true;
+    deletable: true;
+    rel: { tags: { rel: "tags"; to: "many" } };
+  };
+  // tags…
+};
+
+type DatabasePgRestApiFunctions = {
+  open_todos: [{ args: {}; returns: DatabasePgRestApiRelations["todos"]["row"]; set: true }];
+};
+
+export type DatabasePgRest = {
+  default: "api";
+  schemas: { api: { relations: DatabasePgRestApiRelations; functions: DatabasePgRestApiFunctions } };
+};
+```
+
+## In your editor
+
+The table restricts the columns, and not only when the compiler runs: inside `select` on `tags`, the completion offers
+`id`, `todo_id`, `label` and `*` -- the three columns of that table, and nothing from `todos`. Same inside `where`, and
+the relationships you may embed are the ones a foreign key actually leads to.
+
+## What it refuses
+
+`mistakes.ts` is a list of mistakes, each with `@ts-expect-error` above it -- which is the assertion that it *is* one:
+`npm run typecheck` fails if any of them ever starts compiling. Remove a comment to read the message:
+
+```ts
+// @ts-expect-error "urgent" is not one of the enum's labels
+void pgRest.query({ table: "todos", where: { priority: "urgent" } });
+
+// @ts-expect-error `id` is generated: it cannot be written
+void pgRest.query({ table: "todos", action: "insert", rows: { id: 42, title: "nope" } });
+
+// @ts-expect-error a misspelled field would be dropped in silence at runtime
+void pgRest.query({ table: "todos", select: ["id"], limitt: 10 });
+```
+
+Not everything can be described: casts (`total::text`), JSON paths (`meta->>tier`) and aggregates (`total.sum()`) change
+or invent a column, so they are errors here and belong on an instance created without a type argument -- which keeps
+working exactly as before.
+
+## Where to look next
+
+This example is deliberately bare. The others add what a real application needs: a server
+([`with-pglite`](../with-pglite), [`with-node-postgres`](../with-node-postgres)), Row Level Security, and a real sign-in
+([`with-better-auth`](../with-better-auth)). The reference for everything above is
+[In-process queries](../../README.md#in-process-queries) and [Generated types](../../README.md#generated-types).

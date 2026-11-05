@@ -10,6 +10,7 @@ import {
   toSafeFailure,
 } from "./query";
 import type { SchemaCache } from "./schema";
+import type { AnyDatabase, TypedPgRestInstance } from "./typed";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
 export type { DbAdapter, DbSession, Row } from "./adapter";
@@ -17,6 +18,15 @@ export type { PreRequestInfo, RequestContext } from "./core";
 export { ApiError, DbQueryError, PgRestError } from "./errors";
 export type { ErrorBody } from "./errors";
 export { QueryError } from "./query";
+export type {
+  AnyDatabase,
+  AnyRelation,
+  AnySchema,
+  AnySignature,
+  QueryData,
+  TypedPgRestInstance,
+  TypedQuery,
+} from "./typed";
 export type {
   DeleteQuery,
   Embed,
@@ -122,8 +132,17 @@ export interface PgRestInstance {
 
 const UNEXPOSABLE = new Set(["pg_catalog", "information_schema"]);
 
-/** Create a PostgREST-compatible handler over a Postgres database. */
-export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstance> => {
+export interface CreatePgRest {
+  (options: PgRestOptions): Promise<PgRestInstance>;
+  /**
+   * With a database type from `generateTypes` (`@adrdp/pg-rest/types`), `query` and `querySafe`
+   * are typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
+   * name real columns and relationships, and `data` is inferred from the `select`.
+   */
+  <Db extends AnyDatabase>(options: PgRestOptions): Promise<TypedPgRestInstance<Db>>;
+}
+
+const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
   const schemas = options.schemas?.length ? [...options.schemas] : ["public"];
   for (const s of schemas) {
     if (UNEXPOSABLE.has(s)) {
@@ -204,3 +223,12 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
     close: async () => {},
   };
 };
+
+/**
+ * Create a PostgREST-compatible handler over a Postgres database.
+ *
+ * `createPgRest<Db>(options)` returns the same instance with `query` and `querySafe` typed by a
+ * generated database type; the cast is the whole of that difference, since types never reach
+ * runtime and the two instances are one object.
+ */
+export const createPgRest: CreatePgRest = create as CreatePgRest;

@@ -18,11 +18,16 @@ describe("runtime-agnostic library", () => {
     expect(offenders).toEqual([]);
   });
 
-  // with-better-auth differs on purpose: todos.owner_id references the Better Auth user (see its README)
+  /**
+   * The driver examples are one app ported to each driver, so their schemas must not drift. Two
+   * differ on purpose: with-better-auth (todos.owner_id references the Better Auth user) and
+   * with-generated-types (a different, smaller app, with an enum to show in the generated types).
+   */
+  const SAME_SCHEMA_EXCEPT = ["with-better-auth", "with-generated-types"];
   test("the examples ship the same schema.sql (they are independent copies)", async () => {
     const files: string[] = [];
     for await (const f of new Glob("examples/*/schema.sql").scan(".")) {
-      if (!f.includes("with-better-auth")) files.push(f);
+      if (!SAME_SCHEMA_EXCEPT.some((e) => f.includes(e))) files.push(f);
     }
     expect(files.length).toBeGreaterThanOrEqual(4);
     const texts = await Promise.all(files.map((f) => Bun.file(f).text()));
