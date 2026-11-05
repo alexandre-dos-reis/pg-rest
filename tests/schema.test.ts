@@ -41,6 +41,16 @@ describe.skipIf(!hasDb)("schema introspection", () => {
     expect(cache.functions.get("api.hello")![0]!.returnEnumLabels).toBeUndefined();
   });
 
+  test("an identity column is told apart from a plain default", () => {
+    const moods = getRelation(cache, "api", "moods");
+    const id = moods.columns.find((c) => c.name === "id")!;
+    expect(id.identity).toBe("always");
+    expect(id.hasDefault).toBe(true);
+    // a serial column has a default but no identity
+    expect(getRelation(cache, "api", "clients").columns.find((c) => c.name === "id")!.identity).toBeUndefined();
+    expect(moods.columns.find((c) => c.name === "note")!.identity).toBeUndefined();
+  });
+
   test("a view column knows the table column it is read from", () => {
     const total = getRelation(cache, "api", "big_orders").columns.find((c) => c.name === "total")!;
     expect(total.source).toEqual({ schema: "api", table: "orders", column: "total" });

@@ -325,6 +325,28 @@ export type NoExtraKeys<Q, Allowed> = {
   readonly [K in Exclude<keyof Q, KeysOfUnion<Allowed>>]: never;
 };
 
+/** The insert or update shape of the relation a query writes to. */
+type WriteShape<Db extends AnyDatabase, Q, Field extends "insert" | "update"> = Q extends { table: infer T }
+  ? T extends Table<Db, SchemaIn<Db, Q>>
+    ? Relations<Db, SchemaIn<Db, Q>>[T][Field]
+    : never
+  : never;
+
+/**
+ * The same guard, for the payload of a write: `rows: { id: 42, ... }` on a generated column, or any
+ * other key the relation does not accept, would otherwise reach the database and be refused there.
+ */
+type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
+  ? {
+      // mapped over the tuple, not over `infer E`: the element union would keep only the keys the
+      // rows have in common, and a stray key on one of them would slip through
+      readonly rows: R extends ReadonlyArray<unknown>
+        ? { readonly [I in keyof R]: R[I] & NoExtraKeys<R[I], WriteShape<Db, Q, "insert">> }
+        : R & NoExtraKeys<R, WriteShape<Db, Q, "insert">>;
+    }
+  : unknown) &
+  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, WriteShape<Db, Q, "update">> } : unknown);
+
 /** Every query this database allows, as a union discriminated by `table` or `rpc`. */
 export type TypedQuery<Db extends AnyDatabase> = {
   [S in Schema<Db>]:
@@ -390,11 +412,11 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
  */
 export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "querySafe"> {
   query<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>>>;
   querySafe<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QuerySafeResult<QueryData<Db, Q>>>;
 }

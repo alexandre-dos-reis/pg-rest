@@ -128,8 +128,9 @@ const shapes = (rel: Relation, sourceNullable: (col: Column) => boolean, push: L
   for (const c of cols) push(depth + 1, `${key(c.name)}: ${value(c)};`);
   push(depth, "};");
 
-  // A generated column cannot be written. A column with a default, or a nullable one, may be left out.
-  const writable = cols.filter((c) => !c.generated);
+  // A generated column cannot be written, and neither can an `always` identity; a column with a
+  // default, or a nullable one, may be left out.
+  const writable = cols.filter((c) => !c.generated && c.identity !== "always");
   push(depth, rel.insertable ? "insert: {" : "insert: never;");
   if (rel.insertable) {
     for (const c of writable) {

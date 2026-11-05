@@ -121,13 +121,11 @@ type DatabasePgRestApiRelations = {
       note: string | null;
     };
     insert: {
-      id?: number;
       mood?: "sad" | "ok" | "happy";
       seen?: ("sad" | "ok" | "happy")[] | null;
       note?: string | null;
     };
     update: {
-      id?: number;
       mood?: "sad" | "ok" | "happy";
       seen?: ("sad" | "ok" | "happy")[] | null;
       note?: string | null;

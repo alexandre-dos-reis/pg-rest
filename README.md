@@ -228,6 +228,10 @@ Self-contained projects in [`examples/`](examples) (a todo API with Row Level Se
 | [`with-pglite`](examples/with-pglite)               | Node.js ≥ 22.18 | `@electric-sql/pglite`                                 | no (Postgres in WebAssembly)  |
 | [`with-better-auth`](examples/with-better-auth)     | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) sessions | yes (docker-compose included) |
 
+And one that is not a server at all: [`with-generated-types`](examples/with-generated-types) — two tables, an enum, and
+typed queries checked against types generated from the database (`npm run gen:types && npm start`). It runs on PGlite, so
+there is nothing to install or start.
+
 ## Database adapters
 
 `db` is a `DbAdapter` — the only thing pg-rest needs from a driver:

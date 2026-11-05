@@ -78,6 +78,9 @@ describe("generateTypes", () => {
           column("name", "text"),
           column("note", "text", { nullable: true }),
           column("computed", "text", { generated: true }),
+          // an `always` identity refuses a value (428C9), so it is not writable either
+          column("serial_always", "bigint", { hasDefault: true, identity: "always" }),
+          column("serial_default", "bigint", { hasDefault: true, identity: "by-default" }),
         ]),
         relation("ro", [column("x", "integer")], {
           kind: "view",
@@ -88,8 +91,14 @@ describe("generateTypes", () => {
       ]),
     );
     // a default or a nullable column may be left out; a generated one cannot be written at all
-    expect(out).toContain("insert: {\n      id?: number;\n      name: string;\n      note?: string | null;\n    };");
-    expect(out).toContain("update: {\n      id?: number;\n      name?: string;\n      note?: string | null;\n    };");
+    expect(out).toContain(
+      "insert: {\n      id?: number;\n      name: string;\n      note?: string | null;\n      serial_default?: number;\n    };",
+    );
+    expect(out).toContain(
+      "update: {\n      id?: number;\n      name?: string;\n      note?: string | null;\n      serial_default?: number;\n    };",
+    );
+    // it is still a column of the row: it just cannot be written
+    expect(out).toContain("serial_always: number;");
     expect(out).toContain("insert: never;");
     expect(out).toContain("update: never;");
     expect(out).toContain("insertable: false;");

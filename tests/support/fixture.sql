@@ -70,7 +70,8 @@ CREATE VIEW api.client_totals AS SELECT client_id, sum(total) AS revenue FROM ap
 -- An enum, and an array of it: introspected as labels (see Column.enumLabels).
 CREATE TYPE api.mood AS ENUM ('sad', 'ok', 'happy');
 CREATE TABLE api.moods (
-  id    serial PRIMARY KEY,
+  -- an identity column: Postgres refuses a value for it, so the generated types leave it out
+  id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   mood  api.mood NOT NULL DEFAULT 'ok',
   seen  api.mood[],
   note  text

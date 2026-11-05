@@ -236,6 +236,14 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ rpc: "hello", select: ["anything"] }));
     // @ts-expect-error a field that is in no query is dropped in silence at runtime, so it is refused here
     void (() => pgRest.query({ table: "clients", select: ["id"], limitt: 10 }));
+    // @ts-expect-error the payload is checked the same way: no such column
+    void (() => pgRest.query({ table: "clients", action: "insert", rows: { name: "x", nope: 1 } }));
+    // @ts-expect-error ... in a bulk insert too
+    void (() => pgRest.query({ table: "clients", action: "insert", rows: [{ name: "x" }, { name: "y", nope: 1 }] }));
+    // @ts-expect-error ... and in an update
+    void (() => pgRest.query({ table: "clients", action: "update", set: { nope: 1 } }));
+    // @ts-expect-error an identity column cannot be written (the fixture's moods.id is one)
+    void (() => pgRest.query({ table: "moods", action: "insert", rows: { id: 42, mood: "ok" } }));
     // the string forms that change or invent a column are not described by the types: a cast, a
     // JSON path and an aggregate all need an untyped instance
     // @ts-expect-error
