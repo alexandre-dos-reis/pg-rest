@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { FilterOp, QueryResult, QuerySafeResult } from "./query";
+import type { FilterOp, QueryResult, QuerySafeResult, Scalar } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -242,8 +242,12 @@ type WhereOf<R, EmbedKeys extends string> = {
   readonly and?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
   readonly or?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
 } & {
-  /** A filter on an embedded resource, by its dotted path. The column is not checked there. */
-  readonly [K in `${EmbedKeys}.${string}`]?: Filter<never>;
+  /**
+   * A filter on an embedded resource, by its dotted path, the way the query string writes it. The
+   * column belongs to the other resource, so only the shape of the condition is checked here --
+   * prefer the embed's own `where`, which knows its columns.
+   */
+  readonly [K in `${EmbedKeys}.${string}`]?: Filter<Scalar>;
 };
 
 type OrderOf<R> =
@@ -424,6 +428,26 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
   : unknown) &
   (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, WriteShape<Db, Q, "update">> } : unknown);
 
+/** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
+type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
+  | Column<Db, S, T>
+  | "and"
+  | "or"
+  | `${keyof Embeds<Db, S, T> & string}.${string}`;
+
+/**
+ * A condition on something that is not a column of this relation. An unknown key inside `where` is
+ * not reported by assignability either -- `{ "titel": true }` would reach the database and come
+ * back as a `42703`. The columns of the relation the query names, so after its `table`.
+ */
+type NoExtraWhereKeys<Db extends AnyDatabase, Q> = Q extends { where: infer W }
+  ? Q extends { table: infer T }
+    ? T extends Table<Db, SchemaIn<Db, Q>>
+      ? { readonly where: W & { readonly [K in Exclude<keyof W, WhereKeys<Db, SchemaIn<Db, Q>, T>>]: never } }
+      : unknown
+    : unknown
+  : unknown;
+
 /** Every query this database allows, as a union discriminated by `table` or `rpc`. */
 export type TypedQuery<Db extends AnyDatabase> = {
   [S in Schema<Db>]:
@@ -510,7 +534,7 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRest
    * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
    */
   query<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>>>;
   /**
@@ -522,7 +546,7 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRest
    * if (error) return c.json(error.body, error.status);
    */
   querySafe<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QuerySafeResult<QueryData<Db, Q>>>;
 }

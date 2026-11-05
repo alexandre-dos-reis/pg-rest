@@ -30,6 +30,7 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `pg-rest/types` |
 | `src/typed.ts` | types only: `createPgRest<Db>` input and result inference over a generated database type |
 | `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
+| `docs/query.md` | the `query()` reference, one example per field. **Every `ts` block is compiled** by `tests/docs.test.ts` against `tests/support/fixture.types.ts`, so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`. Write new examples against the fixture schema, and mark a block ```` ```ts ignore ```` only when it cannot compile |
 | `src/service.ts` | schema store (serialized reload), error mapping, `handleSafely` |
 | `src/errors.ts` | `ApiError`, PostgREST error codes (`PGRSTxxx`), `normalizeDbError` (maps SQLSTATE) |
 | `src/openapi.ts` | OpenAPI document |

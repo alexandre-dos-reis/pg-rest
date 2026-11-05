@@ -45,6 +45,8 @@ const pgRest = await createPgRest({
 
 ## In-process queries
 
+> Reference with an example for every field: **[`docs/query.md`](docs/query.md)**.
+
 Your own code often needs the same data as your HTTP clients — in a server component, a job, a webhook handler. Behind a
 PostgREST server you would have to call yourself over the network, or write the SQL twice. pg-rest runs inside your process,
 so it answers an object instead:

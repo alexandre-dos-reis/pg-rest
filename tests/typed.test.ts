@@ -74,6 +74,29 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(inner.data).toEqual([{ id: 1, clients: { name: "Ada" } }]);
   });
 
+  test("an embedded resource can also be filtered by its dotted path", async () => {
+    const { data } = await pgRest.query({
+      table: "clients",
+      select: ["name", { orders: ["total"] }],
+      where: { "orders.status": "paid" },
+      order: ["id"],
+    });
+    assertType<Equal<typeof data, Array<{ name: string; orders: Array<{ total: number }> }>>>();
+    expect(data).toEqual([
+      { name: "Ada", orders: [{ total: 250 }] },
+      { name: "Linus", orders: [{ total: 99.99 }] },
+      { name: "Grace", orders: [] },
+    ]);
+    // the operator forms work there too
+    const tuple = await pgRest.query({
+      table: "clients",
+      select: ["name", { orders: ["total"] }],
+      where: { "orders.total": ["gte", 200] },
+      order: ["id"],
+    });
+    expect(tuple.data[0]!.orders).toEqual([{ total: 250 }]);
+  });
+
   test("an embed can be renamed, and the type follows the alias", async () => {
     const { data } = await pgRest.query({
       table: "orders",
@@ -244,6 +267,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "clients", where: { id: "one" } }));
     // @ts-expect-error an enum only takes its labels
     void (() => pgRest.query({ table: "moods", where: { mood: "elated" } }));
+    // @ts-expect-error an unknown key inside `where` would reach the database as a 42703
+    void (() => pgRest.query({ table: "clients", select: ["id"], where: { titel: "Ada" } }));
+    // @ts-expect-error a JSON path is not a column the types know
+    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": "gold" } }));
     // @ts-expect-error order only takes real columns
     void (() => pgRest.query({ table: "clients", order: ["nope.desc"] }));
     // @ts-expect-error an aggregate view cannot be written to (insert: never)
