@@ -1,0 +1,109 @@
+# Architecture
+
+Two entry points, one pipeline. `handle()` is the HTTP front door; `query()` takes an object. They meet as soon as the
+query parameters exist and share everything after that — parsing, planning, SQL, the transaction, the error mapping — so
+a feature or a fix lands in one place.
+
+```
+                      ┌─ handleRequest ─ URL, headers, body, content negotiation
+                      │
+[key, value][] ──▶ parseQuery ──▶ ParsedQuery ──▶ planTable / planRpc ──▶ execute ──▶ Response
+                      │                              (SQL builders)      (one transaction)
+                      └─ query() ─ an object, rendered into the same parameters
+```
+
+- [A request, step by step](#a-request-step-by-step)
+- [Where things live](#where-things-live)
+- [The schema cache](#the-schema-cache)
+- [Errors](#errors)
+- [Invariants worth knowing](#invariants-worth-knowing)
+
+## A request, step by step
+
+1. **Route and negotiate** (`core.handleRequest`). The method, the path (minus `basePath`) and the headers decide the
+   target (`/table`, `/rpc/fn`, or the OpenAPI root), the schema (`Accept-Profile` / `Content-Profile`), the
+   preferences (`Prefer`), the output format (`Accept`, including CSV, GeoJSON, custom media types and plans) and the
+   range. The body is parsed for a write.
+2. **Parse the query** (`parse/*`). `parseQuery` turns the query parameters into a `ParsedQuery`: a `select` tree
+   (columns, aliases, casts, JSON paths, aggregates, embedded resources with their hints and join type), the filters as
+   a tree, order, paging, `on_conflict` and `columns`. The grammars follow PostgREST's Parsec ones, including where they
+   stop and ignore the rest of a malformed value.
+3. **Plan** (`core.planTable` / `core.planRpc` + `sql/*`). The relation or function is resolved against the schema
+   cache, relationships through `resolveRelationship`, and the SQL is built: `sql/read` for selects and embeds,
+   `sql/write` for insert/update/delete/upsert, `sql/rpc` for a function call, `sql/filters` for the `WHERE`, and
+   `sql/statement` to wrap it all into **one** statement that returns the body, the page total, the count and the
+   response GUCs. The rendering happens in Postgres (`json_agg`, `ST_AsGeoJSON`, a CSV aggregate), so the handler
+   forwards text rather than re-serialising rows.
+4. **Execute** (`core.execute`). One transaction on one connection:
+   `SET TRANSACTION READ ONLY` for a read, then one `set_config` statement for the role, the claims, the `search_path`
+   and your settings, then `preRequest` if you declared one, then the statement. `Prefer: tx=rollback` and a plan
+   request roll back instead of committing, and a serialization failure (`40001`) is retried twice, since the whole
+   transaction rolled back.
+5. **Respond** (`core.buildResponse`). Status (`201`, `204`, `206`, `416`…), `Content-Range`, `Location`,
+   `Content-Type`, `Preference-Applied`, and the headers and status a function set through `response.headers` /
+   `response.status`.
+
+`query()` enters at step 2 with parameters it renders from the object, builds the same plan, runs the same `execute`,
+and reads the `Response` back into `{ data, count, status }`. The HTTP-only parts — content negotiation, `Range`,
+plans, `OPTIONS`, OpenAPI — stay on `handle()`.
+
+## Where things live
+
+| path | |
+| --- | --- |
+| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `querySafe`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `src/core.ts` | routing, content negotiation, planning, the transaction, response building |
+| `src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
+| `src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement` |
+| `src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
+| `src/service.ts` | the schema store (serialised reloads), error mapping, `handleSafely` |
+| `src/errors.ts` | `PgRestError`, `ApiError`, `DbQueryError`, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
+| `src/query.ts` | the object API: `QueryInput` → query parameters, and `QueryError` |
+| `src/typed.ts` | types only: the typed input and the result inference over a generated database type |
+| `src/types.ts` | `generateTypes`, published as `@adrdp/pg-rest/types`, loaded on demand |
+| `src/openapi.ts` | the Swagger 2.0 document |
+| `src/quote.ts` | identifier and literal quoting — every identifier goes through it |
+| `src/adapter.ts`, `src/adapters/*` | the driver interface and the four adapters |
+
+## The schema cache
+
+`createPgRest` introspects `pg_catalog` once, so a connection or catalog problem surfaces at startup. The cache holds
+relations with their columns (types, nullability, defaults, identity, enum labels, the table column a view column is
+read from), primary keys and unique constraints, what each relation accepts (`pg_relation_is_updatable`), foreign keys —
+**including the ones that travel through views** — functions with their arguments and return shapes, and the custom
+media type handlers.
+
+It is what every later decision reads: whether a table exists (`PGRST205`, with a did-you-mean), whether an embed
+resolves and in which direction, what an insert may contain, which arguments a function overload takes — and it is what
+`generateTypes()` describes, which is why the types cannot disagree with the runtime.
+
+`reloadSchema()` re-reads it. Reloads are serialised, and a failed one keeps the previous cache rather than leaving the
+handler without one.
+
+## Errors
+
+The pure layers throw `PgRestError` (status, `PGRSTxxx` code, details, hint). Adapters' failures become `DbQueryError`,
+normalised by SQLSTATE from whatever the driver throws. At the boundary, `toApiError` maps either — plus connection
+failures and unexpected errors — to an `ApiError`: a status and a body shaped exactly like PostgREST's
+`{ code, message, details, hint }`.
+
+Then it is only a matter of how it reaches you: `handle()` serialises it into a response, `query()` throws a
+`QueryError` with the input attached, `querySafe()` returns it. One mapping, three deliveries.
+
+## Invariants worth knowing
+
+They are the kind that break quietly, so each has a test that fails loudly:
+
+- **One pipeline.** A feature must come from the shared code, not from one entry point. `tests/query.test.ts` asserts
+  `query()` and `handle()` answer identically, error bodies included.
+- **PostgREST's behaviour is the specification.** `tests/compare` replays hundreds of requests against the real
+  PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
+- **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `src/quote.ts`.
+  `tests/security.test.ts` is the guard. → [`security.md`](security.md)
+- **One union member per table** in `src/typed.ts`, and every member declares `table`. Otherwise the editor silently
+  starts offering every table's columns while the compiler stays right; `tests/completions.test.ts` asks the language
+  service and pins it. → [`types.md`](types.md#in-your-editor)
+- **The generated types compile, and are what the generator produces.** `tests/support/fixture.types.ts` is committed;
+  one test pins it byte for byte and `bun run typecheck` compiles it.
+- **The documentation compiles.** Every TypeScript block in `docs/` and in the README is type-checked by
+  `tests/docs.test.ts` against the fixture's generated types.

@@ -1,8 +1,9 @@
 # `query()` — asking in-process
 
 pg-rest is a library, so the HTTP envelope is optional: `query()` takes a plain object, runs in the calling process, and
-goes through the same parser, the same SQL and the same errors as `handle(request)`. This file is the long version of
-[In-process queries](../README.md#in-process-queries), with an example for every field.
+goes through the same parser, the same SQL and the same errors as `handle(request)`. One example per field below; the
+options of the instance itself are in [`options.md`](options.md), and the types the examples rely on in
+[`types.md`](types.md).
 
 Every TypeScript block below is compiled by `tests/docs.test.ts` against the schema it describes, so an example that
 drifts fails the build. The ones that are meant to be refused carry `@ts-expect-error`, which is how the check knows.
@@ -76,8 +77,7 @@ const { data } = await pgRest.query<Array<{ id: number; name: string }>>({
 });
 ```
 
-With one, everything inside is checked and the result is inferred. The type comes from the catalog — see
-[Generated types](../README.md#generated-types):
+With one, everything inside is checked and the result is inferred. The type comes from the catalog — see [`types.md`](types.md):
 
 ```ts
 import type { Database } from "./db.types.ts";

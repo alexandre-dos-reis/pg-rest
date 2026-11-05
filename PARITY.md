@@ -1,6 +1,6 @@
 # Parity with PostgREST v16
 
-Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope **by design** (it is a library: the host app owns it, see the README's *Not supported* section), as opposed to ❌, which is simply not done yet.
+Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope **by design** (it is a library: the host app owns it, see [`docs/design.md`](docs/design.md)), as opposed to ❌, which is simply not done yet.
 
 pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgREST are replaced by
 `createPgRest(options)` and `resolveContext`. Everything below is about the request/response behaviour of `handle()`.

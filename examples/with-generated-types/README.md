@@ -130,4 +130,4 @@ working exactly as before.
 This example is deliberately bare. The others add what a real application needs: a server
 ([`with-pglite`](../with-pglite), [`with-node-postgres`](../with-node-postgres)), Row Level Security, and a real sign-in
 ([`with-better-auth`](../with-better-auth)). The reference for everything above is
-[In-process queries](../../README.md#in-process-queries) and [Generated types](../../README.md#generated-types).
+[`docs/query.md`](../../docs/query.md) and [`docs/types.md`](../../docs/types.md).
