@@ -1,8 +1,17 @@
 # pg-rest
 
-A [PostgREST](https://postgrest.org) (v16 behaviour) reimplementation as a **library**: a web-standard
-`handle(Request) => Promise<Response>` on top of a tiny database-adapter interface — and the same thing callable
-in-process, from a plain object, with types generated from your database.
+**PostgREST v16, as a library.** The same URL grammar, the same embedding, the same `Prefer` / `Accept` / `Range`
+negotiation, the same JSON shapes, the same status codes and the same `PGRSTxxx` error bodies — delivered as a
+web-standard `handle(Request) => Promise<Response>` that you mount in your own server, on top of a tiny
+database-adapter interface.
+
+Compatibility here is a measurement, not a promise: every run replays **344 requests against the real PostgREST 16.5
+binary**, on the same database with the same data, and compares status, headers and body. Exactly **one** difference is
+accepted today — pg-rest refuses a cast target that is not a plain type name — and the test asserts that it still
+differs, so it cannot quietly become two. [`PARITY.md`](PARITY.md) is the table, feature by feature, and marks what is
+out of scope on purpose.
+
+What being a library changes:
 
 - **Runtime-agnostic.** Only web standards (`Request`/`Response`/`Headers`), no driver and no runtime API of its own.
   Tested on Bun and Node.js 22; no runtime dependencies.
