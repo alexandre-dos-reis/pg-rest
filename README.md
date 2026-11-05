@@ -217,6 +217,12 @@ pins the answer, because both are easy to undo by accident.
 The type argument goes on `createPgRest`, not on the call: TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<DatabasePgRest>({ … })` would check the input and then hand you `unknown`.
 
+**The types describe the schema, not the caller.** `insertable` and its two siblings come from
+`pg_relation_is_updatable`, which is structural -- an aggregate view can never be written, whoever asks -- and say
+nothing about `GRANT`. An insert as `anon` therefore compiles, and Postgres answers `42501` → 401, which is the point:
+the role is chosen per call (usually from a cookie, so the compiler never sees it), one schema serves every role, and row
+level security is a predicate over rows that no type can express. Privileges and RLS stay where they are enforced.
+
 What the typed path does not describe, because the type would have to lie: casts (`total::text`), JSON paths
 (`meta->>tier`) and aggregates (`total.sum()`). They change or invent a column, and reading that back out of a string
 literal costs more than it gives. `createPgRest(options)` without a type argument is unchanged — same loose input, and

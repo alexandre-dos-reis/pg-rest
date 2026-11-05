@@ -5,8 +5,6 @@ import { createPgRest } from "@adrdp/pg-rest";
 import { generateTypes } from "@adrdp/pg-rest/types";
 import { options, pglite } from "./db.ts";
 
-const pgRest = await createPgRest(options);
-
 // schemaCache() is the introspected catalog -- the same one the library reads to answer a request,
 // so the types describe exactly what it accepts.
 const types = generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" });

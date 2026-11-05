@@ -7,10 +7,6 @@ import type { DatabasePgRest } from "./db.types.ts";
 
 const pgRest = await createPgRest<DatabasePgRest>(options);
 
-await pgRest.query({
-  table: "tags", //                             the relations of the exposed schema: "todos" | "tags"
-});
-
 const { data: todos, count } = await pgRest.query({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
   select: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there

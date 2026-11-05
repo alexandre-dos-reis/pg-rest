@@ -205,6 +205,30 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(await res.json()).toEqual([{ name: "Ada" }]);
   });
 
+  /**
+   * The generated types describe the *schema*, not the caller: `insertable` and friends come from
+   * `pg_relation_is_updatable`, which is structural (an aggregate view can never be written), and
+   * say nothing about GRANTs. A role is chosen per call, usually from a cookie, so the compiler
+   * cannot see it -- and row level security is a predicate, which no type can express. Privileges
+   * are enforced where they have to be.
+   */
+  test("the types do not know the role: that stays the database's job", async () => {
+    // this compiles: `clients` is a writable table, and nothing in the type mentions `anon`
+    const denied = await pgRest.querySafe({ table: "clients", action: "insert", rows: { name: "x" } });
+    expect(denied.error?.status).toBe(401);
+    expect(denied.error?.body.code).toBe("42501"); // insufficient_privilege, straight from Postgres
+    // the same call as a role that was granted the write succeeds
+    const allowed = await pgRest.querySafe({ table: "clients", action: "insert", rows: { name: "x" } }, authed);
+    expect(allowed.error).toBeNull();
+    // and RLS keeps filtering rows the types know nothing about
+    const as = (sub: string) => ({ role: "authenticated", claims: { sub } });
+    await pgRest.query({ table: "notes", action: "insert", rows: { body: "alice only" } }, as("alice"));
+    expect((await pgRest.query({ table: "notes", select: ["body"] }, as("alice"))).data).toEqual([
+      { body: "alice only" },
+    ]);
+    expect((await pgRest.query({ table: "notes", select: ["body"] }, as("bob"))).data).toEqual([]);
+  });
+
   test("what the types refuse", () => {
     // @ts-expect-error the table does not exist
     void (() => pgRest.query({ table: "cients", select: ["id"] }));
