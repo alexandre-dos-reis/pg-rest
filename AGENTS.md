@@ -16,7 +16,9 @@ reference lives in `docs/`.
   `resolveContext(req)` (or passes a context to `handle`) with the role and claims, and pg-rest applies them with `set_config` so RLS works.
 - Driver-agnostic: the core only knows the `DbAdapter` interface (`src/adapter.ts`). Adapters live in `src/adapters/*` and **must not import
   their driver** (structural types only); drivers are optional peer dependencies. Never add a driver import to `src/` outside tests.
-- **No runtime dependencies.** Don't add one. (Effect was removed on purpose: see PR #5.)
+- **No runtime dependencies.** Don't add one. (Effect was removed on purpose: see PR #5.) The two PostgREST client
+  libraries in `devDependencies` are there for `tests/clients.test.ts`, which checks that real clients still work
+  against `handle()`; they never reach `src/`.
 - Target runtimes: Bun and Node (tested on Node 22). Don't use `Bun.*` APIs in `src/`.
 
 ## Layout

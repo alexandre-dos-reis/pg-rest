@@ -34,6 +34,7 @@ care about.
 | `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
 | `tests/types.test.ts` | the generator, and the committed `fixture.types.ts` byte for byte |
 | `tests/docs.test.ts` | every TypeScript block in the README and `docs/`, compiled |
+| `tests/clients.test.ts` | `@supabase/postgrest-js` and `@neondatabase/postgrest-js` driving `handle()` through their own query builders, with the handler passed as their `fetch` |
 | `tests/security.test.ts` | hostile input through both entry points |
 | `tests/agnostic.test.ts` | the four adapters against the same expectations, and the examples' consistency |
 

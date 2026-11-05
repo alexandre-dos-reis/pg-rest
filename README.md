@@ -50,6 +50,21 @@ app.all("/api/*", (c) => pgRest.handle(c.req.raw));
 curl 'localhost:3000/todos?select=id,title,tags(label)&done=is.false&order=priority.desc&limit=10'
 ```
 
+Any PostgREST client should work — the wire format is the whole contract, and there is no proprietary handshake to
+imitate. The two in widest use are checked against `handle()` on every run, through their own query builders
+(`tests/clients.test.ts`): [`@supabase/postgrest-js`](https://github.com/supabase/supabase-js/tree/master/packages/core/postgrest-js)
+and [`@neondatabase/postgrest-js`](https://github.com/neondatabase/neon-js/tree/main/packages/postgrest-js) — embeds,
+`single()`, `maybeSingle()`, `count`, `range()`, `csv()`, `schema()`, `upsert({ onConflict })`, `rpc()`, the filter
+builders, and the error bodies.
+
+They take a `fetch`, so a client can talk to pg-rest without a socket at all — which is how that test runs:
+
+```ts ignore
+const client = new PostgrestClient("http://pg-rest", {
+  fetch: (input, init) => pgRest.handle(new Request(input, init), ctx),
+});
+```
+
 ## In the same process, with types from your schema
 
 No HTTP, no loopback call: the same parser, the same SQL and the same `set_config` of the role and claims, so Row Level
