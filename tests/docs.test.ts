@@ -37,9 +37,12 @@ declare const user: { id: string; email: string };
 declare const mySessionLookup: (req: Request) => Promise<{ id: string; email: string } | undefined>;
 declare const pg: { Pool: new (config: { connectionString?: string }) => unknown };
 declare const writeFileSync: (path: string, data: string) => void;
+// the hosts the README mounts the handler in
+declare const serve: (options: { fetch: (req: Request) => Promise<Response>; port?: number }) => unknown;
+declare const app: { all: (path: string, handler: (c: { req: { raw: Request } }) => Promise<Response>) => void };
 declare const generateTypes: (cache: unknown, options?: { name?: string }) => string;
 void [createPgRest, QueryError, pool, nodePostgresAdapter, pgRest, ctx, user];
-void [mySessionLookup, pg, writeFileSync, generateTypes];
+void [mySessionLookup, pg, writeFileSync, generateTypes, serve, app];
 `;
 
 const DB_TYPES_OF = (page: string) =>
