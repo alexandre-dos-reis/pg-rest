@@ -5,10 +5,11 @@ import { close, pgRest } from "./client.ts";
 
 const { data: todos, count } = await pgRest.query({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
-  select: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there
+  select: ["id", "title", "priority", { tags: {} }], //  this table's columns, and `tags` because a foreign key leads there
   where: { done: false }, //                     this table's columns too, each with its own value type
   order: [{ column: "priority", desc: true }], //  a column again, so a typo is an error and not a silently unordered answer
   limit: 10, //                                  plain numbers: limit, offset
+  count: "exact",
 });
 // todos: Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Array<{ label: string }> }>
 console.log(`open todos (${count} in total):`, todos);
