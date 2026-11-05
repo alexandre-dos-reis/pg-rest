@@ -16,18 +16,48 @@ export interface TestDb {
 
 let counter = 0;
 
-/** Create a fresh database from fixture.sql (isolated per test file). */
+/**
+ * Replaying fixture.sql costs about 250 ms, most of it `CREATE EXTENSION postgis`, and some suites
+ * want a pristine database per *test* -- `write.test.ts` creates fifty of them. So it is loaded once
+ * into a template, and every test database is a copy of it: about 30 ms.
+ *
+ * The template is named after a hash of the fixture, so it survives between runs and a change to
+ * the schema builds a new one; the stale ones are dropped on the way.
+ */
+const templateName = `pgrest_template_${Bun.hash(fixture).toString(16)}`;
+let templateReady: Promise<void> | undefined;
+
+const ensureTemplate = (admin: SQL): Promise<void> =>
+  (templateReady ??= (async () => {
+    const existing = await admin.unsafe(`SELECT datname FROM pg_database WHERE datname LIKE 'pgrest_template_%'`);
+    for (const row of existing as Array<{ datname: string }>) {
+      if (row.datname !== templateName) await admin.unsafe(`DROP DATABASE IF EXISTS ${row.datname} WITH (FORCE)`);
+    }
+    if (existing.some((r: { datname: string }) => r.datname === templateName)) return;
+    await admin.unsafe(`CREATE DATABASE ${templateName}`);
+    const url = new URL(ADMIN_URL!);
+    url.pathname = `/${templateName}`;
+    const sql = new SQL(url.toString());
+    try {
+      await sql.unsafe(fixture);
+    } finally {
+      // nothing may be connected to a database used as a template
+      await sql.close();
+    }
+  })());
+
+/** Create a fresh database from fixture.sql (isolated per test file, or per test). */
 export const createTestDb = async (): Promise<TestDb> => {
   if (!ADMIN_URL) throw new Error("TEST_DATABASE_URL is not set");
   const name = `pgrest_test_${process.pid}_${Date.now()}_${counter++}`;
   const admin = new SQL(ADMIN_URL);
-  await admin.unsafe(`CREATE DATABASE ${name}`);
+  await ensureTemplate(admin);
+  await admin.unsafe(`CREATE DATABASE ${name} TEMPLATE ${templateName}`);
   await admin.close();
 
   const url = new URL(ADMIN_URL);
   url.pathname = `/${name}`;
   const sql = new SQL(url.toString());
-  await sql.unsafe(fixture);
   const adapter = bunSqlAdapter(sql);
 
   return {

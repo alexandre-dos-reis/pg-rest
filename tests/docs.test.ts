@@ -15,7 +15,6 @@ import type * as TS from "typescript";
 const ts = createRequire(import.meta.url)("typescript") as typeof TS;
 
 const root = new URL("..", import.meta.url).pathname;
-const file = `${root}tests/_docs.ts`;
 
 /**
  * The preamble the blocks are written against: a typed instance over the schema the page documents,
@@ -64,7 +63,12 @@ const blocksOf = (markdown: string): string[] => {
   return out;
 };
 
-const diagnose = (content: string): string[] => {
+/**
+ * Every page in one program, rather than one program per page: each becomes its own virtual file,
+ * compiled together, and the diagnostics are handed back per page. Ten programs meant reading
+ * lib.d.ts ten times.
+ */
+const diagnoseAll = (sources: Map<string, string>): Map<string, string[]> => {
   const options: TS.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.Preserve,
@@ -76,21 +80,30 @@ const diagnose = (content: string): string[] => {
     // a documentation example is allowed to name something and not use it
     noUnusedLocals: false,
   };
+  /** One file per page, named after it so a diagnostic says which page it came from. */
+  const fileOf = (page: string) => `${root}tests/_docs_${page.replace(/[^a-z]/gi, "_")}.ts`;
+  const contents = new Map([...sources].map(([page, text]) => [fileOf(page), text]));
+
   const host = ts.createCompilerHost(options, true);
   const original = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, ...rest) =>
-    name === file ? ts.createSourceFile(name, content, ts.ScriptTarget.ESNext, true) : original(name, ...rest);
-  host.fileExists = (f) => f === file || existsSync(f);
-  host.readFile = (f) => (f === file ? content : existsSync(f) ? readFileSync(f, "utf8") : undefined);
-  const program = ts.createProgram([file], options, host);
-  return ts
-    .getPreEmitDiagnostics(program)
-    .filter((d) => d.file?.fileName === file)
-    .map((d) => {
-      const line = d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : 0;
-      const source = content.split("\n")[line - 1]?.trim() ?? "";
-      return `line ${line}: ${ts.flattenDiagnosticMessageText(d.messageText, " ")}\n    ${source}`;
-    });
+  host.getSourceFile = (name, ...rest) => {
+    const text = contents.get(name);
+    return text === undefined ? original(name, ...rest) : ts.createSourceFile(name, text, ts.ScriptTarget.ESNext, true);
+  };
+  host.fileExists = (f) => contents.has(f) || existsSync(f);
+  host.readFile = (f) => contents.get(f) ?? (existsSync(f) ? readFileSync(f, "utf8") : undefined);
+  const program = ts.createProgram([...contents.keys()], options, host);
+
+  const out = new Map([...sources.keys()].map((page) => [page, [] as string[]]));
+  for (const d of ts.getPreEmitDiagnostics(program)) {
+    const name = d.file?.fileName;
+    if (name === undefined || !contents.has(name)) continue;
+    const page = [...sources.keys()].find((p) => fileOf(p) === name)!;
+    const line = d.start !== undefined ? d.file!.getLineAndCharacterOfPosition(d.start).line + 1 : 0;
+    const source = contents.get(name)!.split("\n")[line - 1]?.trim() ?? "";
+    out.get(page)!.push(`line ${line}: ${ts.flattenDiagnosticMessageText(d.messageText, " ")}\n    ${source}`);
+  }
+  return out;
 };
 
 /** The markdown that documents the library: the README, and everything in docs/. */
@@ -110,15 +123,29 @@ describe("the documentation", () => {
     }
   });
 
+  /** Compiled once for every page, on first use. */
+  let compiled: Map<string, string[]> | undefined;
+  const errorsOf = (page: string) => {
+    compiled ??= diagnoseAll(
+      new Map(
+        pages.map((p) => {
+          const blocks = blocksOf(readFileSync(`${root}${p}`, "utf8"));
+          // each block in its own scope: they redeclare the same names, and most of them await
+          return [
+            p,
+            `${preamble(DB_TYPES_OF(p))}\n${blocks
+              .map((b, i) => `export const block${i} = async () => {\n${b}\n};`)
+              .join("\n\n")}`,
+          ];
+        }),
+      ),
+    );
+    return compiled.get(page) ?? [];
+  };
+
   for (const page of pages) {
     test(`${page} compiles`, () => {
-      const blocks = blocksOf(readFileSync(`${root}${page}`, "utf8"));
-      if (blocks.length === 0) return;
-      // each block in its own scope: they redeclare the same names, and most of them await
-      const content = `${preamble(DB_TYPES_OF(page))}\n${blocks
-        .map((b, i) => `export const block${i} = async () => {\n${b}\n};`)
-        .join("\n\n")}`;
-      const errors = diagnose(content);
+      const errors = errorsOf(page);
       if (errors.length) console.error(`\n${page}\n${errors.join("\n")}\n`);
       expect(errors).toEqual([]);
     });
