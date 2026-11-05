@@ -56,6 +56,18 @@ try {
   assert.equal(bad.status, 409);
   assert.equal((await call("/clients?select=id&email=eq.fine@x")).body.length, 0);
 
+  // query(): the same plumbing, without an HTTP request
+  const rows = await api.query({ table: "clients", select: ["name"], order: ["id"], limit: 1 });
+  assert.deepEqual(rows.data, [{ name: "Ada" }]);
+  assert.deepEqual(
+    (await api.query({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
+    [{ body: "hi" }],
+  );
+  const failed: any = await api.query({ table: "cients" }).catch((e: unknown) => e);
+  assert.equal(failed.status, 404);
+  assert.equal(failed.body.code, "PGRST205");
+  assert.equal(failed.input.table, "cients");
+
   // RPC + OpenAPI
   assert.equal((await call("/rpc/add?a=40&b=2")).body, 42);
   assert.equal((await call("/")).body.swagger, "2.0");

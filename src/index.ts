@@ -1,6 +1,7 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
+import { type QueryInput, type QueryResult, runQuery } from "./query";
 import type { SchemaCache } from "./schema";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
@@ -8,6 +9,25 @@ export type { DbAdapter, DbSession, Row } from "./adapter";
 export type { PreRequestInfo, RequestContext } from "./core";
 export { ApiError, DbQueryError, PgRestError } from "./errors";
 export type { ErrorBody } from "./errors";
+export { QueryError } from "./query";
+export type {
+  DeleteQuery,
+  Embed,
+  Filter,
+  FilterOp,
+  FilterSpec,
+  InsertQuery,
+  Order,
+  QueryInput,
+  QueryResult,
+  QueryReturning,
+  RpcQuery,
+  Scalar,
+  Select,
+  SelectQuery,
+  UpdateQuery,
+  Where,
+} from "./query";
 export type { Column, ForeignKey, FunctionDef, Relation, SchemaCache } from "./schema";
 export { SchemaLoadError } from "./service";
 
@@ -63,6 +83,18 @@ export interface PgRestInstance {
    * `resolveContext` is used; otherwise the request runs as the anonymous role.
    */
   handle(request: Request, ctx?: RequestContext): Promise<Response>;
+  /**
+   * Run a query described by an object, in-process: no `Request`, no URL, no HTTP status.
+   * It goes through the same parser, the same SQL and the same error mapping as
+   * {@link PgRestInstance.handle}, so the database sees the same thing either way.
+   *
+   * Only the HTTP envelope is gone, which is also what it cannot do: content negotiation
+   * (CSV, GeoJSON, custom media types), `EXPLAIN` plans and OpenAPI stay on `handle`.
+   *
+   * Failures throw a {@link QueryError}: an `Error` carrying the PostgREST status, body
+   * (`code`, `message`, `details`, `hint`) and the input that produced it.
+   */
+  query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -130,8 +162,12 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
     return handleSafely({ db: adapter, config, cache: store.current() }, request, context ?? {});
   };
 
+  const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> =>
+    (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
+
   return {
     handle,
+    query,
     reloadSchema: async () => void (await store.reload()),
     schemaCache: async () => store.current(),
     close: async () => {},

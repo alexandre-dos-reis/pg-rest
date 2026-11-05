@@ -41,7 +41,8 @@ export interface PreRequestInfo {
   readonly claims: Readonly<Record<string, unknown>>;
   readonly method: Method;
   readonly path: string;
-  readonly request: Request;
+  /** The HTTP request, when the call came through `handle()`. In-process `query()` calls have none. */
+  readonly request?: Request | undefined;
 }
 
 export interface CoreConfig {
@@ -69,6 +70,33 @@ export interface Env {
   readonly cache: SchemaCache;
 }
 
+/**
+ * Where a call came from. `handle()` passes the HTTP request; `query()` runs in-process and has no
+ * headers, so SQL sees an empty `request.headers` / `request.cookies`.
+ */
+export interface Caller {
+  /** What SQL reads as `request.path`. */
+  readonly path: string;
+  readonly headers?: Headers | undefined;
+  /** The HTTP request, when there is one. Passed through to `preRequest`. */
+  readonly request?: Request | undefined;
+}
+
+/** A query string, read once: what `parseQuery` takes, plus the bare keys (`?a&b`) it must ignore. */
+export interface QueryParams {
+  readonly params: ReadonlyArray<readonly [string, string]>;
+  readonly bare: ReadonlySet<string>;
+}
+
+/** The bare keys of a query string: `?a&b=1` -> `{a}`. They are arguments, never filters. */
+export const bareKeys = (search: string): Set<string> => {
+  const out = new Set<string>();
+  for (const kv of search.slice(1).split("&")) {
+    if (kv !== "" && !kv.includes("=")) out.add(decodeURIComponent(kv));
+  }
+  return out;
+};
+
 /** Statement options that depend on the negotiated output format. */
 const formatOptions = (format: OutputFormat) => ({
   csv: format.kind === "csv",
@@ -85,23 +113,35 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 // helpers
 // ---------------------------------------------------------------------------
 
-const readSchema = (env: Env, request: Request, method: Method): string => {
-  const wanted = (
-    method === "GET" || method === "HEAD"
-      ? request.headers.get("accept-profile")
-      : request.headers.get("content-profile")
-  )?.trim();
-  if (!wanted) return env.config.schemas[0]!;
-  if (!env.config.schemas.includes(wanted)) {
+/** The schema a call runs against: the one it asks for, if exposed, else the default one. */
+export const useSchema = (env: Env, wanted: string | null | undefined): string => {
+  const name = wanted?.trim();
+  if (!name) return env.config.schemas[0]!;
+  if (!env.config.schemas.includes(name)) {
     throw new PgRestError(
       406,
       "PGRST106",
-      `Invalid schema: ${wanted}`,
+      `Invalid schema: ${name}`,
       null,
       `Only the following schemas are exposed: ${env.config.schemas.join(", ")}`,
     );
   }
-  return wanted;
+  return name;
+};
+
+const readSchema = (env: Env, request: Request, method: Method): string =>
+  useSchema(
+    env,
+    method === "GET" || method === "HEAD"
+      ? request.headers.get("accept-profile")
+      : request.headers.get("content-profile"),
+  );
+
+/** Refuse a call that has no role when anonymous access is disabled. */
+export const assertRole = (env: Env, ctx: RequestContext): void => {
+  if (!ctx.role && env.config.anonymousRole === undefined) {
+    throw new PgRestError(401, "PGRST302", "Anonymous access is disabled", null, null);
+  }
 };
 
 const parseCookies = (header: string | null): Record<string, string> => {
@@ -130,9 +170,8 @@ const applyCtxSql = (
   ctx: RequestContext,
   role: string,
   claims: Record<string, unknown>,
-  request: Request,
+  caller: Caller,
   method: Method,
-  pathname: string,
   schema: string,
   prefer: Preferences,
 ): { sql: string; params: string[] } => {
@@ -142,14 +181,14 @@ const applyCtxSql = (
   ];
   if (env.config.requestSettings) {
     const headers: Record<string, string> = {};
-    request.headers.forEach((v, k) => {
+    caller.headers?.forEach((v, k) => {
       headers[k] = v;
     });
     entries.push(
       ["request.method", method],
-      ["request.path", pathname],
+      ["request.path", caller.path],
       ["request.headers", JSON.stringify(headers)],
-      ["request.cookies", JSON.stringify(parseCookies(request.headers.get("cookie")))],
+      ["request.cookies", JSON.stringify(parseCookies(caller.headers?.get("cookie") ?? null))],
     );
   }
   const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
@@ -233,7 +272,7 @@ class RollbackWith<T> extends Error {
 // plans
 // ---------------------------------------------------------------------------
 
-interface Plan {
+export interface Plan {
   readonly method: Method;
   readonly statement: string;
   readonly params: string[];
@@ -285,9 +324,7 @@ const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; 
 // ---------------------------------------------------------------------------
 
 export const handleRequest = async (env: Env, request: Request, ctx: RequestContext): Promise<Response> => {
-  if (!ctx.role && env.config.anonymousRole === undefined) {
-    throw new PgRestError(401, "PGRST302", "Anonymous access is disabled", null, null);
-  }
+  assertRole(env, ctx);
   // like PostgREST's web server, answer other methods (TRACE...) with an empty 405
   if (!isSupportedMethod(request.method))
     return new Response(null, { status: 405, headers: { "Content-Type": JSON_CT } });
@@ -352,33 +389,35 @@ export const handleRequest = async (env: Env, request: Request, ctx: RequestCont
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
   const body = await parseBody(request, method);
 
+  const qp: QueryParams = { params: [...url.searchParams], bare: bareKeys(url.search) };
   let plan: Plan;
   if (target.type === "table") {
-    plan = planTable(env, method, schema, target.name, url, prefer, format, range, body);
+    plan = planTable(env, method, schema, target.name, qp, prefer, format, range, body);
   } else {
-    plan = planRpc(env, method, schema, target.name, url, prefer, format, range, body);
+    plan = planRpc(env, method, schema, target.name, qp, prefer, format, range, body);
   }
 
-  return execute(env, ctx, request, method, url.pathname, schema, prefer, format, plan, honoredTx, wantsPlan);
+  const caller: Caller = { path: url.pathname, headers: request.headers, request };
+  return execute(env, ctx, caller, method, schema, prefer, format, plan, honoredTx, wantsPlan);
 };
 
 // ---------------------------------------------------------------------------
 // planning: tables
 // ---------------------------------------------------------------------------
 
-const planTable = (
+export const planTable = (
   env: Env,
   method: Method,
   schema: string,
   name: string,
-  url: URL,
+  qp: QueryParams,
   prefer: Preferences,
   format: OutputFormat,
   range: { offset: number; limit?: number } | undefined,
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
   const rel = getRelation(env.cache, schema, name);
-  const query = parseQuery([...url.searchParams]);
+  const query = parseQuery(qp.params);
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
   const singular = format.kind === "object";
 
@@ -606,12 +645,12 @@ const looksLikeFilter = (v: string): boolean =>
     v,
   );
 
-const planRpc = (
+export const planRpc = (
   env: Env,
   method: Method,
   schema: string,
   name: string,
-  url: URL,
+  qp: QueryParams,
   prefer: Preferences,
   format: OutputFormat,
   range: { offset: number; limit?: number } | undefined,
@@ -626,7 +665,7 @@ const planRpc = (
   let nonObjectBody = false;
   const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
   const getArgKeys = new Set<string>();
-  const bare = new Set<string>();
+  const bare = qp.bare;
 
   if (method === "POST") {
     if (body) {
@@ -647,10 +686,8 @@ const planRpc = (
     }
   } else {
     // every query parameter that is not a filter, a reserved word or a bare key is an argument
-    for (const kv of url.search.slice(1).split("&"))
-      if (kv !== "" && !kv.includes("=")) bare.add(decodeURIComponent(kv));
     const lists = new Map<string, string[]>();
-    for (const [k, v] of url.searchParams) {
+    for (const [k, v] of qp.params) {
       if (RESERVED.has(k) || bare.has(k) || looksLikeFilter(v) || k.includes(".")) continue;
       lists.set(k, [...(lists.get(k) ?? []), v]);
     }
@@ -671,7 +708,7 @@ const planRpc = (
 
   const fnArgNames = new Set(fn.args.map((a) => a.name));
   const query = parseQuery(
-    [...url.searchParams].filter(([k, v]) => !(v === "" && bare.has(k))),
+    qp.params.filter(([k, v]) => !(v === "" && bare.has(k))),
     {
       // On GET, parameters that name function arguments are not filters.
       allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
@@ -739,12 +776,11 @@ interface RawResult {
   readonly responseStatus: number | undefined;
 }
 
-const execute = async (
+export const execute = async (
   env: Env,
   ctx: RequestContext,
-  request: Request,
+  caller: Caller,
   method: Method,
-  pathname: string,
   schema: string,
   prefer: Preferences,
   format: OutputFormat,
@@ -754,7 +790,7 @@ const execute = async (
 ): Promise<Response> => {
   const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
-  const setup = applyCtxSql(env, ctx, role, claims, request, method, pathname, schema, prefer);
+  const setup = applyCtxSql(env, ctx, role, claims, caller, method, schema, prefer);
   const strict = prefer.handling === "strict";
   const rollback = (honoredTx && prefer.tx === "rollback") || wantsPlan !== undefined;
 
@@ -768,7 +804,7 @@ const execute = async (
         if (typeof pre === "string") {
           await s.query(`SELECT ${pre.split(".").map(quoteIdent).join(".")}()`);
         } else if (pre) {
-          await pre(s, { role, claims, method, path: pathname, request });
+          await pre(s, { role, claims, method, path: caller.path, request: caller.request });
         }
 
         let planned: number | undefined;
@@ -880,7 +916,7 @@ const execute = async (
       },
     });
   }
-  return buildResponse(env, request, method, prefer, format, plan, result, honoredTx);
+  return buildResponse(env, method, prefer, format, plan, result, honoredTx);
 };
 
 // ---------------------------------------------------------------------------
@@ -889,7 +925,6 @@ const execute = async (
 
 const buildResponse = (
   env: Env,
-  request: Request,
   method: Method,
   prefer: Preferences,
   format: OutputFormat,

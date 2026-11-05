@@ -55,6 +55,14 @@ const allCases: Case[] = [
   get("/clients?select=id&name=in.(Ada,Grace)&order=id"),
   get('/clients?select=id&name=in.("Ada","Linus")&order=id'),
   get("/clients?select=id&id=not.in.(1,2)"),
+  // A lone value is verbatim (so `eq."Ada"` looks for the text `"Ada"`, quotes included, and
+  // `eq.null` for the text `null`); quoting only means something inside a list or a logic tree.
+  // `query()` in src/query.ts renders values on exactly this rule.
+  get('/clients?select=name&name=eq."Ada"'),
+  get("/clients?select=name&name=eq.null"),
+  get("/clients?select=name&name=eq.a,b"),
+  get('/clients?select=name&and=(name.eq."Ada")'),
+  get("/clients?select=name&name=is.null"),
   get("/clients?select=id&id=gt.1&id=lte.3&order=id"),
   get("/clients?select=id&email=is.null"),
   get("/clients?select=id&meta=is.null"),

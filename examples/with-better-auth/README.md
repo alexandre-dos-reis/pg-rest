@@ -40,6 +40,35 @@ resolveContext: async (req) => {
 pg-rest has no CSRF protection of its own. If browsers call it with cookies, apply your usual CSRF defences (SameSite cookies, an `Origin` check)
 in middleware on the Hono app or in `resolveContext`.
 
+## Server-side, without HTTP
+
+The server holds the `pgRest` instance, so code in this process does not have to call itself over the network, nor write the
+same SQL a second time. `query()` takes an object and the caller:
+
+```ts
+app.get("/dashboard", async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const ctx = session ? { role: "authenticated", claims: { sub: session.user.id } } : undefined;
+
+  const { data: todos } = await pgRest.query(
+    {
+      table: "todos",
+      select: ["id", "title", "done", { tags: ["label"] }],
+      where: { done: false },
+      order: [{ column: "created", desc: true }],
+      limit: 10,
+    },
+    ctx,
+  );
+
+  return c.json(todos);
+});
+```
+
+Same role, same claims, same RLS policies as the REST route: `anon` without a session (the two seeded todos), the user's own
+rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and the errors throw, with
+the PostgREST `code` on them. See [In-process queries](../../README.md#in-process-queries).
+
 ## Try it
 
 ```sh
