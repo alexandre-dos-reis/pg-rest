@@ -1,6 +1,14 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
+import {
+  type QueryInput,
+  type QueryResult,
+  type QuerySafeResult,
+  runQuery,
+  runQuerySafe,
+  toSafeFailure,
+} from "./query";
 import type { SchemaCache } from "./schema";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
@@ -8,6 +16,26 @@ export type { DbAdapter, DbSession, Row } from "./adapter";
 export type { PreRequestInfo, RequestContext } from "./core";
 export { ApiError, DbQueryError, PgRestError } from "./errors";
 export type { ErrorBody } from "./errors";
+export { QueryError } from "./query";
+export type {
+  DeleteQuery,
+  Embed,
+  Filter,
+  FilterOp,
+  FilterSpec,
+  InsertQuery,
+  Order,
+  QueryInput,
+  QueryResult,
+  QueryReturning,
+  QuerySafeResult,
+  RpcQuery,
+  Scalar,
+  Select,
+  SelectQuery,
+  UpdateQuery,
+  Where,
+} from "./query";
 export type { Column, ForeignKey, FunctionDef, Relation, SchemaCache } from "./schema";
 export { SchemaLoadError } from "./service";
 
@@ -63,6 +91,27 @@ export interface PgRestInstance {
    * `resolveContext` is used; otherwise the request runs as the anonymous role.
    */
   handle(request: Request, ctx?: RequestContext): Promise<Response>;
+  /**
+   * Run a query described by an object, in-process: no `Request`, no URL, no HTTP status.
+   * It goes through the same parser, the same SQL and the same error mapping as
+   * {@link PgRestInstance.handle}, so the database sees the same thing either way.
+   *
+   * Only the HTTP envelope is gone, which is also what it cannot do: content negotiation
+   * (CSV, GeoJSON, custom media types), `EXPLAIN` plans and OpenAPI stay on `handle`.
+   *
+   * Failures throw a {@link QueryError}: an `Error` carrying the PostgREST status, body
+   * (`code`, `message`, `details`, `hint`) and the input that produced it.
+   */
+  query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /**
+   * {@link PgRestInstance.query} with the failure as a value instead of an exception:
+   * `const { data, error } = await pgRest.querySafe({ table: "todos" })`. Exactly one of the two
+   * is set, so `if (error)` leaves `data` non-null. The error is the same {@link QueryError}.
+   *
+   * It never rejects: an error the library did not foresee comes back as a 500 `error` carrying the
+   * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
+   */
+  querySafe<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>>;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -130,8 +179,26 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
     return handleSafely({ db: adapter, config, cache: store.current() }, request, context ?? {});
   };
 
+  const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> =>
+    (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
+
+  const querySafe = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>> => {
+    try {
+      return (await runQuerySafe(
+        { db: adapter, config, cache: store.current() },
+        input,
+        ctx ?? {},
+      )) as QuerySafeResult<T>;
+    } catch (e) {
+      // runQuerySafe does not throw; this covers everything around it, so the promise cannot reject
+      return toSafeFailure(input, e) as QuerySafeResult<T>;
+    }
+  };
+
   return {
     handle,
+    query,
+    querySafe,
     reloadSchema: async () => void (await store.reload()),
     schemaCache: async () => store.current(),
     close: async () => {},

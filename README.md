@@ -10,6 +10,9 @@ A [PostgREST](https://postgrest.org) (v16 behaviour) reimplementation as a **lib
   _optional peer dependencies_, so you only install the one you use.
 - **No JWT and no server.** You decide who the caller is (cookie, API key, session, mTLS…) and hand pg-rest a role, claims and
   settings; they are applied per request with `set_config`, so Postgres Row Level Security sees them exactly as it would behind PostgREST.
+- **Callable without HTTP.** Being a library, it also answers a plain JavaScript object: `query({ table: "todos", select: ["id"], limit: 10 })`
+  runs in-process, through the same parser, the same SQL and the same errors. A server cannot offer that. See
+  [In-process queries](#in-process-queries).
 
 ## Quick start
 
@@ -39,6 +42,88 @@ const pgRest = await createPgRest({
 //   Node:    serve({ fetch: (req) => pgRest.handle(req) })      // @hono/node-server (or srvx, ...)
 //   Hono:    app.all("/api/*", (c) => pgRest.handle(c.req.raw))
 ```
+
+## In-process queries
+
+Your own code often needs the same data as your HTTP clients — in a server component, a job, a webhook handler. Behind a
+PostgREST server you would have to call yourself over the network, or write the SQL twice. pg-rest runs inside your process,
+so it answers an object instead:
+
+```ts
+const { data } = await pgRest.query({
+  table: "todos",
+  select: ["id", "title", { tags: ["label"] }],
+  where: { done: false, or: [{ priority: ["gte", 3] }, { pinned: true }] },
+  order: [{ column: "created", desc: true }],
+  limit: 10,
+});
+
+// the caller is the second argument, exactly like handle(request, ctx)
+await pgRest.query(
+  { table: "todos", action: "insert", rows: { title: "Write docs" }, select: ["id"] },
+  { role: "authenticated", claims: { sub: user.id } },
+);
+```
+
+**It is the same code path**, not a second implementation: the object is turned into the query parameters PostgREST would
+have parsed, and from there everything is shared — `select` trees, the 25 filter operators, embedding, `set_config` of the
+role and claims (so RLS applies), the SQL builders, the SQLSTATE mapping. `tests/query.test.ts` asserts that `query()` and
+`handle()` answer with the same thing, down to the error bodies. What you gain over building a URL yourself is that the
+query string, the `Request`, the headers and the response parsing all disappear — and that the input can be typed.
+
+| field                                   | meaning                                                                                              |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `table` / `rpc`                         | the relation to read or write, or the function to call                                               |
+| `action`                                | `select` (default), `insert`, `upsert`, `update`, `delete`                                           |
+| `select`                                | columns; `{ relation: [...] }` embeds, with `{ inner, hint, as, spread, where, order, limit }`        |
+| `where`                                 | `{ col: value }` (eq), `{ col: ["gte", 3] }`, `{ col: { op, value, not, quantifier, config } }`, `and`/`or` groups |
+| `order`, `limit`, `offset`              | paging; a dotted key or an embed option does the same for an embedded resource                        |
+| `single`                                | one object instead of an array (406 `PGRST116` otherwise)                                             |
+| `count`                                 | `exact` / `planned` / `estimated`, returned as `count`                                                |
+| `rows` / `set` / `args`                 | the payload of an insert or upsert, of an update, and the arguments of a function                     |
+| `returning`                             | `representation` (the default here) or `minimal`                                                      |
+| `schema`, `stripNulls`, `maxAffected`, `timezone` | the `Accept-Profile`, `nulls=stripped` and `Prefer` equivalents                             |
+
+It returns `{ data, count, status }`: the rows (or the object, or `null`), the total when you asked for a `count`, and the
+status the same call would have answered over HTTP — handy for `201` after an insert.
+
+Two deliberate differences from the HTTP default, both documented and both reversible: a write **returns its rows** unless you
+pass `returning: "minimal"` (a function that gives nothing back is of little use in a program), and a function call is always a
+`POST` (so its transaction is read-write, even for a `STABLE` function).
+
+Errors **throw** instead of becoming a response:
+
+```ts
+try {
+  await pgRest.query({ table: "cients" });
+} catch (e) {
+  if (e instanceof QueryError) {
+    e.status; // 404
+    e.body; // { code: "PGRST205", message: "Could not find the table 'api.cients'…", details: null, hint: "Perhaps you meant the table 'api.clients'" }
+    e.input; // the object you passed, so you can see what failed
+  }
+}
+```
+
+`QueryError` extends `ApiError`, which extends `Error`: the PostgREST body is untouched (same `code` to switch on as your
+HTTP clients get), while `Error.message` is a one-line summary with the code and hint for your logs. An unexpected internal
+error keeps its stack under `cause`.
+
+If you would rather handle the failure as a value than with `try/catch`, `querySafe()` is the same query with the error
+returned instead of thrown:
+
+```ts
+const { data, error } = await pgRest.querySafe({ table: "cients" });
+if (error) return c.json(error.body, error.status); // the PostgREST body, straight through
+data; // non-null here: exactly one of the two is set, and TypeScript knows it
+```
+
+It returns `{ data, error, count, status }` and nothing else differs — same `QueryError`, same codes, same everything.
+**`querySafe()` never rejects**: an error the library did not foresee comes back as a 500 `error` with the original under
+`cause`, so checking `error` is all a caller ever has to do. `query()` is unchanged; pick one per call site.
+
+Content negotiation is the part that cannot leave HTTP: CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
+headers, `OPTIONS` and the OpenAPI document stay on `handle()`. Reads, writes, RPC and RLS are all here.
 
 ## Examples
 
@@ -121,7 +206,8 @@ Numbers from one run on a small 2-vCPU sandbox (indicative only; see the benchma
 | `allowTxOverride`     | honour `Prefer: tx=rollback`                                                                              |
 | `openApi`             | serve the Swagger 2.0 document at `/`                                                                     |
 
-Also returned: `reloadSchema()` (call after migrations), `schemaCache()`, `close()`.
+Also returned: `query(input, ctx?)` (see [In-process queries](#in-process-queries)), `reloadSchema()` (call after migrations),
+`schemaCache()`, `close()`.
 
 ## Supported
 

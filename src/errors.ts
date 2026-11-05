@@ -36,6 +36,16 @@ export class PgRestError extends Error {
   }
 }
 
+/**
+ * A one-line summary for stack traces and logs. The wire format is `body`, which this never
+ * touches: PostgREST clients read `message` from the JSON, while a program that catches the
+ * error reads it from `Error.message` and wants the code and hint with it.
+ */
+const describe = (b: ErrorBody): string =>
+  [`${b.code}:`, b.message, b.details ? `(${b.details})` : "", b.hint ? `hint: ${b.hint}` : ""]
+    .filter(Boolean)
+    .join(" ");
+
 /** An error that has already been mapped to an HTTP response. */
 export class ApiError extends Error {
   readonly _tag = "ApiError";
@@ -47,7 +57,7 @@ export class ApiError extends Error {
     readonly body: ErrorBody;
     readonly headers: Readonly<Record<string, string>>;
   }) {
-    super(fields.body.message);
+    super(describe(fields.body));
     this.name = "ApiError";
     this.status = fields.status;
     this.body = fields.body;
