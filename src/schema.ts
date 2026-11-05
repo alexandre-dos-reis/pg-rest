@@ -379,7 +379,10 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       WHERE n.nspname = ANY(${S})
         AND p.prokind = 'f'
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
-      ORDER BY 1, 2`,
+      -- overloads share a name, so the signature breaks the tie: without it the order is whatever
+      -- the catalog scan returns, which differs between a database and a copy of it, and the
+      -- generated types churn
+      ORDER BY 1, 2, pg_get_function_identity_arguments(p.oid)`,
   );
 
   const handlerRows = await run<{

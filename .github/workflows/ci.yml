@@ -14,21 +14,11 @@ env:
   POSTGREST_VERSION: v16.5
 
 jobs:
-  test:
-    name: Typecheck, build, test (PostgreSQL 16)
+  # Everything that needs neither a database nor a build: the fastest feedback, on its own runner.
+  checks:
+    name: Lint, format, typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgis/postgis:16-3.6
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -38,12 +28,12 @@ jobs:
       - run: bun run lint
       - run: bun run fmt:check
       - run: bun run typecheck
-      - run: bun run build
-      - name: Unit and integration tests
-        run: bun test # tests/compare skips itself without POSTGREST_BIN
 
-  node:
-    name: Built package on Node.js (node-postgres)
+  # One job for everything that needs the database: the suite, the differential test against the
+  # real PostgREST, and the built package on Node. They used to be three jobs, each paying for its
+  # own runner, its own container pull and its own build, for a few seconds of work.
+  test:
+    name: Tests, differential, Node
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -66,18 +56,26 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
+      - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/postgrest"
+          curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP/postgrest"
+          "$RUNNER_TEMP/postgrest/postgrest" --version
       - run: bun run build
+      # the whole suite, tests/compare included: it skips itself without POSTGREST_BIN
+      - name: Unit, integration and differential tests
+        run: bun test
+        env:
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
       - name: Run the built library on Node
         run: node scripts/node-smoke.ts
 
+  # One job for the six examples: one checkout, one install, one build, one database server.
   examples:
-    name: Example ${{ matrix.example }}
+    name: Examples
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: [with-bun, with-node-postgres, with-postgres-js, with-pglite, with-better-auth, with-generated-types]
     services:
       postgres:
         image: postgres:16
@@ -98,56 +96,36 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
-      - run: bun run build
-      - name: Run the example
-        run: |
-          case "${{ matrix.example }}" in
-            with-pglite | with-generated-types)
-              # PGlite keeps the database in-process: there is no service to point at
-              scripts/check-example.sh ${{ matrix.example }}
-              ;;
-            *)
-              export PGPASSWORD=postgres
-              psql -h localhost -U postgres -c 'CREATE DATABASE example'
-              dir=examples/${{ matrix.example }}
-              # with-better-auth ships two files, run in order: Better Auth's tables, then the api schema
-              for f in "$dir/schema.sql" "$dir/1-better-auth.sql" "$dir/2-api.sql"; do
-                if [ -f "$f" ]; then
-                  psql -h localhost -U postgres -d example -v ON_ERROR_STOP=1 -q -f "$f"
-                fi
-              done
-              scripts/check-example.sh ${{ matrix.example }} postgres://postgres:postgres@localhost:5432/example
-              ;;
-          esac
-
-  compare:
-    name: Differential test against PostgREST 16
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgis/postgis:16-3.6
+      # builds pg-rest once and links it into every example, so the loop below does not rebuild
+      - name: Link the examples against the local build
+        run: scripts/link-examples.sh
+      - name: Run the examples
         env:
-          POSTGRES_PASSWORD: postgres
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - run: bun install --frozen-lockfile
-      - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
+          PGPASSWORD: postgres
+          SKIP_LINK: 1
         run: |
-          mkdir -p "$RUNNER_TEMP/postgrest"
-          curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" \
-            | tar -xJ -C "$RUNNER_TEMP/postgrest"
-          "$RUNNER_TEMP/postgrest/postgrest" --version
-      - name: Compare pg-rest with PostgREST
-        run: bun test tests/compare
-        env:
-          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          fail=0
+          port=3100
+          # the ones that need a Postgres server, each on its own database
+          for example in with-bun with-node-postgres with-postgres-js with-better-auth; do
+            db="ex_$(echo "$example" | tr -- - _)"
+            psql -h localhost -U postgres -q -c "CREATE DATABASE $db"
+            dir="examples/$example"
+            # with-better-auth ships two files, run in order: Better Auth's tables, then the api schema
+            for f in "$dir/schema.sql" "$dir/1-better-auth.sql" "$dir/2-api.sql"; do
+              if [ -f "$f" ]; then
+                psql -h localhost -U postgres -d "$db" -v ON_ERROR_STOP=1 -q -f "$f"
+              fi
+            done
+            echo "::group::$example"
+            port=$((port + 1))
+            PORT=$port scripts/check-example.sh "$example" "postgres://postgres:postgres@localhost:5432/$db" || fail=1
+            echo "::endgroup::"
+          done
+          # and the ones that carry the database in-process (PGlite)
+          for example in with-pglite with-generated-types; do
+            echo "::group::$example"
+            scripts/check-example.sh "$example" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail

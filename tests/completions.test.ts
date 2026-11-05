@@ -27,6 +27,42 @@ interface Asked {
   readonly hover: string;
 }
 
+/**
+ * One language service for the whole file, with the snippet swapped in between questions. Creating
+ * one per question meant re-reading lib.d.ts and the fixture's types for each of them.
+ */
+const options: TS.CompilerOptions = {
+  target: ts.ScriptTarget.ESNext,
+  module: ts.ModuleKind.Preserve,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+};
+let content = "";
+let version = 0;
+const host: TS.LanguageServiceHost = {
+  getScriptFileNames: () => [file],
+  getScriptVersion: (f: string) => (f === file ? String(version) : "1"),
+  getScriptSnapshot: (f: string) =>
+    f === file
+      ? ts.ScriptSnapshot.fromString(content)
+      : existsSync(f)
+        ? ts.ScriptSnapshot.fromString(readFileSync(f, "utf8"))
+        : undefined,
+  getCurrentDirectory: () => dir,
+  getCompilationSettings: () => options,
+  getDefaultLibFileName: (o: TS.CompilerOptions) => ts.getDefaultLibFilePath(o),
+  fileExists: (f: string) => f === file || ts.sys.fileExists(f),
+  readFile: (f: string) => (f === file ? content : ts.sys.readFile(f)),
+  readDirectory: ts.sys.readDirectory,
+  directoryExists: ts.sys.directoryExists,
+  getDirectories: ts.sys.getDirectories,
+  realpath: ts.sys.realpath,
+};
+const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+const text = (parts: TS.SymbolDisplayPart[] | undefined) => (parts ?? []).map((d) => d.text).join("");
+
 const ask = (snippet: string): Asked => {
   const marked = `
 import { createPgRest } from "../src/index";
@@ -36,37 +72,9 @@ ${snippet}
 `;
   const pos = marked.indexOf("#");
   if (pos < 0) throw new Error("the snippet needs a # marker");
-  const content = marked.slice(0, pos) + marked.slice(pos + 1);
+  content = marked.slice(0, pos) + marked.slice(pos + 1);
+  version++;
 
-  const options: TS.CompilerOptions = {
-    target: ts.ScriptTarget.ESNext,
-    module: ts.ModuleKind.Preserve,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    noEmit: true,
-    skipLibCheck: true,
-  };
-  const host: TS.LanguageServiceHost = {
-    getScriptFileNames: () => [file],
-    getScriptVersion: () => "1",
-    getScriptSnapshot: (f: string) =>
-      f === file
-        ? ts.ScriptSnapshot.fromString(content)
-        : existsSync(f)
-          ? ts.ScriptSnapshot.fromString(readFileSync(f, "utf8"))
-          : undefined,
-    getCurrentDirectory: () => dir,
-    getCompilationSettings: () => options,
-    getDefaultLibFileName: (o: TS.CompilerOptions) => ts.getDefaultLibFilePath(o),
-    fileExists: (f: string) => f === file || ts.sys.fileExists(f),
-    readFile: (f: string) => (f === file ? content : ts.sys.readFile(f)),
-    readDirectory: ts.sys.readDirectory,
-    directoryExists: ts.sys.directoryExists,
-    getDirectories: ts.sys.getDirectories,
-    realpath: ts.sys.realpath,
-  };
-  const service = ts.createLanguageService(host, ts.createDocumentRegistry());
-  const text = (parts: TS.SymbolDisplayPart[] | undefined) => (parts ?? []).map((d) => d.text).join("");
   const info = service.getQuickInfoAtPosition(file, pos);
   return {
     entries: (service.getCompletionsAtPosition(file, pos, {})?.entries ?? []).map((e) => e.name).sort(),

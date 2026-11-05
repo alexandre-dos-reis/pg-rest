@@ -269,6 +269,8 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "moods", where: { mood: "elated" } }));
     // @ts-expect-error an unknown key inside `where` would reach the database as a 42703
     void (() => pgRest.query({ table: "clients", select: ["id"], where: { titel: "Ada" } }));
+    // @ts-expect-error `as` and `spread` cannot both be written: `...alias:table(*)` does not parse
+    void (() => pgRest.query({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
     // @ts-expect-error a JSON path is not a column the types know
     void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": "gold" } }));
     // @ts-expect-error order only takes real columns

@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Guide for coding agents working on **pg-rest**: a PostgREST v16-compatible REST layer shipped as a library.
-Read `README.md` for usage and `PARITY.md` for what is and isn't implemented before changing behaviour.
+Before changing behaviour, read `PARITY.md` for what is and isn't implemented, `docs/design.md` for what is out of
+scope on purpose, and `docs/architecture.md` for how a request becomes SQL. `README.md` is deliberately short: the
+reference lives in `docs/`.
 
 ## What this is
 
@@ -14,7 +16,9 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
   `resolveContext(req)` (or passes a context to `handle`) with the role and claims, and pg-rest applies them with `set_config` so RLS works.
 - Driver-agnostic: the core only knows the `DbAdapter` interface (`src/adapter.ts`). Adapters live in `src/adapters/*` and **must not import
   their driver** (structural types only); drivers are optional peer dependencies. Never add a driver import to `src/` outside tests.
-- **No runtime dependencies.** Don't add one. (Effect was removed on purpose: see PR #5.)
+- **No runtime dependencies.** Don't add one. (Effect was removed on purpose: see PR #5.) The two PostgREST client
+  libraries in `devDependencies` are there for `tests/clients.test.ts`, which checks that real clients still work
+  against `handle()`; they never reach `src/`.
 - Target runtimes: Bun and Node (tested on Node 22). Don't use `Bun.*` APIs in `src/`.
 
 ## Layout
@@ -30,7 +34,7 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `pg-rest/types` |
 | `src/typed.ts` | types only: `createPgRest<Db>` input and result inference over a generated database type |
 | `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
-| `docs/query.md` | the `query()` reference, one example per field. **Every `ts` block is compiled** by `tests/docs.test.ts` against `tests/support/fixture.types.ts`, so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`. Write new examples against the fixture schema, and mark a block ```` ```ts ignore ```` only when it cannot compile |
+| `docs/*.md` | the reference: `query`, `types`, `options`, `adapters`, `design`, `architecture`, `security`, `performance`, `development`. **Every `ts` block is compiled** by `tests/docs.test.ts` -- the README's against `examples/with-generated-types/db.types.ts`, everything in `docs/` against `tests/support/fixture.types.ts` -- so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`, and a block that cannot compile is fenced ```` ```ts ignore ````. The same test asserts every relative link resolves, and that each page is linked from the README |
 | `src/service.ts` | schema store (serialized reload), error mapping, `handleSafely` |
 | `src/errors.ts` | `ApiError`, PostgREST error codes (`PGRSTxxx`), `normalizeDbError` (maps SQLSTATE) |
 | `src/openapi.ts` | OpenAPI document |

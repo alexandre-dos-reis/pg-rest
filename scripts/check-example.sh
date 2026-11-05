@@ -7,8 +7,9 @@ set -euo pipefail
 name="$1"; export DATABASE_URL="${2:-}"; port="${PORT:-3101}"; export PORT="$port"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 # pg-rest is a version dependency, and the version in package.json is usually not on the registry
-# yet, so the example runs against the local build.
-"$root/scripts/link-examples.sh" "$name" >/dev/null
+# yet, so the example runs against the local build. SKIP_LINK=1 when the caller already linked them
+# all (CI does, once, so the loop does not rebuild per example).
+if [ "${SKIP_LINK:-0}" != 1 ]; then "$root/scripts/link-examples.sh" "$name" >/dev/null; fi
 cd "$root/examples/$name"
 
 check() { # description, expected, actual
@@ -20,7 +21,8 @@ if [ ! -f server.ts ]; then
   fail=0
   bun run gen:types >/dev/null
   # the generated file is committed, so the generator's output for this schema is pinned here
-  check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "examples/$name")"
+  # (only that file: the rest of the example may legitimately differ in a working tree)
+  check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "examples/$name/db.types.ts")"
   # every @ts-expect-error in mistakes.ts has to still be an error, and main.ts has to compile
   tsc_out="$(bun run typecheck 2>&1)" || { echo "FAIL typecheck:"; echo "$tsc_out"; exit 1; }
   check "the typed queries compile, the mistakes do not" 0 $?

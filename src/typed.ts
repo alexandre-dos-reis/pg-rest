@@ -79,31 +79,45 @@ type SelectList<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
 >;
 
 /** An embedded resource: its columns, or an object with its own filters and paging. */
+type EmbedOptions<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = {
+  /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
+  readonly select?: SelectList<Db, S, T>;
+  /** `!inner`: drop the parent rows that have no match here. A to-one embed stops being nullable. */
+  readonly inner?: boolean;
+  /** Which relationship to follow, when more than one leads here: a foreign key name, or a table. */
+  readonly hint?: string;
+  /** Filters on the embedded rows, not on the parent's. */
+  readonly where?: Where<Db, S, T>;
+  /** How to sort the embedded rows. */
+  readonly order?: ReadonlyArray<Order<Db, S, T>>;
+  /** At most this many embedded rows per parent row. */
+  readonly limit?: number;
+  /** Skip this many embedded rows per parent row. */
+  readonly offset?: number;
+};
+
+/**
+ * An embedded resource: its columns, or the long form with its own filters and paging.
+ *
+ * `as` and `spread` are exclusive, because PostgREST's grammar has no way to write both:
+ * `...alias:table(*)` does not parse (`PGRST100`), so a type that accepted it would promise
+ * something the request cannot express.
+ */
 type Embed<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
   | SelectList<Db, S, T>
-  | {
-      /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
-      readonly select?: SelectList<Db, S, T>;
-      /** `!inner`: drop the parent rows that have no match here. A to-one embed stops being nullable. */
-      readonly inner?: boolean;
+  | (EmbedOptions<Db, S, T> & {
+      /** Rename the resource in the result. The inferred key follows. */
+      readonly as?: string;
+      readonly spread?: never;
+    })
+  | (EmbedOptions<Db, S, T> & {
       /**
        * `...rel(*)`: merge these columns into the parent row instead of nesting them. Spreading a
        * to-many relationship turns each column into an array of its values.
        */
-      readonly spread?: boolean;
-      /** Which relationship to follow, when more than one leads here: a foreign key name, or a table. */
-      readonly hint?: string;
-      /** Rename the resource in the result. The inferred key follows. */
-      readonly as?: string;
-      /** Filters on the embedded rows, not on the parent's. */
-      readonly where?: Where<Db, S, T>;
-      /** How to sort the embedded rows. */
-      readonly order?: ReadonlyArray<Order<Db, S, T>>;
-      /** At most this many embedded rows per parent row. */
-      readonly limit?: number;
-      /** Skip this many embedded rows per parent row. */
-      readonly offset?: number;
-    };
+      readonly spread: true;
+      readonly as?: never;
+    });
 
 /** The columns of `Items` picked out of a plain row, `alias:column` renamed, `*` taking them all. */
 type PickedFrom<R, Items> =
