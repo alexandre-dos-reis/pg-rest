@@ -66,8 +66,7 @@ type Flatten<T> = T extends object ? { [K in keyof T]: T[K] } & {} : T;
  *
  * PostgREST's other string forms -- casts, JSON paths, aggregates -- are not described here: they
  * change the type of the value or invent a column, and parsing them from a string literal would
- * cost more than it gives. Neither is `spread`, which merges an embed into the parent row, and for a
- * to-many embed turns each of its columns into an array. Use an untyped instance for those.
+ * cost more than it gives. Use an untyped instance for those.
  */
 type SelectItem<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
   | "*"
@@ -83,13 +82,26 @@ type SelectList<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
 type Embed<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
   | SelectList<Db, S, T>
   | {
+      /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
       readonly select?: SelectList<Db, S, T>;
+      /** `!inner`: drop the parent rows that have no match here. A to-one embed stops being nullable. */
       readonly inner?: boolean;
+      /**
+       * `...rel(*)`: merge these columns into the parent row instead of nesting them. Spreading a
+       * to-many relationship turns each column into an array of its values.
+       */
+      readonly spread?: boolean;
+      /** Which relationship to follow, when more than one leads here: a foreign key name, or a table. */
       readonly hint?: string;
+      /** Rename the resource in the result. The inferred key follows. */
       readonly as?: string;
+      /** Filters on the embedded rows, not on the parent's. */
       readonly where?: Where<Db, S, T>;
+      /** How to sort the embedded rows. */
       readonly order?: ReadonlyArray<Order<Db, S, T>>;
+      /** At most this many embedded rows per parent row. */
       readonly limit?: number;
+      /** Skip this many embedded rows per parent row. */
       readonly offset?: number;
     };
 
@@ -256,12 +268,26 @@ type Order<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>>
 // ---------------------------------------------------------------------------
 
 interface Common {
+  /** At most this many rows. A read that is capped answers `206` with a `Content-Range`. */
   readonly limit?: number;
+  /** Skip this many rows. Needs an `order` to mean anything stable. */
   readonly offset?: number;
+  /**
+   * Return one object instead of an array. Anything other than exactly one row is a `406`
+   * (`PGRST116`), so `data` is the row itself, never `undefined`.
+   */
   readonly single?: boolean;
+  /**
+   * Also count the rows the filters match, ignoring `limit`/`offset`, into `count`:
+   * `"exact"` counts them, `"planned"` asks the planner, `"estimated"` takes the planner's
+   * number only when it is above `maxRows`.
+   */
   readonly count?: "exact" | "planned" | "estimated";
+  /** Leave `null` fields out of the result rather than spelling them out. */
   readonly stripNulls?: boolean;
+  /** Refuse the call -- and roll it back -- if it would affect more rows than this (`PGRST124`). */
   readonly maxAffected?: number;
+  /** Run the statement in this time zone, which is what `timestamptz` values are rendered in. */
   readonly timezone?: string;
 }
 
@@ -278,18 +304,48 @@ type AtSchema<Db extends AnyDatabase, S extends Schema<Db>> = S extends Db["defa
  */
 type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
   AtSchema<Db, S> & {
+    /**
+     * The table or view to read or write. It is what restricts everything below: `select`, `where`
+     * and `order` only accept this relation's columns, and `rows`/`set` its writable ones.
+     */
     readonly table: T;
     /** Never both: the discriminant has to exist on every member for the editor to pick one. */
     readonly rpc?: never;
+    /**
+     * What to do. `"select"` (the default) reads; `"insert"` and `"upsert"` take `rows`, `"update"`
+     * takes `set`, `"delete"` takes neither. A write returns its rows unless `returning: "minimal"`.
+     */
     readonly action?: "select" | "insert" | "upsert" | "update" | "delete";
+    /**
+     * The columns to return, and the resources to embed. A string is a column (`"title"`) or a
+     * renamed one (`"name:title"`); `"*"` takes them all; `{ tags: ["label"] }` embeds a related
+     * resource, and `{ tags: { select, inner, where, order, limit, as, spread } }` is its long form.
+     *
+     * `data` is inferred from exactly this: pick two columns and the rows have two keys.
+     */
     readonly select?: SelectList<Db, S, T>;
+    /**
+     * Which rows, by column. A plain value means `eq` (and `null` means `is.null`),
+     * `["gte", 3]` names an operator, and `{ op, value, not, quantifier, config }` is the long form.
+     * `and` and `or` take a list of nested groups; a dotted key filters an embedded resource.
+     */
     readonly where?: Where<Db, S, T>;
+    /** How to sort: `"created"`, `"created.desc"`, or `{ column, desc, nulls }`. */
     readonly order?: ReadonlyArray<Order<Db, S, T>>;
+    /**
+     * What to insert: one object or many. Generated and `GENERATED ALWAYS AS IDENTITY` columns are
+     * absent, and a column with a default or a nullable one is optional.
+     */
     readonly rows?: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
+    /** The columns to change, for an `"update"`. The rows are the ones `where` matches. */
     readonly set?: Relations<Db, S>[T]["update"];
+    /** For an `"upsert"`, the columns the conflict is resolved on. Defaults to the primary key. */
     readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
+    /** Insert only these columns, ignoring any other key in `rows` (and so making a bulk insert uniform). */
     readonly columns?: ReadonlyArray<Column<Db, S, T>>;
+    /** What a column missing from `rows` gets: its `DEFAULT` (the default here) or `null`. */
     readonly missing?: "default" | "null";
+    /** Whether a write answers with the rows it touched (the default here) or with nothing. */
     readonly returning?: "representation" | "minimal";
   };
 
@@ -308,6 +364,10 @@ type WriteRules<Db extends AnyDatabase, Q> = (Q extends { action: "insert" | "up
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
   AtSchema<Db, S> & {
+    /**
+     * The function to call, like `POST /rpc/name`. Its arguments and its result come from the
+     * signature the catalog carries, overloads included.
+     */
     readonly rpc: F;
     /**
      * `table` is absent from a function call, but it must still be *declared*: a union where some
@@ -315,11 +375,18 @@ type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions
      * then offers every table's columns inside `select`.
      */
     readonly table?: never;
+    /** A function call has no action: it is whatever the function does. */
     readonly action?: never;
+    /** The arguments, by name. A parameter with a `DEFAULT` is optional. */
     readonly args?: Functions<Db, S>[F][number]["args"];
-    /** A function's result is a row like any other, so it takes the same three. */
+    /**
+     * A function's result is a row like any other, so it takes the same three. These apply to the
+     * rows it returns, not to its arguments -- and a scalar function has no columns to ask for.
+     */
     readonly select?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
+    /** Filters on the rows the function returned, by their column. */
     readonly where?: WhereOf<Functions<Db, S>[F][number]["returns"], never>;
+    /** How to sort the rows the function returned. */
     readonly order?: ReadonlyArray<OrderOf<Functions<Db, S>[F][number]["returns"]>>;
   };
 
@@ -421,10 +488,39 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
  * `handle` is unchanged: HTTP requests are strings from outside and cannot be typed.
  */
 export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "querySafe"> {
+  /**
+   * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
+   * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`
+   * its writable columns. `data` is inferred from the `select`, nesting included.
+   *
+   * `ctx` is who is asking -- `{ role, claims, settings }` -- applied with `set_config`, so row
+   * level security and privileges work as they do over HTTP. They are the database's business: no
+   * type here knows what a role may do.
+   *
+   * Failures **throw** a `QueryError` carrying the PostgREST status and body. Use
+   * {@link TypedPgRestInstance.querySafe} to get them as a value instead.
+   *
+   * @example
+   * const { data } = await pgRest.query({
+   *   table: "todos",
+   *   select: ["id", "title", { tags: ["label"] }],
+   *   where: { done: false },
+   *   limit: 10,
+   * });
+   * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
+   */
   query<const Q extends TypedQuery<Db>>(
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>>>;
+  /**
+   * {@link TypedPgRestInstance.query} with the failure as a value: `{ data, error }`, where exactly
+   * one of the two is set, so `if (error)` leaves `data` non-null. It never rejects.
+   *
+   * @example
+   * const { data, error } = await pgRest.querySafe({ table: "todos", select: ["id"] });
+   * if (error) return c.json(error.body, error.status);
+   */
   querySafe<const Q extends TypedQuery<Db>>(
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,

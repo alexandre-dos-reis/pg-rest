@@ -1,9 +1,8 @@
 // Step 1: write the types. Run it again after a migration.
 //   node gen-types.ts
 import { writeFileSync } from "node:fs";
-import { createPgRest } from "@adrdp/pg-rest";
 import { generateTypes } from "@adrdp/pg-rest/types";
-import { options, pglite } from "./db.ts";
+import { pgRest, pglite } from "./db.ts";
 
 // schemaCache() is the introspected catalog -- the same one the library reads to answer a request,
 // so the types describe exactly what it accepts.

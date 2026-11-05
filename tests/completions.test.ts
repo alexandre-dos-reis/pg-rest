@@ -19,8 +19,15 @@ const ts = createRequire(import.meta.url)("typescript") as typeof TS;
 const dir = new URL(".", import.meta.url).pathname;
 const file = `${dir}_completions.ts`;
 
-/** Completion entries at `#` in `snippet`, with the marker removed. */
-const completionsAt = (snippet: string): string[] => {
+interface Asked {
+  readonly entries: string[];
+  /** The documentation the completion list carries for one entry, as the editor shows it. */
+  readonly docOf: (name: string) => string;
+  /** What a hover over the marked position says. */
+  readonly hover: string;
+}
+
+const ask = (snippet: string): Asked => {
   const marked = `
 import { createPgRest } from "../src/index";
 import type { DatabasePgRest } from "./support/fixture.types";
@@ -59,8 +66,20 @@ ${snippet}
     realpath: ts.sys.realpath,
   };
   const service = ts.createLanguageService(host, ts.createDocumentRegistry());
-  return (service.getCompletionsAtPosition(file, pos, {})?.entries ?? []).map((e) => e.name).sort();
+  const text = (parts: TS.SymbolDisplayPart[] | undefined) => (parts ?? []).map((d) => d.text).join("");
+  const info = service.getQuickInfoAtPosition(file, pos);
+  return {
+    entries: (service.getCompletionsAtPosition(file, pos, {})?.entries ?? []).map((e) => e.name).sort(),
+    docOf: (name: string) =>
+      text(
+        service.getCompletionEntryDetails(file, pos, name, undefined, undefined, undefined, undefined)?.documentation,
+      ),
+    hover: `${text(info?.displayParts)}\n${text(info?.documentation)}`,
+  };
 };
+
+/** Completion entries at `#` in `snippet`, with the marker removed. */
+const completionsAt = (snippet: string): string[] => ask(snippet).entries;
 
 describe("what an editor offers in a typed query", () => {
   test("the table restricts the columns of select", () => {
@@ -103,6 +122,38 @@ describe("what an editor offers in a typed query", () => {
     // a TABLE(...) function is the known gap: the catalog does not carry its output columns, so
     // there is nothing to offer and any name is accepted (the request path knows no more)
     expect(completionsAt(`void pgRest.query({ rpc: "client_summary", select: ["#"] });`)).toEqual([""]);
+  });
+
+  test("the properties carry their documentation, in the list and on hover", () => {
+    // what you read when the completion list opens on an empty query
+    const keys = ask(`void pgRest.query({ # });`);
+    expect(keys.entries).toContain("select");
+    expect(keys.docOf("table")).toContain("restricts everything below");
+    expect(keys.docOf("select")).toContain("columns to return");
+    expect(keys.docOf("where")).toContain("Which rows, by column");
+    expect(keys.docOf("single")).toContain("one object instead of an array");
+    expect(keys.docOf("rpc")).toContain("Never both");
+
+    // hovering the method gives the orientation
+    expect(ask(`void pgRest.qu#ery({ table: "profiles" });`).hover).toContain("decides what the rest may say");
+    expect(ask(`void pgRest.quer#ySafe({ table: "profiles" });`).hover).toContain("It never rejects");
+
+    /*
+     * Hovering a property you have already written shows its *inferred* type and no documentation:
+     * the parameter is the inferred `Q`, so there is no declared property for the editor to point
+     * at. Intersecting the union back in (`Q & TypedQuery<Db>`) restores nothing and makes the
+     * union too complex to represent (TS2590), so this is the price of inferring `data` from the
+     * `select`. The completion list above is where the documentation lands.
+     */
+    const written = ask(`void pgRest.query({ table: "profiles", sel#ect: ["bio"] });`);
+    expect(written.hover).toContain('(property) select: readonly ["bio"]');
+
+    // inside an embed, the long form documents itself too -- and `spread` is *declared*, which a
+    // test of its inferred shape alone would not have caught
+    const embed = ask(`void pgRest.query({ table: "clients", select: [{ orders: { # } }] });`);
+    expect(embed.entries).toEqual(["as", "hint", "inner", "limit", "offset", "order", "select", "spread", "where"]);
+    expect(embed.docOf("spread")).toContain("merge these columns into the parent row");
+    expect(embed.docOf("inner")).toContain("drop the parent rows");
   });
 
   test("the table names are the exposed ones", () => {

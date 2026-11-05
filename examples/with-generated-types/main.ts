@@ -1,11 +1,7 @@
 // Step 2: use them. Every property below is checked against db.types.ts, and the result is inferred
 // from the select -- hover `todos` in your editor, or read the comments.
 //   node main.ts
-import { createPgRest } from "@adrdp/pg-rest";
-import { options, pglite } from "./db.ts";
-import type { DatabasePgRest } from "./db.types.ts";
-
-const pgRest = await createPgRest<DatabasePgRest>(options);
+import { pgRest } from "./db.ts";
 
 const { data: todos, count } = await pgRest.query({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
@@ -13,7 +9,6 @@ const { data: todos, count } = await pgRest.query({
   where: { done: false }, //                     this table's columns too, each with its own value type
   order: [{ column: "priority", desc: true }], //  a column again, so a typo is an error and not a silently unordered answer
   limit: 10, //                                  plain numbers: limit, offset
-  count: "exact", //                             "exact" | "planned" | "estimated", and `count` below stops being undefined
 });
 // todos: Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Array<{ label: string }> }>
 console.log(`open todos (${count} in total):`, todos);
