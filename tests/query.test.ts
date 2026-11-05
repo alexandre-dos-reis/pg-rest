@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ApiError, QueryError, type QueryInput } from "../src/index";
-import { hasDb } from "./support/db";
+import { ApiError, createPgRest, QueryError, type QueryInput } from "../src/index";
+import { createTestDb, hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
 import { toParams } from "../src/query";
 
@@ -326,6 +326,112 @@ describe.skipIf(!hasDb)("query()", () => {
       expect(e.status).toBe(401);
       expect(e.body.code).toBe("PGRST302");
       await closed.close();
+    });
+  });
+
+  describe("querySafe()", () => {
+    test("a success carries the same fields as query(), plus error: null", async () => {
+      const { data, error, count, status } = await t.api.querySafe<Array<{ id: number }>>({
+        table: "orders",
+        select: ["id"],
+        limit: 2,
+        order: ["id"],
+        count: "exact",
+      });
+      expect(error).toBeNull();
+      expect(data).toEqual([{ id: 1 }, { id: 2 }]);
+      expect(count).toBe(4);
+      expect(status).toBe(206);
+    });
+
+    test("a failure is the value, not an exception, and it is the same QueryError", async () => {
+      const input: QueryInput = { table: "cients" };
+      const { data, error, count, status } = await t.api.querySafe(input);
+      expect(data).toBeNull();
+      expect(count).toBeUndefined();
+      expect(status).toBe(404);
+      expect(error).toBeInstanceOf(QueryError);
+      expect(error?.input).toBe(input);
+
+      const thrown = (await t.api.query(input).catch((e: unknown) => e)) as QueryError;
+      expect(error?.body).toEqual(thrown.body);
+      expect(error?.status).toBe(thrown.status);
+      expect(error?.message).toBe(thrown.message);
+    });
+
+    test("narrowing on error leaves data usable", async () => {
+      const r = await t.api.querySafe<Array<{ name: string }>>({
+        table: "clients",
+        select: ["name"],
+        where: { id: 1 },
+      });
+      if (r.error) throw r.error;
+      // a type error here would fail the typecheck, which is half the point of the shape
+      const names: string[] = r.data.map((row) => row.name);
+      expect(names).toEqual(["Ada"]);
+    });
+
+    test("writes and RLS behave as they do through query()", async () => {
+      const ok = await t.api.querySafe<Array<{ label: string }>>(
+        { table: "things", schema: "v2", action: "insert", rows: { label: "safe" }, select: ["label"] },
+        authed(),
+      );
+      expect(ok.error).toBeNull();
+      expect(ok.data).toEqual([{ label: "safe" }]);
+      expect(ok.status).toBe(201);
+
+      const denied = await t.api.querySafe({ table: "things", schema: "v2", action: "insert", rows: { label: "no" } });
+      expect(denied.data).toBeNull();
+      expect(denied.error?.body.code).toBe("42501");
+    });
+
+    test("query() still throws: neither form changed the other", async () => {
+      expect(t.api.query({ table: "cients" })).rejects.toBeInstanceOf(QueryError);
+    });
+
+    test("every kind of failure comes back as error, never as a rejection", async () => {
+      // refused by the builder, before any SQL
+      const operator = await t.api.querySafe({ table: "orders", where: { total: ["nope" as never, 1] } });
+      expect(operator.error?.body.code).toBe("PGRST100");
+      // refused by the schema cache
+      expect((await t.api.querySafe({ table: "clients", select: ["nope"] })).error?.status).toBe(400);
+      // refused by Postgres (privileges), and by the response shaping
+      expect((await t.api.querySafe({ table: "clients", action: "delete", where: { id: 1 } })).error?.body.code).toBe(
+        "42501",
+      );
+      expect((await t.api.querySafe({ table: "clients", where: { id: 999 }, single: true })).error?.body.code).toBe(
+        "PGRST116",
+      );
+      // and the caller check that happens before anything else
+      const closed = await makeApi({ anonymousRole: false });
+      expect((await closed.api.querySafe({ table: "clients" })).error?.body.code).toBe("PGRST302");
+      await closed.close();
+    });
+
+    test("it never rejects, not even on an error the library cannot map", async () => {
+      const db = await createTestDb();
+      let broken = false;
+      // a driver that fails with something that is not even an Error, after the schema was read
+      const api = await createPgRest({
+        db: {
+          query: (text, params) => db.adapter.query(text, params),
+          transaction: (fn) => (broken ? Promise.reject("boom") : db.adapter.transaction(fn)),
+        },
+        schemas: ["api"],
+      });
+      broken = true;
+
+      const r = await api.querySafe({ table: "clients", select: ["id"] });
+      expect(r.data).toBeNull();
+      expect(r.status).toBe(500);
+      expect(r.error).toBeInstanceOf(QueryError);
+      expect(r.error?.body).toEqual({ code: "PGRSTX00", message: "Internal error", details: null, hint: null });
+      expect(r.error?.cause).toBe("boom");
+      // the same call through query() does throw: that is the only difference between the two
+      expect(api.query({ table: "clients" })).rejects.toBeInstanceOf(QueryError);
+
+      await api.close();
+      await db.drop();
     });
   });
 

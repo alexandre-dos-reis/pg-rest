@@ -182,6 +182,20 @@ export interface QueryResult<T = unknown> {
   readonly status: number;
 }
 
+/**
+ * What a query returned, as a value instead of an exception: exactly one of `data` and `error`
+ * is set, so narrowing on `error` leaves `data` non-null.
+ */
+export type QuerySafeResult<T = unknown> =
+  | (QueryResult<T> & { readonly error: null })
+  | {
+      readonly data: null;
+      readonly error: QueryError;
+      readonly count?: undefined;
+      /** The status the failure would have answered with over HTTP. */
+      readonly status: number;
+    };
+
 /** A query that failed, with the PostgREST error body and the input that produced it. */
 export class QueryError extends ApiError {
   constructor(
@@ -491,5 +505,43 @@ export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext 
     // An unexpected error keeps its stack under `cause`; over HTTP it would only be a 500 body.
     const unexpected = api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError);
     throw new QueryError(input, api, unexpected ? { cause: e } : undefined);
+  }
+};
+
+/**
+ * Turn anything at all into the failed half of a {@link QuerySafeResult}. `runQuery` already maps
+ * what it can; whatever it could not is still reported, as the body PostgREST answers a 500 with
+ * and the original error under `cause`. Nothing is logged and nothing is dropped: `error` is the
+ * only channel, so the caller decides what to do with it.
+ */
+export const toSafeFailure = (input: QueryInput, e: unknown): QuerySafeResult => {
+  const error =
+    e instanceof QueryError
+      ? e
+      : new QueryError(
+          input,
+          new ApiError({
+            status: 500,
+            headers: {},
+            body: { code: "PGRSTX00", message: "Internal error", details: null, hint: null },
+          }),
+          { cause: e },
+        );
+  return { data: null, error, status: error.status };
+};
+
+/**
+ * {@link runQuery} with the failure as a value: `{ data, error }`, where exactly one is set.
+ * The error is the same {@link QueryError} the throwing form raises -- this only chooses how it
+ * reaches you, which is a matter of taste and of how much of a result you handle in one place.
+ *
+ * **This never rejects.** Every failure, including one the library did not foresee, comes back as
+ * `error`, so a caller that checks it needs no `try`/`catch` at all.
+ */
+export const runQuerySafe = async (env: Env, input: QueryInput, ctx: RequestContext = {}): Promise<QuerySafeResult> => {
+  try {
+    return { ...(await runQuery(env, input, ctx)), error: null };
+  } catch (e) {
+    return toSafeFailure(input, e);
   }
 };

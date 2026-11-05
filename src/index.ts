@@ -1,7 +1,14 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
-import { type QueryInput, type QueryResult, runQuery } from "./query";
+import {
+  type QueryInput,
+  type QueryResult,
+  type QuerySafeResult,
+  runQuery,
+  runQuerySafe,
+  toSafeFailure,
+} from "./query";
 import type { SchemaCache } from "./schema";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
@@ -21,6 +28,7 @@ export type {
   QueryInput,
   QueryResult,
   QueryReturning,
+  QuerySafeResult,
   RpcQuery,
   Scalar,
   Select,
@@ -95,6 +103,15 @@ export interface PgRestInstance {
    * (`code`, `message`, `details`, `hint`) and the input that produced it.
    */
   query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /**
+   * {@link PgRestInstance.query} with the failure as a value instead of an exception:
+   * `const { data, error } = await pgRest.querySafe({ table: "todos" })`. Exactly one of the two
+   * is set, so `if (error)` leaves `data` non-null. The error is the same {@link QueryError}.
+   *
+   * It never rejects: an error the library did not foresee comes back as a 500 `error` carrying the
+   * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
+   */
+  querySafe<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>>;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -165,9 +182,23 @@ export const createPgRest = async (options: PgRestOptions): Promise<PgRestInstan
   const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> =>
     (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
 
+  const querySafe = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>> => {
+    try {
+      return (await runQuerySafe(
+        { db: adapter, config, cache: store.current() },
+        input,
+        ctx ?? {},
+      )) as QuerySafeResult<T>;
+    } catch (e) {
+      // runQuerySafe does not throw; this covers everything around it, so the promise cannot reject
+      return toSafeFailure(input, e) as QuerySafeResult<T>;
+    }
+  };
+
   return {
     handle,
     query,
+    querySafe,
     reloadSchema: async () => void (await store.reload()),
     schemaCache: async () => store.current(),
     close: async () => {},

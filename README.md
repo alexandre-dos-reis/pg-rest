@@ -109,6 +109,19 @@ try {
 HTTP clients get), while `Error.message` is a one-line summary with the code and hint for your logs. An unexpected internal
 error keeps its stack under `cause`.
 
+If you would rather handle the failure as a value than with `try/catch`, `querySafe()` is the same query with the error
+returned instead of thrown:
+
+```ts
+const { data, error } = await pgRest.querySafe({ table: "cients" });
+if (error) return c.json(error.body, error.status); // the PostgREST body, straight through
+data; // non-null here: exactly one of the two is set, and TypeScript knows it
+```
+
+It returns `{ data, error, count, status }` and nothing else differs — same `QueryError`, same codes, same everything.
+**`querySafe()` never rejects**: an error the library did not foresee comes back as a 500 `error` with the original under
+`cause`, so checking `error` is all a caller ever has to do. `query()` is unchanged; pick one per call site.
+
 Content negotiation is the part that cannot leave HTTP: CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
 headers, `OPTIONS` and the OpenAPI document stay on `handle()`. Reads, writes, RPC and RLS are all here.
 

@@ -67,6 +67,10 @@ try {
   assert.equal(failed.status, 404);
   assert.equal(failed.body.code, "PGRST205");
   assert.equal(failed.input.table, "cients");
+  const safe: any = await api.querySafe({ table: "cients" });
+  assert.equal(safe.data, null);
+  assert.equal(safe.error.body.code, "PGRST205");
+  assert.equal((await api.querySafe({ table: "clients", select: ["name"], limit: 1 })).error, null);
 
   // RPC + OpenAPI
   assert.equal((await call("/rpc/add?a=40&b=2")).body, 42);

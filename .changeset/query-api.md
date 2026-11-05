@@ -22,6 +22,18 @@ are covered; content negotiation (CSV, GeoJSON, media type handlers), `EXPLAIN` 
 on `handle()`. Failures throw a `QueryError` — an `Error` carrying the PostgREST status and body (`code`, `message`,
 `details`, `hint`) plus the input that produced it.
 
+`querySafe(input, ctx?)` is the same query with the failure as a value rather than an exception, for call sites where
+that reads better:
+
+```ts
+const { data, error } = await pgRest.querySafe({ table: "cients" });
+if (error) return c.json(error.body, error.status);
+```
+
+Exactly one of `data` and `error` is set, so narrowing on `error` leaves `data` non-null. It is the same `QueryError`
+`query()` throws, and `querySafe()` **never rejects** — an unforeseen error comes back as a 500 `error` carrying the
+original under `cause`. `query()` itself is unchanged.
+
 Two deliberate defaults differ from HTTP, both reversible: a write returns its rows unless `returning: "minimal"`, and a
 function call is always a `POST`.
 
