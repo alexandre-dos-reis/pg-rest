@@ -4,5 +4,10 @@
   "semi": true,
   "singleQuote": false,
   "trailingComma": "all",
-  "ignorePatterns": ["dist", "node_modules", "bun.lock"]
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    "bun.lock",
+    "tests/support/fixture.types.ts"
+  ]
 }

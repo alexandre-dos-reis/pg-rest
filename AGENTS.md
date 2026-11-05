@@ -27,12 +27,14 @@ Read `README.md` for usage and `PARITY.md` for what is and isn't implemented bef
 | `src/parse/*` | URL/query parsing: `select`, filters, request headers, fields |
 | `src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`) |
 | `src/schema.ts` | schema introspection and cache |
+| `src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `pg-rest/types` |
 | `src/service.ts` | schema store (serialized reload), error mapping, `handleSafely` |
 | `src/errors.ts` | `ApiError`, PostgREST error codes (`PGRSTxxx`), `normalizeDbError` (maps SQLSTATE) |
 | `src/openapi.ts` | OpenAPI document |
 | `src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
 | `src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `pg-rest/adapters/*`) |
 | `tests/` | `bun test` suites; `tests/support` has the fixture schema (`fixture.sql`) and helpers |
+| `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
 | `examples/with-*` | independent runnable examples, each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |

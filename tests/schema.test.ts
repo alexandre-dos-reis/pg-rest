@@ -23,6 +23,36 @@ describe.skipIf(!hasDb)("schema introspection", () => {
     expect(getRelation(cache, "v2", "things").schema).toBe("v2");
   });
 
+  test("loads enum labels, on columns and on functions", () => {
+    const moods = getRelation(cache, "api", "moods");
+    const col = (n: string) => moods.columns.find((c) => c.name === n)!;
+    // format_type qualifies a type that is not in the search_path, which is why the labels are
+    // attached to the column instead of being keyed by type name
+    expect(col("mood").type).toBe("api.mood");
+    expect(col("mood").enumLabels).toEqual(["sad", "ok", "happy"]);
+    // an array of an enum carries the labels of its element type
+    expect(col("seen").type).toBe("api.mood[]");
+    expect(col("seen").enumLabels).toEqual(["sad", "ok", "happy"]);
+    expect(col("note").enumLabels).toBeUndefined();
+
+    const fn = cache.functions.get("api.cheer_up")![0]!;
+    expect(fn.args[0]!.enumLabels).toEqual(["sad", "ok", "happy"]);
+    expect(fn.returnEnumLabels).toEqual(["sad", "ok", "happy"]);
+    expect(cache.functions.get("api.hello")![0]!.returnEnumLabels).toBeUndefined();
+  });
+
+  test("a view column knows the table column it is read from", () => {
+    const total = getRelation(cache, "api", "big_orders").columns.find((c) => c.name === "total")!;
+    expect(total.source).toEqual({ schema: "api", table: "orders", column: "total" });
+    // the catalog always reports a view column as nullable, whatever the source says
+    expect(total.nullable).toBe(true);
+    // an aggregate is not read from a column, so it has no source
+    expect(
+      getRelation(cache, "api", "client_totals").columns.find((c) => c.name === "revenue")!.source,
+    ).toBeUndefined();
+    expect(getRelation(cache, "api", "orders").columns[0]!.source).toBeUndefined();
+  });
+
   test("loads columns with types and defaults", () => {
     const orders = getRelation(cache, "api", "orders");
     const names = orders.columns.map((c) => c.name);
