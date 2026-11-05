@@ -1,7 +1,8 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { generateTypes } from "../src/types";
+import { createPgRest } from "../src/index";
 import { introspect, type Column, type Relation, type SchemaCache } from "../src/schema";
-import { createTestDb, hasDb, requirePostgis } from "./support/db";
+import { createTestDb, hasDb, requirePostgis, type TestDb } from "./support/db";
 
 const column = (name: string, type: string, extra: Partial<Column> = {}): Column => ({
   name,
@@ -134,11 +135,21 @@ describe("generateTypes", () => {
 
 describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
   let cache: SchemaCache;
+  let db: TestDb;
   beforeAll(async () => {
     requirePostgis();
-    const db = await createTestDb();
+    db = await createTestDb();
     cache = await introspect(db.adapter, ["api", "v2"]);
-    await db.drop();
+  });
+  afterAll(() => db.drop());
+
+  test("the instance generates the same thing, with the generator loaded on demand", async () => {
+    const api = await createPgRest({ db: db.adapter, schemas: ["api", "v2"] });
+    expect(await api.generateTypes({ name: "DatabasePgRest" })).toBe(generateTypes(cache, { name: "DatabasePgRest" }));
+    // the options are the generator's own
+    expect(await api.generateTypes()).toContain("export type Database = {");
+    expect(await api.generateTypes({ header: false })).toStartWith("type DatabaseApiRelations");
+    await api.close();
   });
 
   test("the committed types are exactly what the generator produces", async () => {

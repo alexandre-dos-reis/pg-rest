@@ -73,7 +73,8 @@ bun run link:examples  # point the examples at the local build, without touching
   Use `bun run link:examples [name]`. `bun run version` moves them onto each new release, and `scripts/githooks/pre-commit` (wired up by the
   `prepare` script on `bun install`) refuses a commit that leaves them out of step with the root `package.json`.
 - CI (`.github/workflows/ci.yml`): typecheck + build + tests on PostgreSQL 16, a Node job (`scripts/node-smoke.ts` against the built `dist`),
-  an examples matrix (`scripts/check-example.sh`), and the PostgREST differential test.
+  an examples matrix (`scripts/check-example.sh`, one job per example -- the two PGlite ones need no database service),
+  and the PostgREST differential test.
 - Typecheck runs before the build in CI, so `src`/`tests` code must not import from `dist`.
 
 ## Releasing

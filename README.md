@@ -135,14 +135,22 @@ types come from there, and what they allow is what the library accepts:
 ```ts
 // scripts/gen-types.ts — run it after a migration
 import { writeFileSync } from "node:fs";
-import { generateTypes } from "@adrdp/pg-rest/types";
 
-writeFileSync("src/db.types.ts", generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" }));
+writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "DatabasePgRest" }));
 ```
 
 No CLI and no second database connection: you already have a driver, and the library has no runtime dependency to spend
-on one. The output is a plain module with no imports — commit it, and add it to your formatter's ignore list so the file
-stays byte-for-byte what the generator produced.
+on one. The generator is loaded by that call and not before, so a server that only serves requests never carries it.
+When you hold a `SchemaCache` rather than an instance, the same function is exported standalone:
+
+```ts
+import { generateTypes } from "@adrdp/pg-rest/types";
+
+const types = generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" });
+```
+
+The output is a plain module with no imports — commit it, and add it to your formatter's ignore list so the file stays
+byte-for-byte what the generator produced.
 
 ```ts
 type DatabasePgRestApiRelations = {
@@ -244,8 +252,8 @@ Self-contained projects in [`examples/`](examples) (a todo API with Row Level Se
 | [`with-better-auth`](examples/with-better-auth)     | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) sessions | yes (docker-compose included) |
 
 And one that is not a server at all: [`with-generated-types`](examples/with-generated-types) — two tables, an enum, and
-typed queries checked against types generated from the database (`npm run gen:types && npm start`). It runs on PGlite, so
-there is nothing to install or start.
+typed queries checked against types generated from the database (`bun run gen:types && bun start`). It runs on Bun over
+PGlite, so there is nothing to install or start.
 
 ## Database adapters
 

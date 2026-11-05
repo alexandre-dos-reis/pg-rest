@@ -10,6 +10,7 @@ import {
   toSafeFailure,
 } from "./query";
 import type { SchemaCache } from "./schema";
+import type { GenerateTypesOptions } from "./types";
 import type { AnyDatabase, TypedPgRestInstance } from "./typed";
 import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./service";
 
@@ -126,6 +127,20 @@ export interface PgRestInstance {
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
   schemaCache(): Promise<SchemaCache>;
+  /**
+   * TypeScript types for this database, as the text of a module. Write it next to your code, keep
+   * it in version control, and hand the type it exports to `createPgRest<Database>` so queries
+   * check themselves. Run it again after a migration.
+   *
+   * ```ts
+   * writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }));
+   * ```
+   *
+   * The generator is loaded on demand, so a server that never calls this never pays for it. The
+   * same function is exported standalone as `@adrdp/pg-rest/types` for when you hold a
+   * {@link SchemaCache} rather than an instance.
+   */
+  generateTypes(options?: GenerateTypesOptions): Promise<string>;
   /** Stop the handler. The database adapter is left open: close it yourself. */
   close(): Promise<void>;
 }
@@ -218,6 +233,10 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
     handle,
     query,
     querySafe,
+    // Type generation is a build-time job: importing it here would put the generator in the bundle
+    // of every server that only serves requests, so it is fetched when it is actually wanted.
+    generateTypes: async (forTypes?: GenerateTypesOptions) =>
+      (await import("./types")).generateTypes(store.current(), forTypes),
     reloadSchema: async () => void (await store.reload()),
     schemaCache: async () => store.current(),
     close: async () => {},

@@ -4,38 +4,52 @@ The smallest example there is: no server, no HTTP, no auth. Two tables, an enum 
 **check themselves** against types generated from the database. This folder is self-contained: copy it anywhere.
 
 ```sh
-npm install
-npm run gen:types   # 1. read the catalog, write db.types.ts
-npm start           # 2. run typed queries
-npm run typecheck   # and see that the mistakes in mistakes.ts really are mistakes
+bun install
+bun run gen:types   # 1. read the catalog, write db.types.ts
+bun start           # 2. run typed queries
+bun run typecheck   # and see that the mistakes in mistakes.ts really are mistakes
 ```
+
+It runs on **Bun** -- `@types/bun` carries Bun's globals and Node's typings, so one package covers both -- over PGlite,
+which keeps the driver in-process. `Bun.sql` and its adapter (see [`with-bun`](../with-bun)) need a Postgres server
+listening somewhere, and this example is about the types, so it stays on the driver that needs nothing started.
+Everything here runs the same on Node (`node gen-types.ts`, `node main.ts`) with `@types/node` instead.
 
 Two steps, because that is the real workflow: the types are a file you generate after a migration and commit, like any
 other artefact your editor and CI need to see.
 
 `pg-rest` is an ordinary versioned dependency, so once this folder is copied out of the repository the install above is
 all you need. Inside the repository that version is not on the registry yet and will not resolve, so link the local
-build instead -- from the repository root:
+build instead -- from the repository root (never a `file:` or `link:` path in `package.json`, which `check:examples`
+refuses, and which installs a partial copy of the repository rather than a link):
 
 ```sh
 bun run link:examples with-generated-types   # builds pg-rest, then symlinks it into node_modules
 ```
 
-## The three files
+## The four files
 
-**`db.ts`** -- Postgres in WebAssembly (PGlite), `schema.sql` loaded in memory. Nothing to install, nothing to start.
+**`db.ts`** -- Postgres in WebAssembly (PGlite), `schema.sql` loaded in memory, and the options. Nothing to install,
+nothing to start. It deliberately knows nothing about the generated types: the generator has to run before they exist.
 
-**`gen-types.ts`** -- the generator, which is one call:
+**`gen-types.ts`** -- the generator, which is one call on the instance:
 
 ```ts
-const types = generateTypes(await pgRest.schemaCache(), { name: "DatabasePgRest" });
+const types = await pgRest.generateTypes({ name: "DatabasePgRest" });
 writeFileSync(new URL("./db.types.ts", import.meta.url), types);
 ```
 
-`schemaCache()` is the introspected catalog -- the same one the library reads to answer a request -- so the types
-describe exactly what it accepts. No CLI and no second connection: you already have a driver.
+The types come from the catalog the instance already read to answer requests, so they describe exactly what it accepts.
+No CLI and no second connection: you already have a driver. This script builds its own *untyped* instance -- a generator
+cannot be typed by the file it is about to write, which is also why it imports `db.ts` and not `client.ts`.
 
-**`main.ts`** -- the queries. Hand the generated type to `createPgRest` and everything inside follows:
+**`client.ts`** -- the instance your application code imports, created once and typed by `db.types.ts`:
+
+```ts
+export const pgRest = await createPgRest<DatabasePgRest>(options);
+```
+
+**`main.ts`** -- the queries. That one type argument is what makes everything inside follow:
 
 ```ts
 const pgRest = await createPgRest<DatabasePgRest>(options);

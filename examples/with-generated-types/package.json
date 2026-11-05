@@ -3,16 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "gen:types": "node gen-types.ts",
-    "start": "node main.ts",
+    "gen:types": "bun gen-types.ts",
+    "start": "bun main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@adrdp/pg-rest": "^0.1.2",
+    "@adrdp/pg-rest": "^0.1.3",
     "@electric-sql/pglite": ">=0.2.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/bun": "^1.4.4",
     "typescript": "^5.9.0"
   }
 }

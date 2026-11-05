@@ -1,11 +1,7 @@
 // What the types refuse. Each line is a mistake, and `@ts-expect-error` is the assertion that it is
 // one: `npm run typecheck` fails if any of them ever starts compiling. Remove a comment to see the
 // message the compiler gives you.
-import { createPgRest } from "@adrdp/pg-rest";
-import { options } from "./db.ts";
-import type { DatabasePgRest } from "./db.types.ts";
-
-const pgRest = await createPgRest<DatabasePgRest>(options);
+import { pgRest } from "./client.ts";
 
 // @ts-expect-error no such table ("todos" exists)
 void pgRest.query({ table: "todoz", select: ["id"] });
