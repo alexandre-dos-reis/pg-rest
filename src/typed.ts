@@ -270,42 +270,52 @@ type AtSchema<Db extends AnyDatabase, S extends Schema<Db>> = S extends Db["defa
   ? { readonly schema?: S }
   : { readonly schema: S };
 
-type Read<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
+/**
+ * Everything a query on one relation may say. Reads and writes share **one** member per table on
+ * purpose: when several members of the union carry the same `table` value, TypeScript cannot pick
+ * one from the discriminant, and the editor then offers every table's columns inside `select` and
+ * `where`. What the separate shapes used to enforce is enforced by {@link WriteRules} instead.
+ */
+type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
   AtSchema<Db, S> & {
     readonly table: T;
-    readonly action?: "select";
+    /** Never both: the discriminant has to exist on every member for the editor to pick one. */
+    readonly rpc?: never;
+    readonly action?: "select" | "insert" | "upsert" | "update" | "delete";
     readonly select?: SelectList<Db, S, T>;
     readonly where?: Where<Db, S, T>;
     readonly order?: ReadonlyArray<Order<Db, S, T>>;
+    readonly rows?: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
+    readonly set?: Relations<Db, S>[T]["update"];
+    readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
+    readonly columns?: ReadonlyArray<Column<Db, S, T>>;
+    readonly missing?: "default" | "null";
+    readonly returning?: "representation" | "minimal";
   };
 
-type Write<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
-  AtSchema<Db, S> & {
-    readonly table: T;
-    readonly select?: SelectList<Db, S, T>;
-    readonly returning?: "representation" | "minimal";
-  } & (
-    | {
-        readonly action: "insert" | "upsert";
-        readonly rows: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
-        readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
-        readonly columns?: ReadonlyArray<Column<Db, S, T>>;
-        readonly missing?: "default" | "null";
-      }
-    | {
-        readonly action: "update";
-        readonly set: Relations<Db, S>[T]["update"];
-        readonly where?: Where<Db, S, T>;
-      }
-    | {
-        readonly action: "delete";
-        readonly where?: Where<Db, S, T>;
-      }
-  );
+/**
+ * The payload each action needs, and refuses: `rows` belongs to an insert or an upsert, `set` to an
+ * update, and a read has no business with either. Required here rather than in the shape, because
+ * an optional property that must sometimes be present cannot be said in one object type.
+ */
+type WriteRules<Db extends AnyDatabase, Q> = (Q extends { action: "insert" | "upsert" }
+  ? {
+      readonly rows: WriteShape<Db, Q, "insert"> | ReadonlyArray<WriteShape<Db, Q, "insert">>;
+    }
+  : { readonly rows?: never; readonly onConflict?: never; readonly columns?: never; readonly missing?: never }) &
+  (Q extends { action: "update" } ? { readonly set: WriteShape<Db, Q, "update"> } : { readonly set?: never }) &
+  (Q extends { action: "insert" | "upsert" | "update" | "delete" } ? unknown : { readonly returning?: never });
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
   AtSchema<Db, S> & {
     readonly rpc: F;
+    /**
+     * `table` is absent from a function call, but it must still be *declared*: a union where some
+     * members lack the discriminant altogether is one TypeScript will not narrow, and the editor
+     * then offers every table's columns inside `select`.
+     */
+    readonly table?: never;
+    readonly action?: never;
     readonly args?: Functions<Db, S>[F][number]["args"];
     /** A function's result is a row like any other, so it takes the same three. */
     readonly select?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
@@ -350,7 +360,7 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
 /** Every query this database allows, as a union discriminated by `table` or `rpc`. */
 export type TypedQuery<Db extends AnyDatabase> = {
   [S in Schema<Db>]:
-    | { [T in Table<Db, S>]: Read<Db, S, T> | Write<Db, S, T> }[Table<Db, S>]
+    | { [T in Table<Db, S>]: TableQuery<Db, S, T> }[Table<Db, S>]
     | { [F in keyof Functions<Db, S> & string]: Rpc<Db, S, F> }[keyof Functions<Db, S> & string];
 }[Schema<Db>];
 
@@ -412,11 +422,11 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
  */
 export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "querySafe"> {
   query<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>>>;
   querySafe<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q>,
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QuerySafeResult<QueryData<Db, Q>>>;
 }

@@ -85,6 +85,12 @@ export type DatabasePgRest = {
 };
 ```
 
+## In your editor
+
+The table restricts the columns, and not only when the compiler runs: inside `select` on `tags`, the completion offers
+`id`, `todo_id`, `label` and `*` -- the three columns of that table, and nothing from `todos`. Same inside `where`, and
+the relationships you may embed are the ones a foreign key actually leads to.
+
 ## What it refuses
 
 `mistakes.ts` is a list of mistakes, each with `@ts-expect-error` above it -- which is the assertion that it *is* one:

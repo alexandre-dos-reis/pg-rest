@@ -207,6 +207,13 @@ turns each of them into an array when it spreads a to-many. `single: true` retur
 `returning: "minimal"` returns `null`, a function's arguments and result come from its signature, overloads included, and
 a misspelled field that the runtime would silently drop is refused.
 
+**The table restricts the columns in your editor too**, not only when the compiler runs: inside `select` on `tags`, the
+completion offers that table's three columns and nothing from `todos`. That is not free — TypeScript narrows the
+contextual type of a nested property only when the discriminant picks exactly one member of the union, so the query type
+keeps one member per table (reads and writes merged, each action's payload required by `WriteRules`) and every member
+declares `table`, function calls included (`table?: never`). `tests/completions.test.ts` asks the language service and
+pins the answer, because both are easy to undo by accident.
+
 The type argument goes on `createPgRest`, not on the call: TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<DatabasePgRest>({ … })` would check the input and then hand you `unknown`.
 

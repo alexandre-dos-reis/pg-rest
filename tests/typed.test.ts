@@ -242,6 +242,22 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "clients", action: "insert", rows: [{ name: "x" }, { name: "y", nope: 1 }] }));
     // @ts-expect-error ... and in an update
     void (() => pgRest.query({ table: "clients", action: "update", set: { nope: 1 } }));
+    // reads and writes share one member per table, so what the shape no longer says is checked
+    // by WriteRules: each action's payload is required, and refused on the others
+    // @ts-expect-error an insert needs its rows
+    void (() => pgRest.query({ table: "clients", action: "insert" }));
+    // @ts-expect-error an update needs its set
+    void (() => pgRest.query({ table: "clients", action: "update" }));
+    // @ts-expect-error a read has no rows
+    void (() => pgRest.query({ table: "clients", rows: { name: "x" } }));
+    // @ts-expect-error an insert has no set
+    void (() => pgRest.query({ table: "clients", action: "insert", rows: { name: "x" }, set: { name: "y" } }));
+    // @ts-expect-error on_conflict belongs to an upsert
+    void (() => pgRest.query({ table: "clients", onConflict: ["id"] }));
+    // @ts-expect-error there is nothing to return from a read
+    void (() => pgRest.query({ table: "clients", select: ["id"], returning: "minimal" }));
+    // @ts-expect-error a query names a table or a function, not both
+    void (() => pgRest.query({ table: "clients", rpc: "add" }));
     // @ts-expect-error an identity column cannot be written (the fixture's moods.id is one)
     void (() => pgRest.query({ table: "moods", action: "insert", rows: { id: 42, mood: "ok" } }));
     // the string forms that change or invent a column are not described by the types: a cast, a
