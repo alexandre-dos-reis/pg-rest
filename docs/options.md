@@ -44,14 +44,10 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 With a generated database type — `createPgRest<Database>(options)` — `query` is typed by it and everything else is
 unchanged.
 
-`handle` is a plain `fetch`, which is all a PostgREST client library needs: hand it one and the exchange never touches a
-socket.
-
-```ts ignore
-const client = new PostgrestClient("http://pg-rest", {
-  fetch: (input, init) => pgRest.handle(new Request(input, init), ctx),
-});
-```
+`handle` is for requests that come from outside: mount it in any server that speaks web-standard `Request`/`Response`.
+In the same process, reach for `query()` instead — a PostgREST client library over `handle` would build a URL and a
+body for pg-rest to parse straight back, two passes over a query you are already holding as an object. Both entry
+points share one pipeline, so the database sees the same thing either way; only the envelope differs.
 
 ## Errors
 
