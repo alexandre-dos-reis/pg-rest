@@ -36,6 +36,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | --- | --- |
 | `handle(request, ctx?)` | the HTTP entry point. An explicit `ctx` overrides `resolveContext` |
 | `query(input, ctx?)` | the same thing from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
+| `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
 | `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
 | `schemaCache()` | the introspected catalog |
 | `reloadSchema()` | re-read it after a migration. A failed reload keeps the previous cache |

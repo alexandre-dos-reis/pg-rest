@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { CountFrom, FilterOp, QueryResult, Scalar } from "./query";
+import type { ContextSource, CountFrom, FilterOp, QueryResult, Scalar } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -529,7 +529,12 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
  *
  * `handle` is unchanged: HTTP requests are strings from outside and cannot be typed.
  */
-export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query"> {
+export type TypedContextQuery<Db extends AnyDatabase> = <const Q extends TypedQuery<Db>>(
+  input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
+  ctx?: RequestContext,
+) => Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+
+export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "setContextQuery"> {
   /**
    * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
    * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`
@@ -557,4 +562,17 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRest
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+
+  /**
+   * {@link TypedPgRestInstance.query} with the context decided once -- typically read from an
+   * `AsyncLocalStorage` your middleware entered -- so queries deep in the call stack no longer carry
+   * it. The returned function is typed exactly like `query` minus `ctx`.
+   *
+   * @example
+   * const store = new AsyncLocalStorage<RequestContext>();
+   * const db = pgRest.setContextQuery(() => store.getStore());
+   * const { data, error } = await db({ table: "todos", select: ["id", "title"] });
+   * // data: Array<{ id: number; title: string }>
+   */
+  setContextQuery(source: ContextSource): TypedContextQuery<Db>;
 }

@@ -20,6 +20,7 @@ drifts fails the build. The ones that are meant to be refused carry `@ts-expect-
 - [Writing](#writing)
 - [Calling a function](#calling-a-function)
 - [Who is asking](#who-is-asking)
+  - [Binding it once](#binding-it-once)
 - [Errors](#errors)
 - [What the typed path does not describe](#what-the-typed-path-does-not-describe)
 - [Every field](#every-field)
@@ -516,6 +517,63 @@ outright). **The types say nothing about what a role may do**: `insertable` and 
 schema serves every role, the role is usually resolved from a cookie at runtime, and RLS is a predicate over rows that no
 type can express — so privileges stay where they are enforced.
 
+### Binding it once
+
+Threading `ctx` through every layer that happens to run a query is noise. `setContextQuery(source)` returns the same
+`query`, typed the same way, with the context already decided -- `source` being either a fixed context or a function
+called at *every* call, which is what makes an `AsyncLocalStorage` work:
+
+```ts
+const db = pgRest.setContextQuery(() => store.getStore());
+
+// entered once, per request
+app.use(async (c, next) => {
+  const user = await mySessionLookup(c.req.raw);
+  const ctx: RequestContext = user
+    ? { role: "authenticated", claims: { sub: user.id, email: user.email } }
+    : { role: "anon" };
+  await store.run(ctx, next);
+});
+
+// anywhere below, however deep, with no ctx to pass
+const { data, error } = await db({ table: "notes", select: ["body"] });
+```
+
+```ts ignore
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { RequestContext } from "@adrdp/pg-rest";
+
+const store = new AsyncLocalStorage<RequestContext>();
+```
+
+pg-rest keeps no store of its own: that is what leaves it dependency-free and runtime-neutral, and it lets the context
+come from anywhere — `node:async_hooks` on Node and Bun, a per-request store your framework already has, a fixed context
+for a job or a test. On Cloudflare Workers `AsyncLocalStorage` needs the `nodejs_als` (or `nodejs_compat`)
+compatibility flag; without it, a fixed context and the per-call override below still work.
+
+Two rules, and the second is the reason this is safe to reach for:
+
+```ts
+const db = pgRest.setContextQuery(() => store.getStore());
+
+// a context passed to the call wins over the source: one administrative query without leaving the scope
+await db({ table: "notes", select: ["id"] }, { role: "admin" });
+
+// a source that gives nothing -- the store was never entered -- is an error, not the anonymous role
+const forgotten = await db({ table: "notes" });
+forgotten.error?.status; //    500
+forgotten.error?.body.code; // "PGRSTX01"
+```
+
+Falling back to `anon` there would turn a missing middleware into a silent change of privileges, which is the kind of
+bug that reads as "empty result" in development and as an incident in production. Like `query()`, a bound query never
+rejects: a `source` that throws comes back as a 500 `error` carrying the original under `cause`.
+
+Use `store.run(ctx, …)`, not `store.enterWith(ctx)`: `run` is bounded by its callback, `enterWith` leaks the context
+into whatever follows in the current async resource. An `async` middleware is fine — `run` hands back its callback's
+promise, and the context crosses every `await` inside it — as long as you `await` (or return) what `run` gives you,
+otherwise the response leaves before the queries finish.
+
 ## Errors
 
 `query()` never rejects: a failure is part of the result, as an `error` carrying the PostgREST status and body plus the
@@ -554,6 +612,7 @@ What you are likely to see:
 | `PGRST116` | 406 | `single` matched something other than exactly one row |
 | `PGRST124` | 400 | `maxAffected` exceeded |
 | `PGRST302` | 401 | no context and anonymous access disabled |
+| `PGRSTX01` | 500 | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
 | `42501` | 401 / 403 | the role lacks the privilege |
 | `23505` / `23503` | 409 | unique / foreign key violation |
 | `PT4xx` | 4xx | your own `RAISE … USING ERRCODE = 'PT404'` |

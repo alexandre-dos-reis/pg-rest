@@ -51,7 +51,7 @@ plans, `OPTIONS`, OpenAPI — stay on `handle()`.
 
 | path | |
 | --- | --- |
-| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `setContextQuery`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
 | `src/core.ts` | routing, content negotiation, planning, the transaction, response building |
 | `src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement` |

@@ -1,7 +1,16 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
-import { type QueryInput, type QueryResult, runQuery, toFailedResult } from "./query";
+import {
+  type ContextQuery,
+  type ContextSource,
+  type QueryInput,
+  type QueryResult,
+  noContextResult,
+  resolveContextSource,
+  runQuery,
+  toFailedResult,
+} from "./query";
 import type { SchemaCache } from "./schema";
 import type { GenerateTypesOptions } from "./types";
 import type { AnyDatabase, TypedPgRestInstance } from "./typed";
@@ -18,10 +27,13 @@ export type {
   AnySchema,
   AnySignature,
   QueryData,
+  TypedContextQuery,
   TypedPgRestInstance,
   TypedQuery,
 } from "./typed";
 export type {
+  ContextQuery,
+  ContextSource,
   CountFrom,
   CountOf,
   DeleteQuery,
@@ -115,6 +127,27 @@ export interface PgRestInstance {
    * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
    */
   query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /**
+   * {@link PgRestInstance.query} with the context decided once: `source` is either a fixed
+   * {@link RequestContext} or a function called at every call, so an `AsyncLocalStorage` entered by
+   * your middleware answers "who is asking" without threading `ctx` through every layer.
+   *
+   * ```ts ignore
+   * const store = new AsyncLocalStorage<RequestContext>();
+   * const db = pgRest.setContextQuery(() => store.getStore());
+   * // in a middleware: store.run({ role: "authenticated", claims: { sub: userId } }, next)
+   * const { data, error } = await db({ table: "todos" });
+   * ```
+   *
+   * pg-rest holds no store of its own -- that keeps it dependency-free and runtime-neutral, and
+   * lets the context come from anywhere, not just `node:async_hooks`.
+   *
+   * A context passed to the call wins over `source`, which is how an administrative query steps
+   * out of the ambient context without leaving its scope. A `source` that returns nothing (the
+   * store was never entered) is a 500 `PGRSTX01` `error`, not a silent fall back to the anonymous
+   * role. Like `query`, it never rejects.
+   */
+  setContextQuery(source: ContextSource): ContextQuery;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -213,9 +246,27 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
     }
   };
 
+  const setContextQuery = (source: ContextSource): ContextQuery => {
+    // The source is read per call, not once here: that is what makes an AsyncLocalStorage useful,
+    // one bound `db` serving a different context for every request in flight.
+    return async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
+      let context = ctx;
+      if (!context) {
+        try {
+          context = await resolveContextSource(source);
+        } catch (e) {
+          return toFailedResult(input, e) as QueryResult<T>;
+        }
+        if (!context) return noContextResult(input) as QueryResult<T>;
+      }
+      return query<T>(input, context);
+    };
+  };
+
   return {
     handle,
     query,
+    setContextQuery,
     // Type generation is a build-time job: importing it here would put the generator in the bundle
     // of every server that only serves requests, so it is fetched when it is actually wanted.
     generateTypes: async (forTypes?: GenerateTypesOptions) =>
