@@ -91,5 +91,11 @@
     "@electric-sql/pglite": {
       "optional": true
     }
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "bun",
+      "version": "1.4.4"
+    }
   }
 }

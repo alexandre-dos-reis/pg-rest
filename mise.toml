@@ -51,3 +51,6 @@ rm -rf "$PGDATA" "{{ config_root }}/.cache/postgres.log"
 [tasks.test]
 description = "The whole suite, against the cluster and the pinned PostgREST"
 run = 'POSTGREST_BIN="$(mise which postgrest)" bun test'
+
+[settings]
+idiomatic_version_file_enable_tools = ["bun"]
