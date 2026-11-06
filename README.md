@@ -12,6 +12,10 @@ mTLS — and hand over a role and claims, applied with `set_config` so Row Level
 PostgREST. **No HTTP needed either:** the same queries run in the calling process, typed from your own schema. And no
 runtime dependencies, nothing but web standards in the core, your driver staying yours.
 
+> **Not an ORM:** there is no model of your database here to drift from it. The types are read out of the catalog, one
+> way, and the query language stays PostgREST's.
+> → [the line none of these may cross](docs/proposals.md#the-line-none-of-these-may-cross)
+
 ```sh
 npm i @adrdp/pg-rest pg      # or: bun add @adrdp/pg-rest (Bun.sql is built in), postgres, @electric-sql/pglite
 ```
