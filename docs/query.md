@@ -320,18 +320,18 @@ const more = await pgRest.query({
 });
 ```
 
-| operator | SQL |
-| --- | --- |
-| `eq` `neq` `gt` `gte` `lt` `lte` | `=` `<>` `>` `>=` `<` `<=` |
-| `like` `ilike` | `LIKE` / `ILIKE`, with `*` as the wildcard |
-| `match` `imatch` | `~` / `~*` |
-| `in` | `IN (…)` |
-| `is` | `IS` (`null`, `true`, `false`, `unknown`) |
-| `isdistinct` | `IS DISTINCT FROM` |
-| `fts` `plfts` `phfts` `wfts` | `@@` with `to_tsquery`, `plainto_`, `phraseto_`, `websearch_to_` |
-| `cs` `cd` | `@>` / `<@` (array and range containment) |
-| `ov` | `&&` (overlap) |
-| `sl` `sr` `nxl` `nxr` `adj` | range `<<` `>>` `&<` `&>` `-\|-` |
+| operator                         | SQL                                                              |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `eq` `neq` `gt` `gte` `lt` `lte` | `=` `<>` `>` `>=` `<` `<=`                                       |
+| `like` `ilike`                   | `LIKE` / `ILIKE`, with `*` as the wildcard                       |
+| `match` `imatch`                 | `~` / `~*`                                                       |
+| `in`                             | `IN (…)`                                                         |
+| `is`                             | `IS` (`null`, `true`, `false`, `unknown`)                        |
+| `isdistinct`                     | `IS DISTINCT FROM`                                               |
+| `fts` `plfts` `phfts` `wfts`     | `@@` with `to_tsquery`, `plainto_`, `phraseto_`, `websearch_to_` |
+| `cs` `cd`                        | `@>` / `<@` (array and range containment)                        |
+| `ov`                             | `&&` (overlap)                                                   |
+| `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
 
 A quantifier applies the operator to every element of an array column, and `and`/`or` take nested groups:
 
@@ -450,8 +450,8 @@ const fields = await untyped.query({
 
 Two things to know:
 
-- **A whole-value filter is pg-rest's own.** PostgREST answers `0A000` (*input of anonymous composite types is not
-  implemented*) to any comparison against a composite column, because the literal it sends has no type. pg-rest sends
+- **A whole-value filter is pg-rest's own.** PostgREST answers `0A000` (_input of anonymous composite types is not
+  implemented_) to any comparison against a composite column, because the literal it sends has no type. pg-rest sends
   the value as JSON and turns it into a row of the column's own type, so the comparison works — over `handle()` too,
   since both entry points share one pipeline. A bare Postgres row literal (`owner=eq.(Ada,,)`) still answers `0A000`,
   like PostgREST.
@@ -633,10 +633,10 @@ type can express — so privileges stay where they are enforced.
 
 Threading `ctx` through every layer that happens to run a query is noise. `setContextQuery(source)` returns the same
 `query`, typed the same way, with the context already decided -- `source` being either a fixed context or a function
-called at *every* call, which is what makes an `AsyncLocalStorage` work:
+called at _every_ call, which is what makes an `AsyncLocalStorage` work:
 
 ```ts
-const db = pgRest.setContextQuery(() => store.getStore());
+const pgQuery = pgRest.setContextQuery(() => store.getStore());
 
 // entered once, per request
 app.use(async (c, next) => {
@@ -648,7 +648,7 @@ app.use(async (c, next) => {
 });
 
 // anywhere below, however deep, with no ctx to pass
-const { data, error } = await db({ table: "notes", select: ["body"] });
+const { data, error } = await pgQuery({ table: "notes", select: ["body"] });
 ```
 
 ```ts ignore
@@ -732,7 +732,7 @@ exactly the JSON PostgREST answers with.
 
 ### `kind`: the error to switch on
 
-`code` is exact and there are dozens of them; `kind` is the handful of cases that call for *different reactions*, as a
+`code` is exact and there are dozens of them; `kind` is the handful of cases that call for _different reactions_, as a
 string union, so a `switch` is checked by the compiler rather than by a table of codes you keep yourself:
 
 ```ts
@@ -767,23 +767,23 @@ const addClient = async (name: string, email: string) => {
 
 Every kind, and what it means:
 
-| `kind` | when |
-| --- | --- |
-| `invalid_query` | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
-| `invalid_payload` | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write |
-| `undefined_object` | no table, view or function by that name — a typo (read the `hint`), or a migration the schema cache has not seen |
-| `invalid_embed` | no relationship between two resources, or more than one, which needs a `hint` |
-| `not_single_row` | `single` matched other than exactly one row — both "not found" and "found several" |
-| `too_many_affected` | the write would have touched more rows than `maxAffected`, and was rolled back |
-| `unauthenticated` | no role in the context, or anonymous access disabled |
-| `forbidden` | the role lacks the privilege. RLS *hiding* rows is empty data, not an error |
-| `conflict` | a unique or foreign key constraint rejected the row |
-| `invalid_data` | the values themselves were refused: a check constraint, a `NOT NULL`, a failed cast |
-| `raised` | your own `RAISE` in SQL (`P0001`, `PTxyz`, `PGRST`), with the message you wrote |
-| `unsupported` | not implemented, or not over `query()` |
-| `unavailable` | the database could not be reached, is out of connections, or timed out — retrying may work |
-| `no_context` | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
-| `internal` | anything left: a bug, or an error pg-rest did not foresee. The original is under `cause` |
+| `kind`              | when                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
+| `invalid_payload`   | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write          |
+| `undefined_object`  | no table, view or function by that name — a typo (read the `hint`), or a migration the schema cache has not seen                     |
+| `invalid_embed`     | no relationship between two resources, or more than one, which needs a `hint`                                                        |
+| `not_single_row`    | `single` matched other than exactly one row — both "not found" and "found several"                                                   |
+| `too_many_affected` | the write would have touched more rows than `maxAffected`, and was rolled back                                                       |
+| `unauthenticated`   | no role in the context, or anonymous access disabled                                                                                 |
+| `forbidden`         | the role lacks the privilege. RLS _hiding_ rows is empty data, not an error                                                          |
+| `conflict`          | a unique or foreign key constraint rejected the row                                                                                  |
+| `invalid_data`      | the values themselves were refused: a check constraint, a `NOT NULL`, a failed cast                                                  |
+| `raised`            | your own `RAISE` in SQL (`P0001`, `PTxyz`, `PGRST`), with the message you wrote                                                      |
+| `unsupported`       | not implemented, or not over `query()`                                                                                               |
+| `unavailable`       | the database could not be reached, is out of connections, or timed out — retrying may work                                           |
+| `no_context`        | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once))                                             |
+| `internal`          | anything left: a bug, or an error pg-rest did not foresee. The original is under `cause`                                             |
 
 A later version may map a code onto a kind it did not have before, and new kinds are additive — which is why the
 `default` above matters, and why `code` remains the thing to test when you need the exact reason. The same mapping is
@@ -792,19 +792,19 @@ wording.
 
 The codes behind them, and what you are likely to see:
 
-| code | status | `kind` | when |
-| --- | --- | --- | --- |
-| `PGRST205` | 404 | `undefined_object` | no such table — with a `hint` suggesting the nearest name |
-| `PGRST204` | 400 | `invalid_payload` | no such column in a write payload |
-| `PGRST200` / `PGRST201` | 400 / 300 | `invalid_embed` | no relationship between two resources, or more than one (pass a `hint`) |
-| `PGRST116` | 406 | `not_single_row` | `single` matched something other than exactly one row |
-| `PGRST124` | 400 | `too_many_affected` | `maxAffected` exceeded |
-| `PGRST302` | 401 | `unauthenticated` | no context and anonymous access disabled |
-| `PGRSTX01` | 500 | `no_context` | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
-| `42501` | 401 / 403 | `unauthenticated` / `forbidden` | the role lacks the privilege |
-| `23505` / `23503` | 409 | `conflict` | unique / foreign key violation |
-| `PT4xx` | 4xx | `raised` | your own `RAISE … USING ERRCODE = 'PT404'` |
-| `PGRST001` | 503 | `unavailable` | the database connection failed |
+| code                    | status    | `kind`                          | when                                                                                     |
+| ----------------------- | --------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `PGRST205`              | 404       | `undefined_object`              | no such table — with a `hint` suggesting the nearest name                                |
+| `PGRST204`              | 400       | `invalid_payload`               | no such column in a write payload                                                        |
+| `PGRST200` / `PGRST201` | 400 / 300 | `invalid_embed`                 | no relationship between two resources, or more than one (pass a `hint`)                  |
+| `PGRST116`              | 406       | `not_single_row`                | `single` matched something other than exactly one row                                    |
+| `PGRST124`              | 400       | `too_many_affected`             | `maxAffected` exceeded                                                                   |
+| `PGRST302`              | 401       | `unauthenticated`               | no context and anonymous access disabled                                                 |
+| `PGRSTX01`              | 500       | `no_context`                    | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
+| `42501`                 | 401 / 403 | `unauthenticated` / `forbidden` | the role lacks the privilege                                                             |
+| `23505` / `23503`       | 409       | `conflict`                      | unique / foreign key violation                                                           |
+| `PT4xx`                 | 4xx       | `raised`                        | your own `RAISE … USING ERRCODE = 'PT404'`                                               |
+| `PGRST001`              | 503       | `unavailable`                   | the database connection failed                                                           |
 
 ## What the typed path does not describe
 
@@ -848,28 +848,28 @@ const csv = await pgRest.handle(
 
 ## Every field
 
-| field | meaning |
-| --- | --- |
-| `table` | the relation to read or write. Restricts everything else |
-| `rpc` | the function to call, instead of `table` |
-| `schema` | one of the exposed schemas; optional for the default one, required for the others |
-| `action` | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"` |
-| `select` | columns, `"alias:column"`, `"*"`, and embedded resources |
-| `where` | conditions by column, plus `and` / `or` groups |
-| `order` | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }` |
-| `limit`, `offset` | paging |
-| `single` | one object instead of an array (406 otherwise) |
-| `count` | `"exact"`, `"planned"`, `"estimated"` → `count`. The mode decides its type: see [below](#what-comes-back) |
-| `stripNulls` | leave null fields out of the result |
-| `maxAffected` | refuse and roll back beyond this many affected rows |
-| `timezone` | the time zone the statement runs in |
-| `rows` | the payload of an `insert` or `upsert`: one object or many |
-| `set` | the columns an `update` changes |
-| `onConflict` | the columns an upsert resolves on (default: the primary key) |
-| `columns` | insert only these, whatever else `rows` carries |
-| `missing` | a column absent from `rows`: its `"default"` or `"null"` |
-| `returning` | `"representation"` (the default here) or `"minimal"` |
-| `args` | a function's arguments, by name |
+| field             | meaning                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `table`           | the relation to read or write. Restricts everything else                                                  |
+| `rpc`             | the function to call, instead of `table`                                                                  |
+| `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
+| `action`          | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"`                                  |
+| `select`          | columns, `"alias:column"`, `"*"`, and embedded resources                                                  |
+| `where`           | conditions by column, plus `and` / `or` groups                                                            |
+| `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
+| `limit`, `offset` | paging                                                                                                    |
+| `single`          | one object instead of an array (406 otherwise)                                                            |
+| `count`           | `"exact"`, `"planned"`, `"estimated"` → `count`. The mode decides its type: see [below](#what-comes-back) |
+| `stripNulls`      | leave null fields out of the result                                                                       |
+| `maxAffected`     | refuse and roll back beyond this many affected rows                                                       |
+| `timezone`        | the time zone the statement runs in                                                                       |
+| `rows`            | the payload of an `insert` or `upsert`: one object or many                                                |
+| `set`             | the columns an `update` changes                                                                           |
+| `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
+| `columns`         | insert only these, whatever else `rows` carries                                                           |
+| `missing`         | a column absent from `rows`: its `"default"` or `"null"`                                                  |
+| `returning`       | `"representation"` (the default here) or `"minimal"`                                                      |
+| `args`            | a function's arguments, by name                                                                           |
 
 ### What comes back
 
@@ -879,12 +879,12 @@ was asked for; and the status the same call would have answered over HTTP.
 On a [typed instance](types.md) `count` is typed from the mode the query asked for, which is exactly what the runtime
 answers:
 
-| `count` in the query | `count` in the result | |
-| --- | --- | --- |
-| absent | `undefined` | nothing was counted, so there is nothing to narrow |
-| `"exact"` | `number` | always counted; with no paging to look past, that number is the page's own length |
-| `"estimated"` | `number` | the planner's number above `maxRows`, the exact one below it |
-| `"planned"` | `number \| undefined` | `Plan Rows` out of an `EXPLAIN`, which can come back with nothing usable |
+| `count` in the query | `count` in the result |                                                                                   |
+| -------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| absent               | `undefined`           | nothing was counted, so there is nothing to narrow                                |
+| `"exact"`            | `number`              | always counted; with no paging to look past, that number is the page's own length |
+| `"estimated"`        | `number`              | the planner's number above `maxRows`, the exact one below it                      |
+| `"planned"`          | `number \| undefined` | `Plan Rows` out of an `EXPLAIN`, which can come back with nothing usable          |
 
 An instance created without a type argument keeps `number | undefined` throughout: the input is not a literal, so there
 is no mode to read it from.
