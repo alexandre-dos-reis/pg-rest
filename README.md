@@ -74,8 +74,10 @@ if (error) throw error; // or hand `error.body` and `error.status` to your frame
 // data is narrowed from here on: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
 ```
 
-A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, and `query()` never
-rejects. → [`docs/query.md`](docs/query.md)
+A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, a `summary` written
+out for whoever reads it, and a `kind` — `"conflict"`, `"not_single_row"`, `"forbidden"`… — which is a string union, so
+a `switch` on it is checked by the compiler instead of against a table of error codes. `query()` never rejects.
+→ [`docs/query.md`](docs/query.md)
 
 One command writes the types for your database, and one type argument puts them to work:
 

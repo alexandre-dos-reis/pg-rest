@@ -284,10 +284,51 @@ describe.skipIf(!hasDb)("query()", () => {
         hint: "Perhaps you meant the table 'api.clients'",
       });
       expect(e!.input).toBe(input);
-      // the Error reads for a human; the wire body is untouched
+      // the message stays the one-line summary ApiError builds; the wire body is untouched
       expect(e!.message).toBe(
         "PGRST205: Could not find the table 'api.cients' in the schema cache hint: Perhaps you meant the table 'api.clients'",
       );
+      // and `summary` is the same failure written out -- the call it came from, the reason, the kind
+      expect(e!.kind).toBe("undefined_object");
+      expect(e!.summary).toBe(
+        [
+          `select on "cients" failed: Could not find the table 'api.cients' in the schema cache`,
+          "  hint: Perhaps you meant the table 'api.clients'",
+          "  kind: undefined_object -- no such table, view or function (PGRST205, HTTP 404)",
+        ].join("\n"),
+      );
+    });
+
+    test("every failure also carries a kind, the union a program switches on", async () => {
+      const kindOf = async (input: QueryInput, ctx?: RequestContext) => (await t.api.query(input, ctx)).error?.kind;
+
+      // the query object itself
+      expect(await kindOf({ table: "orders", where: { total: ["nope" as never, 1] } })).toBe("invalid_query");
+      expect(await kindOf({ table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } })).toBe(
+        "invalid_query",
+      );
+      // the schema cache
+      expect(await kindOf({ table: "cients" })).toBe("undefined_object");
+      expect(await kindOf({ rpc: "nope" })).toBe("undefined_object");
+      expect(await kindOf({ table: "clients", action: "insert", rows: { nope: 1 } }, authed())).toBe("invalid_payload");
+      // the response shaping
+      expect(await kindOf({ table: "clients", where: { id: 999 }, single: true })).toBe("not_single_row");
+      expect(
+        await kindOf({ table: "orders", action: "update", set: { status: "paid" }, maxAffected: 0 }, authed()),
+      ).toBe("too_many_affected");
+      // Postgres
+      expect(await kindOf({ table: "clients", action: "delete", where: { id: 1 } })).toBe("unauthenticated");
+      expect(
+        await kindOf({ table: "clients", action: "insert", rows: { name: "dup", email: "ada@example.com" } }, authed()),
+      ).toBe("conflict");
+      expect(await kindOf({ rpc: "boom" }, authed())).toBe("raised");
+    });
+
+    test("the kind of an error the library cannot map, and of a missing context", async () => {
+      const closed = await makeApi({ anonymousRole: false });
+      expect((await closed.api.query({ table: "clients" })).error?.kind).toBe("unauthenticated");
+      expect((await closed.api.setContextQuery(() => undefined)({ table: "clients" })).error?.kind).toBe("no_context");
+      await closed.close();
     });
 
     test("permissions, RLS and database errors keep their PostgREST code", async () => {
