@@ -7,7 +7,8 @@ reference lives in `docs/`.
 
 ## What this is
 
-- Two entry points over **one** pipeline: `handle(Request) => Response` and `query(object) => { data, count, status }`.
+- Two entry points over **one** pipeline: `handle(Request) => Response` and
+  `query(object) => { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
   The object is turned into the query parameters `parseQuery` takes, so parsing, planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
   that pipeline: a feature added to one entry point must come from the shared code, and `tests/query.test.ts` pins that the
@@ -115,8 +116,8 @@ Releases carry provenance, so they are attested to the workflow that built them.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type
   inference. Identifiers go through `src/quote.ts`. Never interpolate request data into SQL. `tests/security.test.ts` covers this; extend it.
 - **Errors.** Throw `ApiError` (status, PostgREST-shaped body, headers). `body` is the wire format and must stay exactly
-  PostgREST's; `Error.message` is a human summary (code, details, hint) and is free to change. `query()` throws a
-  `QueryError` carrying the same body plus the input. Database errors become `DbQueryError` in the adapter and are mapped by
+  PostgREST's; `Error.message` is a human summary (code, details, hint) and is free to change. `query()` returns a
+  `QueryError` carrying the same body plus the input, as the `error` of its result -- it never throws. Database errors become `DbQueryError` in the adapter and are mapped by
   SQLSTATE in `normalizeDbError`. If a new driver reports errors differently, fix it in the adapter or in `normalizeDbError`, not in the core.
 - **Adding an adapter** = implement `DbAdapter` (`query`, `transaction`, optional `close`), add a subpath entry in `tsdown.config.ts` and
   `package.json` `exports`, an optional peer dependency, a test in `tests/agnostic.test.ts`, an `examples/with-*`, and a CI matrix entry.

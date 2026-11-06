@@ -51,7 +51,7 @@ plans, `OPTIONS`, OpenAPI — stay on `handle()`.
 
 | path | |
 | --- | --- |
-| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `querySafe`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
 | `src/core.ts` | routing, content negotiation, planning, the transaction, response building |
 | `src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement` |
@@ -87,8 +87,8 @@ normalised by SQLSTATE from whatever the driver throws. At the boundary, `toApiE
 failures and unexpected errors — to an `ApiError`: a status and a body shaped exactly like PostgREST's
 `{ code, message, details, hint }`.
 
-Then it is only a matter of how it reaches you: `handle()` serialises it into a response, `query()` throws a
-`QueryError` with the input attached, `querySafe()` returns it. One mapping, three deliveries.
+Then it is only a matter of how it reaches you: `handle()` serialises it into a response, `query()` puts a `QueryError`
+with the input attached in the `error` of its result. One mapping, two deliveries — neither of them a rejection.
 
 ## Invariants worth knowing
 

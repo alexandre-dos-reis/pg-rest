@@ -63,14 +63,12 @@ try {
     (await api.query({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
     [{ body: "hi" }],
   );
-  const failed: any = await api.query({ table: "cients" }).catch((e: unknown) => e);
+  const failed: any = await api.query({ table: "cients" });
+  assert.equal(failed.data, null);
   assert.equal(failed.status, 404);
-  assert.equal(failed.body.code, "PGRST205");
-  assert.equal(failed.input.table, "cients");
-  const safe: any = await api.querySafe({ table: "cients" });
-  assert.equal(safe.data, null);
-  assert.equal(safe.error.body.code, "PGRST205");
-  assert.equal((await api.querySafe({ table: "clients", select: ["name"], limit: 1 })).error, null);
+  assert.equal(failed.error.body.code, "PGRST205");
+  assert.equal(failed.error.input.table, "cients");
+  assert.equal(rows.error, null);
 
   // generateTypes, both ways: the method (which loads the generator on demand, from the built
   // chunk) and the standalone subpath. The generated module is plain text, with no imports.

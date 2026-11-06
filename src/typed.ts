@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { FilterOp, QueryResult, QuerySafeResult, Scalar } from "./query";
+import type { CountFrom, FilterOp, QueryResult, Scalar } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -299,6 +299,10 @@ interface Common {
    * Also count the rows the filters match, ignoring `limit`/`offset`, into `count`:
    * `"exact"` counts them, `"planned"` asks the planner, `"estimated"` takes the planner's
    * number only when it is above `maxRows`.
+   *
+   * The mode decides the type of `count`: a `number` for `"exact"` and `"estimated"`,
+   * `number | undefined` for `"planned"` (an `EXPLAIN` can give nothing usable), and `undefined`
+   * when no count is asked for.
    */
   readonly count?: "exact" | "planned" | "estimated";
   /** Leave `null` fields out of the result rather than spelling them out. */
@@ -519,13 +523,13 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
 // ---------------------------------------------------------------------------
 
 /**
- * A {@link PgRestInstance} whose `query` and `querySafe` are typed by a generated database type:
+ * A {@link PgRestInstance} whose `query` is typed by a generated database type:
  * `table` and `rpc` are the ones that exist, `select` and `where` only name real columns and
  * relationships, and `data` is inferred from the `select`.
  *
  * `handle` is unchanged: HTTP requests are strings from outside and cannot be typed.
  */
-export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "querySafe"> {
+export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query"> {
   /**
    * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
    * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`
@@ -535,32 +539,22 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRest
    * level security and privileges work as they do over HTTP. They are the database's business: no
    * type here knows what a role may do.
    *
-   * Failures **throw** a `QueryError` carrying the PostgREST status and body. Use
-   * {@link TypedPgRestInstance.querySafe} to get them as a value instead.
+   * A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and
+   * body, and exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and
+   * `count`. It never rejects.
    *
    * @example
-   * const { data } = await pgRest.query({
+   * const { data, error } = await pgRest.query({
    *   table: "todos",
    *   select: ["id", "title", { tags: ["label"] }],
    *   where: { done: false },
    *   limit: 10,
    * });
+   * if (error) return c.json(error.body, error.status);
    * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
    */
   query<const Q extends TypedQuery<Db>>(
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
-  ): Promise<QueryResult<QueryData<Db, Q>>>;
-  /**
-   * {@link TypedPgRestInstance.query} with the failure as a value: `{ data, error }`, where exactly
-   * one of the two is set, so `if (error)` leaves `data` non-null. It never rejects.
-   *
-   * @example
-   * const { data, error } = await pgRest.querySafe({ table: "todos", select: ["id"] });
-   * if (error) return c.json(error.body, error.status);
-   */
-  querySafe<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-    ctx?: RequestContext,
-  ): Promise<QuerySafeResult<QueryData<Db, Q>>>;
+  ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
 }

@@ -154,9 +154,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
         (await t.api.query({ table: "clients", select: ["id"], where: { or: [{ name: p }, { email: p }] } })).data,
       ).toEqual([]);
       // a column name is an identifier: it is checked against the schema, never interpolated
-      const key = (await t.api.query({ table: "clients", where: { [p]: 1 } }).catch((e: unknown) => e)) as {
-        status: number;
-      };
+      const key = await t.api.query({ table: "clients", where: { [p]: 1 } });
       expect(key.status).toBeGreaterThanOrEqual(400);
       expect(key.status).toBeLessThan(500);
     }

@@ -1,14 +1,7 @@
 import type { DbAdapter } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
-import {
-  type QueryInput,
-  type QueryResult,
-  type QuerySafeResult,
-  runQuery,
-  runQuerySafe,
-  toSafeFailure,
-} from "./query";
+import { type QueryInput, type QueryResult, runQuery, toFailedResult } from "./query";
 import type { SchemaCache } from "./schema";
 import type { GenerateTypesOptions } from "./types";
 import type { AnyDatabase, TypedPgRestInstance } from "./typed";
@@ -29,6 +22,8 @@ export type {
   TypedQuery,
 } from "./typed";
 export type {
+  CountFrom,
+  CountOf,
   DeleteQuery,
   Embed,
   Filter,
@@ -36,10 +31,11 @@ export type {
   FilterSpec,
   InsertQuery,
   Order,
+  QueryFailed,
   QueryInput,
+  QueryOk,
   QueryResult,
   QueryReturning,
-  QuerySafeResult,
   RpcQuery,
   Scalar,
   Select,
@@ -110,19 +106,15 @@ export interface PgRestInstance {
    * Only the HTTP envelope is gone, which is also what it cannot do: content negotiation
    * (CSV, GeoJSON, custom media types), `EXPLAIN` plans and OpenAPI stay on `handle`.
    *
-   * Failures throw a {@link QueryError}: an `Error` carrying the PostgREST status, body
+   * A failure is part of the result, not an exception: `const { data, error } = await
+   * pgRest.query({ table: "todos" })`. Exactly one of the two is set, so `if (error)` leaves
+   * `data` non-null, and `error` is a {@link QueryError} carrying the PostgREST status, body
    * (`code`, `message`, `details`, `hint`) and the input that produced it.
-   */
-  query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
-  /**
-   * {@link PgRestInstance.query} with the failure as a value instead of an exception:
-   * `const { data, error } = await pgRest.querySafe({ table: "todos" })`. Exactly one of the two
-   * is set, so `if (error)` leaves `data` non-null. The error is the same {@link QueryError}.
    *
    * It never rejects: an error the library did not foresee comes back as a 500 `error` carrying the
    * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
    */
-  querySafe<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>>;
+  query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -150,8 +142,7 @@ const UNEXPOSABLE = new Set(["pg_catalog", "information_schema"]);
 export interface CreatePgRest {
   (options: PgRestOptions): Promise<PgRestInstance>;
   /**
-   * With a database type from `generateTypes` (`@adrdp/pg-rest/types`), `query` and `querySafe`
-   * are typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
+   * With a database type from `generateTypes` (`@adrdp/pg-rest/types`), `query` is typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
    * name real columns and relationships, and `data` is inferred from the `select`.
    */
   <Db extends AnyDatabase>(options: PgRestOptions): Promise<TypedPgRestInstance<Db>>;
@@ -213,26 +204,18 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
     return handleSafely({ db: adapter, config, cache: store.current() }, request, context ?? {});
   };
 
-  const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> =>
-    (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
-
-  const querySafe = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QuerySafeResult<T>> => {
+  const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
     try {
-      return (await runQuerySafe(
-        { db: adapter, config, cache: store.current() },
-        input,
-        ctx ?? {},
-      )) as QuerySafeResult<T>;
+      return (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
     } catch (e) {
-      // runQuerySafe does not throw; this covers everything around it, so the promise cannot reject
-      return toSafeFailure(input, e) as QuerySafeResult<T>;
+      // runQuery does not throw; this covers everything around it, so the promise cannot reject
+      return toFailedResult(input, e) as QueryResult<T>;
     }
   };
 
   return {
     handle,
     query,
-    querySafe,
     // Type generation is a build-time job: importing it here would put the generator in the bundle
     // of every server that only serves requests, so it is fetched when it is actually wanted.
     generateTypes: async (forTypes?: GenerateTypesOptions) =>
@@ -246,7 +229,7 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
 /**
  * Create a PostgREST-compatible handler over a Postgres database.
  *
- * `createPgRest<Db>(options)` returns the same instance with `query` and `querySafe` typed by a
+ * `createPgRest<Db>(options)` returns the same instance with `query` typed by a
  * generated database type; the cast is the whole of that difference, since types never reach
  * runtime and the two instances are one object.
  */

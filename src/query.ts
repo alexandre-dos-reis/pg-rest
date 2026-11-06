@@ -172,29 +172,48 @@ export interface RpcQuery extends Common {
 
 export type QueryInput = SelectQuery | InsertQuery | UpdateQuery | DeleteQuery | RpcQuery;
 
-/** What a query returned. `count` is set only when it was asked for. */
-export interface QueryResult<T = unknown> {
+/**
+ * What `count` a query gets back from the `count` it asked for. `"exact"` and `"estimated"` always
+ * answer with a number -- when paging leaves nothing to count, that number is the page's own length.
+ * `"planned"` reads `Plan Rows` out of an `EXPLAIN`, which can come back with nothing usable, so it
+ * stays optional. Asking for no count at all gets none: `undefined`, and not a number to test for.
+ */
+export type CountOf<C> = C extends "exact" | "estimated"
+  ? number
+  : C extends "planned"
+    ? number | undefined
+    : C extends undefined
+      ? undefined
+      : number | undefined;
+
+/** {@link CountOf} read off a query object: a query that never mentions `count` gets none. */
+export type CountFrom<Q> = Q extends { count: infer C } ? CountOf<C> : undefined;
+
+/** The half of a {@link QueryResult} a query that worked answers with. */
+export interface QueryOk<T = unknown, C extends number | undefined = number | undefined> {
   /** The rows, the single object when `single` is set, or `null` when there is no body. */
   readonly data: T;
-  /** Rows matching the filters, ignoring `limit`/`offset`. */
-  readonly count?: number | undefined;
+  /** Rows matching the filters, ignoring `limit`/`offset`; `undefined` unless `count` asked for one. */
+  readonly count: C;
   /** The status the same call would answer with over HTTP (201 after an insert, 204 after a minimal write...). */
   readonly status: number;
+  /** Always `null` here: `if (error)` is what separates the two halves. */
+  readonly error: null;
+}
+
+/** The half a failed query answers with: no data, no count, and the error that explains it. */
+export interface QueryFailed {
+  readonly data: null;
+  readonly count: undefined;
+  readonly status: number;
+  readonly error: QueryError;
 }
 
 /**
- * What a query returned, as a value instead of an exception: exactly one of `data` and `error`
- * is set, so narrowing on `error` leaves `data` non-null.
+ * What a query returned: exactly one of `data` and `error` is set, so `if (error)` leaves `data`
+ * non-null and `count` the type the query asked for (see {@link CountOf}).
  */
-export type QuerySafeResult<T = unknown> =
-  | (QueryResult<T> & { readonly error: null })
-  | {
-      readonly data: null;
-      readonly error: QueryError;
-      readonly count?: undefined;
-      /** The status the failure would have answered with over HTTP. */
-      readonly status: number;
-    };
+export type QueryResult<T = unknown, C extends number | undefined = number | undefined> = QueryOk<T, C> | QueryFailed;
 
 /** A query that failed, with the PostgREST error body and the input that produced it. */
 export class QueryError extends ApiError {
@@ -463,7 +482,7 @@ const totalOf = (range: string | null): number | undefined => {
   return total === undefined || total === "*" ? undefined : Number(total);
 };
 
-const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<QueryResult> => {
+const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
   assertRole(env, ctx);
   if (isRpc(input) && "table" in input) {
     throw bad("A query names either a table or an rpc, not both");
@@ -495,26 +514,29 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Qu
 
 /**
  * Run a query described by an object, in-process. Same parser, same SQL and same errors as
- * {@link handleRequest}: only the HTTP envelope is gone. Throws a {@link QueryError}.
+ * {@link handleRequest}: only the HTTP envelope is gone.
+ *
+ * **This never rejects.** Every failure, including one the library did not foresee, comes back as
+ * the `error` of the result, so a caller that checks it needs no `try`/`catch` at all.
  */
 export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext = {}): Promise<QueryResult> => {
   try {
-    return await run(env, input, ctx);
+    return { ...(await run(env, input, ctx)), error: null };
   } catch (e) {
     const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
     // An unexpected error keeps its stack under `cause`; over HTTP it would only be a 500 body.
     const unexpected = api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError);
-    throw new QueryError(input, api, unexpected ? { cause: e } : undefined);
+    return toFailedResult(input, new QueryError(input, api, unexpected ? { cause: e } : undefined));
   }
 };
 
 /**
- * Turn anything at all into the failed half of a {@link QuerySafeResult}. `runQuery` already maps
- * what it can; whatever it could not is still reported, as the body PostgREST answers a 500 with
- * and the original error under `cause`. Nothing is logged and nothing is dropped: `error` is the
- * only channel, so the caller decides what to do with it.
+ * Turn anything at all into the failed half of a {@link QueryResult}. `runQuery` maps what it can;
+ * whatever it could not still arrives, as the body PostgREST answers a 500 with and the original
+ * error under `cause`. Nothing is logged and nothing is dropped: `error` is the only channel, so
+ * the caller decides what to do with it.
  */
-export const toSafeFailure = (input: QueryInput, e: unknown): QuerySafeResult => {
+export const toFailedResult = (input: QueryInput, e: unknown): QueryFailed => {
   const error =
     e instanceof QueryError
       ? e
@@ -527,21 +549,5 @@ export const toSafeFailure = (input: QueryInput, e: unknown): QuerySafeResult =>
           }),
           { cause: e },
         );
-  return { data: null, error, status: error.status };
-};
-
-/**
- * {@link runQuery} with the failure as a value: `{ data, error }`, where exactly one is set.
- * The error is the same {@link QueryError} the throwing form raises -- this only chooses how it
- * reaches you, which is a matter of taste and of how much of a result you handle in one place.
- *
- * **This never rejects.** Every failure, including one the library did not foresee, comes back as
- * `error`, so a caller that checks it needs no `try`/`catch` at all.
- */
-export const runQuerySafe = async (env: Env, input: QueryInput, ctx: RequestContext = {}): Promise<QuerySafeResult> => {
-  try {
-    return { ...(await runQuery(env, input, ctx)), error: null };
-  } catch (e) {
-    return toSafeFailure(input, e);
-  }
+  return { data: null, count: undefined, status: error.status, error };
 };

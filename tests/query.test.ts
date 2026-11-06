@@ -88,13 +88,13 @@ describe.skipIf(!hasDb)("query()", () => {
    */
   const same = async (input: QueryInput, path: string, ctx = authed()) => {
     const viaHttp = await t.get(path, { ctx, headers: { Prefer: "return=representation" } });
-    const viaObject = await t.api.query(input, ctx).catch((e: unknown) => e);
-    if (viaObject instanceof QueryError) {
-      expect(viaObject.body).toEqual(viaHttp.json());
-      expect(viaObject.status).toBe(viaHttp.status);
-      return viaObject;
+    const viaObject = await t.api.query(input, ctx);
+    if (viaObject.error) {
+      expect(viaObject.error.body).toEqual(viaHttp.json());
+      expect(viaObject.error.status).toBe(viaHttp.status);
+    } else {
+      expect(viaObject.data).toEqual(viaHttp.json());
     }
-    expect((viaObject as { data: unknown }).data).toEqual(viaHttp.json());
     return viaObject;
   };
 
@@ -209,10 +209,11 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("maxAffected refuses a too wide update", async () => {
-      const e = (await t.api
-        .query({ table: "orders", action: "update", set: { status: "x" }, maxAffected: 1 }, authed())
-        .catch((x: unknown) => x)) as QueryError;
-      expect(e.body.code).toBe("PGRST124");
+      const { error } = await t.api.query(
+        { table: "orders", action: "update", set: { status: "x" }, maxAffected: 1 },
+        authed(),
+      );
+      expect(error?.body.code).toBe("PGRST124");
       expect(
         (await t.api.query<Array<{ status: string }>>({ table: "orders", select: ["status"], where: { status: "x" } }))
           .data,
@@ -239,6 +240,7 @@ describe.skipIf(!hasDb)("query()", () => {
         rpc: "req_info",
         single: true,
       });
+      if (r.error) throw r.error;
       expect(r.data.method).toBe("POST");
       expect(r.data.path).toBe("/rpc/req_info");
       expect(r.data.header).toBeNull();
@@ -259,47 +261,49 @@ describe.skipIf(!hasDb)("query()", () => {
         { rpc: "whoami", single: true },
         { role: "authenticated", claims: { sub: "u" }, settings: { "app.tenant": "acme" } },
       );
+      if (r.error) throw r.error;
       expect(r.data.tenant).toBe("acme");
     });
   });
 
   describe("errors", () => {
-    test("a QueryError is an ApiError carrying the PostgREST body and the input", async () => {
+    test("the error is a QueryError carrying the PostgREST body and the input", async () => {
       const input: QueryInput = { table: "cients", select: ["id"] };
-      const e = (await t.api.query(input).catch((x: unknown) => x)) as QueryError;
+      const { data, count, status, error: e } = await t.api.query(input);
+      expect(data).toBeNull();
+      expect(count).toBeUndefined();
+      expect(status).toBe(404);
       expect(e).toBeInstanceOf(QueryError);
       expect(e).toBeInstanceOf(ApiError);
       expect(e).toBeInstanceOf(Error);
-      expect(e.status).toBe(404);
-      expect(e.body).toEqual({
+      expect(e!.body).toEqual({
         code: "PGRST205",
         message: "Could not find the table 'api.cients' in the schema cache",
         details: null,
         hint: "Perhaps you meant the table 'api.clients'",
       });
-      expect(e.input).toBe(input);
-      // the thrown Error reads for a human; the wire body is untouched
-      expect(e.message).toBe(
+      expect(e!.input).toBe(input);
+      // the Error reads for a human; the wire body is untouched
+      expect(e!.message).toBe(
         "PGRST205: Could not find the table 'api.cients' in the schema cache hint: Perhaps you meant the table 'api.clients'",
       );
     });
 
     test("permissions, RLS and database errors keep their PostgREST code", async () => {
-      const denied = (await t.api
-        .query({ table: "clients", action: "insert", rows: { name: "x" } })
-        .catch((x: unknown) => x)) as QueryError;
+      const denied = await t.api.query({ table: "clients", action: "insert", rows: { name: "x" } });
       expect(denied.status).toBe(401);
-      expect(denied.body.code).toBe("42501");
+      expect(denied.error?.body.code).toBe("42501");
 
-      const dup = (await t.api
-        .query({ table: "clients", action: "insert", rows: { name: "dup", email: "ada@example.com" } }, authed())
-        .catch((x: unknown) => x)) as QueryError;
+      const dup = await t.api.query(
+        { table: "clients", action: "insert", rows: { name: "dup", email: "ada@example.com" } },
+        authed(),
+      );
       expect(dup.status).toBe(409);
-      expect(dup.body.code).toBe("23505");
+      expect(dup.error?.body.code).toBe("23505");
 
-      const raised = (await t.api.query({ rpc: "boom" }, authed()).catch((x: unknown) => x)) as QueryError;
+      const raised = await t.api.query({ rpc: "boom" }, authed());
       expect(raised.status).toBe(418);
-      expect(raised.body).toEqual({
+      expect(raised.error?.body).toEqual({
         code: "PT418",
         message: "teapot",
         details: "tip me over",
@@ -308,103 +312,67 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("single with the wrong number of rows, and an undeclared embed", async () => {
-      const none = (await t.api
-        .query({ table: "clients", where: { id: 999 }, single: true })
-        .catch((x: unknown) => x)) as QueryError;
+      const none = await t.api.query({ table: "clients", where: { id: 999 }, single: true });
       expect(none.status).toBe(406);
-      expect(none.body.code).toBe("PGRST116");
+      expect(none.error?.body.code).toBe("PGRST116");
 
-      const embed = (await t.api
-        .query({ table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } })
-        .catch((x: unknown) => x)) as QueryError;
-      expect(embed.body.code).toBe("PGRST108");
+      const embed = await t.api.query({ table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } });
+      expect(embed.error?.body.code).toBe("PGRST108");
     });
 
     test("anonymous access can be disabled", async () => {
       const closed = await makeApi({ anonymousRole: false });
-      const e = (await closed.api.query({ table: "clients" }).catch((x: unknown) => x)) as QueryError;
-      expect(e.status).toBe(401);
-      expect(e.body.code).toBe("PGRST302");
+      const { error } = await closed.api.query({ table: "clients" });
+      expect(error?.status).toBe(401);
+      expect(error?.body.code).toBe("PGRST302");
       await closed.close();
     });
   });
 
-  describe("querySafe()", () => {
-    test("a success carries the same fields as query(), plus error: null", async () => {
-      const { data, error, count, status } = await t.api.querySafe<Array<{ id: number }>>({
+  describe("the result carries the failure", () => {
+    test("a success is error: null, a failure is data: null", async () => {
+      const okq = await t.api.query<Array<{ id: number }>>({
         table: "orders",
         select: ["id"],
         limit: 2,
         order: ["id"],
         count: "exact",
       });
-      expect(error).toBeNull();
-      expect(data).toEqual([{ id: 1 }, { id: 2 }]);
-      expect(count).toBe(4);
-      expect(status).toBe(206);
-    });
+      expect(okq).toEqual({ data: [{ id: 1 }, { id: 2 }], count: 4, status: 206, error: null });
 
-    test("a failure is the value, not an exception, and it is the same QueryError", async () => {
       const input: QueryInput = { table: "cients" };
-      const { data, error, count, status } = await t.api.querySafe(input);
-      expect(data).toBeNull();
-      expect(count).toBeUndefined();
-      expect(status).toBe(404);
-      expect(error).toBeInstanceOf(QueryError);
-      expect(error?.input).toBe(input);
-
-      const thrown = (await t.api.query(input).catch((e: unknown) => e)) as QueryError;
-      expect(error?.body).toEqual(thrown.body);
-      expect(error?.status).toBe(thrown.status);
-      expect(error?.message).toBe(thrown.message);
+      const bad = await t.api.query(input);
+      expect(bad.data).toBeNull();
+      expect(bad.count).toBeUndefined();
+      expect(bad.status).toBe(404);
+      expect(bad.error).toBeInstanceOf(QueryError);
+      expect(bad.error?.input).toBe(input);
     });
 
     test("narrowing on error leaves data usable", async () => {
-      const r = await t.api.querySafe<Array<{ name: string }>>({
-        table: "clients",
-        select: ["name"],
-        where: { id: 1 },
-      });
+      const r = await t.api.query<Array<{ name: string }>>({ table: "clients", select: ["name"], where: { id: 1 } });
       if (r.error) throw r.error;
       // a type error here would fail the typecheck, which is half the point of the shape
       const names: string[] = r.data.map((row) => row.name);
       expect(names).toEqual(["Ada"]);
     });
 
-    test("writes and RLS behave as they do through query()", async () => {
-      const ok = await t.api.querySafe<Array<{ label: string }>>(
-        { table: "things", schema: "v2", action: "insert", rows: { label: "safe" }, select: ["label"] },
-        authed(),
-      );
-      expect(ok.error).toBeNull();
-      expect(ok.data).toEqual([{ label: "safe" }]);
-      expect(ok.status).toBe(201);
-
-      const denied = await t.api.querySafe({ table: "things", schema: "v2", action: "insert", rows: { label: "no" } });
-      expect(denied.data).toBeNull();
-      expect(denied.error?.body.code).toBe("42501");
-    });
-
-    test("query() still throws: neither form changed the other", async () => {
-      expect(t.api.query({ table: "cients" })).rejects.toBeInstanceOf(QueryError);
-    });
-
     test("every kind of failure comes back as error, never as a rejection", async () => {
       // refused by the builder, before any SQL
-      const operator = await t.api.querySafe({ table: "orders", where: { total: ["nope" as never, 1] } });
+      const operator = await t.api.query({ table: "orders", where: { total: ["nope" as never, 1] } });
       expect(operator.error?.body.code).toBe("PGRST100");
       // refused by the schema cache
-      expect((await t.api.querySafe({ table: "clients", select: ["nope"] })).error?.status).toBe(400);
+      expect((await t.api.query({ table: "clients", select: ["nope"] })).error?.status).toBe(400);
       // refused by Postgres (privileges), and by the response shaping
-      expect((await t.api.querySafe({ table: "clients", action: "delete", where: { id: 1 } })).error?.body.code).toBe(
+      expect((await t.api.query({ table: "clients", action: "delete", where: { id: 1 } })).error?.body.code).toBe(
         "42501",
       );
-      expect((await t.api.querySafe({ table: "clients", where: { id: 999 }, single: true })).error?.body.code).toBe(
+      expect((await t.api.query({ table: "clients", where: { id: 999 }, single: true })).error?.body.code).toBe(
         "PGRST116",
       );
       // and the caller check that happens before anything else
       const closed = await makeApi({ anonymousRole: false });
-      expect((await closed.api.querySafe({ table: "clients" })).error?.body.code).toBe("PGRST302");
+      expect((await closed.api.query({ table: "clients" })).error?.body.code).toBe("PGRST302");
       await closed.close();
     });
 
@@ -421,14 +389,12 @@ describe.skipIf(!hasDb)("query()", () => {
       });
       broken = true;
 
-      const r = await api.querySafe({ table: "clients", select: ["id"] });
+      const r = await api.query({ table: "clients", select: ["id"] });
       expect(r.data).toBeNull();
       expect(r.status).toBe(500);
       expect(r.error).toBeInstanceOf(QueryError);
       expect(r.error?.body).toEqual({ code: "PGRSTX00", message: "Internal error", details: null, hint: null });
       expect(r.error?.cause).toBe("boom");
-      // the same call through query() does throw: that is the only difference between the two
-      expect(api.query({ table: "clients" })).rejects.toBeInstanceOf(QueryError);
 
       await api.close();
       await db.drop();
