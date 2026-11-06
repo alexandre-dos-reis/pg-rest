@@ -98,8 +98,8 @@ if (error) throw error;
 // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>, count: number
 ```
 
-They come from the catalog the library itself reads, so what they allow is what it accepts — down to your enums, and to
-which embeds a foreign key actually permits. → [`docs/types.md`](docs/types.md)
+They come from the catalog the library itself reads, so what they allow is what it accepts — down to your enums, the
+fields of your composite types, and which embeds a foreign key actually permits. → [`docs/types.md`](docs/types.md)
 
 ## Documentation
 
@@ -131,7 +131,7 @@ own README, schema and `server.ts`:
 | [`with-generated-types`](examples/with-generated-types) | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
 
 [`with-generated-types`](examples/with-generated-types) is the shortest way to see the typed path: two tables, an enum,
-`bun run gen:types && bun start`.
+a composite type, `bun run gen:types && bun start`.
 
 ## Development
 

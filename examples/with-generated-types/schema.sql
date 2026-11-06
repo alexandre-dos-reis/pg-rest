@@ -10,12 +10,17 @@ GRANT USAGE ON SCHEMA api TO anon;
 
 CREATE TYPE api.priority AS ENUM ('low', 'normal', 'high');
 
+-- A composite type (https://www.postgresql.org/docs/current/rowtypes.html): one value made of
+-- several fields, used below as a column. The generator describes its fields instead of `unknown`.
+CREATE TYPE api.place AS (room text, floor int);
+
 CREATE TABLE api.todos (
   id       bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   title    text NOT NULL,
   done     boolean NOT NULL DEFAULT false,
   priority api.priority NOT NULL DEFAULT 'normal',
-  due      date
+  due      date,
+  at       api.place
 );
 
 CREATE TABLE api.tags (
@@ -31,7 +36,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON api.todos, api.tags TO anon;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA api TO anon;
 GRANT EXECUTE ON FUNCTION api.open_todos() TO anon;
 
-INSERT INTO api.todos (title, done, priority, due) VALUES
-  ('Try pg-rest', false, 'high',   '2026-12-01'),
-  ('Write docs',  true,  'normal', NULL);
+INSERT INTO api.todos (title, done, priority, due, at) VALUES
+  ('Try pg-rest', false, 'high',   '2026-12-01', ROW('Lab', 2)::api.place),
+  ('Write docs',  true,  'normal', NULL,         ROW('Library', -1)::api.place);
 INSERT INTO api.tags (todo_id, label) VALUES (1, 'demo'), (1, 'types');

@@ -1,5 +1,25 @@
 // Generated from the database catalog by @adrdp/pg-rest. Do not edit.
 
+/** The `api.address` composite type. */
+type DatabasePgRestCompositeApiAddress = {
+  city: string | null;
+  zip: string | null;
+};
+
+/** The `api.contact` composite type. */
+type DatabasePgRestCompositeApiContact = {
+  name: string | null;
+  home: DatabasePgRestCompositeApiAddress | null;
+  tags: string[] | null;
+};
+
+/** A composite value being written or compared: any of its fields may be left out. */
+type DatabasePgRestCompositeInput<T> = T extends ReadonlyArray<infer E>
+  ? ReadonlyArray<DatabasePgRestCompositeInput<E>>
+  : T extends object
+    ? { readonly [K in keyof T]?: DatabasePgRestCompositeInput<T[K]> }
+    : T;
+
 type DatabasePgRestApiRelations = {
   big_orders: {
     row: {
@@ -313,6 +333,34 @@ type DatabasePgRestApiRelations = {
       clients: { rel: "clients"; to: "one" };
     };
   };
+  venues: {
+    row: {
+      id: number;
+      label: string;
+      owner: DatabasePgRestCompositeApiContact | null;
+      branches: DatabasePgRestCompositeApiAddress[] | null;
+      meta: unknown;
+    };
+    insert: {
+      id?: number;
+      label: string;
+      owner?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiContact> | null;
+      branches?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiAddress[]> | null;
+      meta?: unknown;
+    };
+    update: {
+      id?: number;
+      label?: string;
+      owner?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiContact> | null;
+      branches?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiAddress[]> | null;
+      meta?: unknown;
+    };
+    pk: ["id"];
+    insertable: true;
+    updatable: true;
+    deletable: true;
+    rel: {};
+  };
 };
 
 type DatabasePgRestApiFunctions = {
@@ -323,6 +371,7 @@ type DatabasePgRestApiFunctions = {
   blob: [{ args: {}; returns: string; set: false }];
   boom: [{ args: {}; returns: null; set: false }];
   cheer_up: [{ args: { m: "sad" | "ok" | "happy" }; returns: "sad" | "ok" | "happy"; set: false }];
+  city_of: [{ args: { who: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiContact> }; returns: string; set: false }];
   client_summary: [{ args: { cid: number }; returns: Record<string, unknown>; set: true }];
   clients_fin: [{ args: { state: string }; returns: unknown; set: false }];
   clients_txt_t: [{ args: { state: string; c: unknown }; returns: string; set: false }];
@@ -332,6 +381,7 @@ type DatabasePgRestApiFunctions = {
   greet: [{ args: { name?: string }; returns: string; set: false }];
   hello: [{ args: {}; returns: string; set: false }];
   join_all: [{ args: { sep: string; parts: string[] }; returns: string; set: false }];
+  make_address: [{ args: { city: string; zip: string }; returns: DatabasePgRestCompositeApiAddress; set: false }];
   nothing: [{ args: {}; returns: null; set: false }];
   nums: [{ args: {}; returns: number; set: true }];
   nums_plain: [{ args: {}; returns: unknown; set: true }];

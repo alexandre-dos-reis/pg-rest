@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { generateTypes } from "../src/types";
 import { createPgRest } from "../src/index";
-import { introspect, type Column, type Relation, type SchemaCache } from "../src/schema";
+import { introspect, type Column, type CompositeType, type Relation, type SchemaCache } from "../src/schema";
 import { createTestDb, hasDb, requirePostgis, type TestDb } from "./support/db";
 
 const column = (name: string, type: string, extra: Partial<Column> = {}): Column => ({
@@ -30,12 +30,13 @@ const relation = (name: string, columns: Column[], extra: Partial<Relation> = {}
   ...extra,
 });
 
-const cacheOf = (relations: Relation[]): SchemaCache => ({
+const cacheOf = (relations: Relation[], composites: CompositeType[] = []): SchemaCache => ({
   schemas: ["api"],
   relations: new Map(relations.map((r) => [`api.${r.name}`, r])),
   foreignKeys: [],
   functions: new Map(),
   mediaHandlers: [],
+  composites: new Map(composites.map((c) => [`${c.schema}.${c.name}`, c])),
 });
 
 describe("generateTypes", () => {
@@ -148,7 +149,7 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
     expect(await api.generateTypes({ name: "DatabasePgRest" })).toBe(generateTypes(cache, { name: "DatabasePgRest" }));
     // the options are the generator's own
     expect(await api.generateTypes()).toContain("export type Database = {");
-    expect(await api.generateTypes({ header: false })).toStartWith("type DatabaseApiRelations");
+    expect(await api.generateTypes({ header: false })).not.toStartWith("//");
     await api.close();
   });
 

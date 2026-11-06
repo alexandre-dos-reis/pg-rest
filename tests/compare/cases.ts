@@ -50,6 +50,16 @@ const allCases: Case[] = [
   get("/clients?select=id::text&order=id"),
   get("/clients?select=meta->tier,meta->>tier,meta->address->>city&order=id"),
   get("/clients?select=id&meta->>tier=eq.gold"),
+  // Composite columns take the same arrow operators as json: PostgREST converts anything that is
+  // not json/jsonb with `to_jsonb()` first (see src/sql/filters.ts).
+  get("/venues?select=id,owner->>name,owner->home->>city,owner->home,owner->tags->>0&order=id"),
+  get("/venues?select=id,branches->0->>city,branches->1&order=id"),
+  get("/venues?select=id&owner->>name=eq.Ada"),
+  get("/venues?select=id&owner->home->>city=eq.Lyon"),
+  get("/venues?select=id,owner->>name&order=owner->>name.desc"),
+  get("/venues?select=id,label::text,owner::text&order=id"),
+  // An `int` has no fields, and asking for one is not an error: it answers null, like PostgREST.
+  get("/venues?select=id,id->>nope&order=id"),
   get("/clients?select=id&name=like.*a*&order=id"),
   get("/clients?select=id&name=ilike.*A*&order=id"),
   get("/clients?select=id&name=in.(Ada,Grace)&order=id"),

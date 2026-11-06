@@ -1,7 +1,7 @@
 # pg-rest with generated types
 
-The smallest example there is: no server, no HTTP, no auth. Two tables, an enum and a function, and queries that
-**check themselves** against types generated from the database. This folder is self-contained: copy it anywhere.
+The smallest example there is: no server, no HTTP, no auth. Two tables, an enum, a composite type and a function, and
+queries that **check themselves** against types generated from the database. This folder is self-contained: copy it anywhere.
 
 ```sh
 bun install
@@ -72,14 +72,18 @@ Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Ar
 
 ## What the generated file looks like
 
-67 lines for this schema, with no imports. The enum became a union, `id` is absent from `insert` because
-`GENERATED ALWAYS AS IDENTITY` refuses a value, `title` is required and the columns with a default are optional:
+83 lines for this schema, with no imports. The enum became a union, the composite type a named object type, `id` is
+absent from `insert` because `GENERATED ALWAYS AS IDENTITY` refuses a value, `title` is required and the columns with a
+default are optional:
 
 ```ts
+/** The `api.place` composite type. */
+type DatabasePgRestCompositeApiPlace = { room: string | null; floor: number | null };
+
 type DatabasePgRestApiRelations = {
   todos: {
-    row: { id: number; title: string; done: boolean; priority: "low" | "normal" | "high"; due: string | null };
-    insert: { title: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
+    row: { id: number; title: string; /* … */ at: DatabasePgRestCompositeApiPlace | null };
+    insert: { title: string; done?: boolean; /* … */ at?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiPlace> | null };
     update: { title?: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
     pk: ["id"];
     insertable: true;
@@ -117,6 +121,9 @@ void pgRest.query({ table: "todos", where: { priority: "urgent" } });
 
 // @ts-expect-error `id` is generated: it cannot be written
 void pgRest.query({ table: "todos", action: "insert", rows: { id: 42, title: "nope" } });
+
+// @ts-expect-error `floor` is an int -- the fields of a composite type are checked like any other value
+void pgRest.query({ table: "todos", where: { at: { floor: "2" } } });
 
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
 void pgRest.query({ table: "todos", select: ["id"], limitt: 10 });

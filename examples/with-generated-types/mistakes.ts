@@ -30,5 +30,11 @@ void pgRest.query({ table: "todos", order: ["dew.desc"] });
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
 void pgRest.query({ table: "todos", select: ["id"], limitt: 10 });
 
+// @ts-expect-error `floor` is an int: a field of a composite type is checked like any other value
+void pgRest.query({ table: "todos", where: { at: { floor: "2" } } });
+
+// @ts-expect-error api.place has no `building` field
+void pgRest.query({ table: "todos", action: "insert", rows: { title: "x", at: { building: "A" } } });
+
 // @ts-expect-error no such function
 void pgRest.query({ rpc: "closed_todos" });

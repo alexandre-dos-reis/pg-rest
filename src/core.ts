@@ -1,6 +1,7 @@
 import type { DbAdapter, DbSession } from "./adapter";
 import { DbQueryError, PgRestError } from "./errors";
 import { parseQuery, type ParsedQuery } from "./parse/filter";
+import { OPERATORS_ORDER } from "./parse/syntax";
 import {
   type Method,
   type OutputFormat,
@@ -640,10 +641,11 @@ export const planTable = (
 // ---------------------------------------------------------------------------
 
 /** A query-string value in the filter syntax (`eq.5`, `not.in.(1,2)`, `like(any).{a*}`), not a plain argument. */
-const looksLikeFilter = (v: string): boolean =>
-  /^(not\.)?(eq|neq|gt|gte|lt|lte|like|ilike|match|imatch|in|is|isdistinct|cs|cd|ov|sl|sr|nxl|nxr|adj|fts|plfts|phfts|wfts)(\([a-z]+\))?\./.test(
-    v,
-  );
+const FILTER_VALUE = new RegExp(`^(not\\.)?(${OPERATORS_ORDER.join("|")})(\\([a-z]+\\))?\\.`);
+const looksLikeFilter = (v: string): boolean => FILTER_VALUE.test(v);
+
+/** Query parameters that are never a function argument. */
+const RESERVED = new Set(["select", "order", "limit", "offset", "and", "or", "columns", "on_conflict"]);
 
 export const planRpc = (
   env: Env,
@@ -659,7 +661,6 @@ export const planRpc = (
   if (method !== "GET" && method !== "HEAD" && method !== "POST") {
     throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
   }
-  const RESERVED = new Set(["select", "order", "limit", "offset", "and", "or", "columns", "on_conflict"]);
 
   let argValues: Record<string, unknown> = {};
   let nonObjectBody = false;

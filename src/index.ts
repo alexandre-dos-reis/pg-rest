@@ -32,6 +32,7 @@ export type {
   TypedQuery,
 } from "./typed";
 export type {
+  CompositeValue,
   ContextQuery,
   ContextSource,
   CountFrom,
@@ -41,6 +42,7 @@ export type {
   Filter,
   FilterOp,
   FilterSpec,
+  FilterValue,
   InsertQuery,
   Order,
   QueryFailed,
@@ -55,7 +57,16 @@ export type {
   UpdateQuery,
   Where,
 } from "./query";
-export type { Column, ForeignKey, FunctionDef, Relation, SchemaCache } from "./schema";
+export type {
+  Column,
+  CompositeAttribute,
+  CompositeRef,
+  CompositeType,
+  ForeignKey,
+  FunctionDef,
+  Relation,
+  SchemaCache,
+} from "./schema";
 export { SchemaLoadError } from "./service";
 
 export interface PgRestOptions {

@@ -99,6 +99,32 @@ describe.skipIf(!hasDb)("the PostgREST clients", () => {
       expect(rows.data).toEqual([{ total: 99.99 }, { total: 250 }]);
     });
 
+    test("composite columns: the object comes back, and the arrow forms go out", async () => {
+      // `select("owner->>name")` is what a client sends for a field of a composite column; the
+      // whole column arrives as the nested object Postgres returns
+      const whole = await supabase().from("venues").select("label,owner").eq("id", 1).single();
+      expect(whole.data).toEqual({
+        label: "Concert hall",
+        owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music", "large"] },
+      });
+      const field = await supabase().from("venues").select("id,owner->>name,owner->home->>city").order("id");
+      expect(field.data).toEqual([
+        { id: 1, name: "Ada", city: "Paris" },
+        { id: 2, name: "Grace", city: "Lyon" },
+      ]);
+      expect((await supabase().from("venues").select("id").eq("owner->>name", "Grace")).data).toEqual([{ id: 2 }]);
+
+      // and a write carries the nested object, as it does for json
+      const client = supabase(authed());
+      const inserted = await client
+        .from("venues")
+        .insert({ label: "Client hall", owner: { name: "Barbara", home: { city: "Brussels" } } })
+        .select("label,owner->>name,owner->home->>city")
+        .single();
+      expect(inserted.data).toEqual({ label: "Client hall", name: "Barbara", city: "Brussels" });
+      await client.from("venues").delete().eq("label", "Client hall");
+    });
+
     test("another schema, and csv", async () => {
       const v2 = await supabase().schema("v2").from("things").select("label").order("id");
       expect(v2.data).toEqual([{ label: "one" }, { label: "two" }]);

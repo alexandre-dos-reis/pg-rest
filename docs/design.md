@@ -46,6 +46,10 @@ The same trade reversed: because it runs inside your process, it can do things a
   webhooks. → [`query.md`](query.md)
 - **Types from your own catalog.** `generateTypes()` reads the cache the library already holds, so the types describe
   exactly what it accepts. → [`types.md`](types.md)
+- **Composite values as objects.** `where: { owner: { city: "Paris" } }` compares a
+  [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
+  PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.
+  The one deliberate departure from parity, marked ➕ in [`PARITY.md`](../PARITY.md). → [`query.md`](query.md#composite-types)
 - **Your auth, not a scheme.** `resolveContext` is a function, so "who is the caller" can be anything your application
   already knows.
 - **One process, one pool.** Your app and the REST layer share a driver, a transaction discipline and a deployment.

@@ -2,6 +2,25 @@ import type { Column, FunctionDef, Relation, SchemaCache } from "./schema";
 
 type Json = Record<string, unknown>;
 
+/** The media types the document advertises. RPC paths cannot answer CSV, so they list the first three. */
+const MEDIA_TYPES = [
+  "application/json",
+  "application/vnd.pgrst.object+json;nulls=stripped",
+  "application/vnd.pgrst.object+json",
+  "text/csv",
+] as const;
+const RPC_MEDIA_TYPES = MEDIA_TYPES.slice(0, 3);
+
+/** A `Prefer` header parameter, with the preferences it accepts. */
+const preferParam = (values: ReadonlyArray<string>): Json => ({
+  name: "Prefer",
+  description: "Preference",
+  required: false,
+  in: "header",
+  type: "string",
+  enum: values,
+});
+
 /** Map a Postgres `format_type` string to an OpenAPI 2.0 schema fragment. */
 export const pgTypeToOpenApi = (pgType: string): Json => {
   const t = pgType.trim();
@@ -85,36 +104,15 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const parameters: Json = {
-    preferReturn: {
-      name: "Prefer",
-      description: "Preference",
-      required: false,
-      in: "header",
-      type: "string",
-      enum: ["return=representation", "return=minimal", "return=headers-only"],
-    },
-    preferCount: {
-      name: "Prefer",
-      description: "Preference",
-      required: false,
-      in: "header",
-      type: "string",
-      enum: ["count=none"],
-    },
-    preferPost: {
-      name: "Prefer",
-      description: "Preference",
-      required: false,
-      in: "header",
-      type: "string",
-      enum: [
-        "return=representation",
-        "return=minimal",
-        "return=headers-only",
-        "resolution=ignore-duplicates",
-        "resolution=merge-duplicates",
-      ],
-    },
+    preferReturn: preferParam(["return=representation", "return=minimal", "return=headers-only"]),
+    preferCount: preferParam(["count=none"]),
+    preferPost: preferParam([
+      "return=representation",
+      "return=minimal",
+      "return=headers-only",
+      "resolution=ignore-duplicates",
+      "resolution=merge-duplicates",
+    ]),
     select: { name: "select", description: "Filtering Columns", required: false, in: "query", type: "string" },
     on_conflict: { name: "on_conflict", description: "On Conflict", required: false, in: "query", type: "string" },
     order: { name: "order", description: "Ordering", required: false, in: "query", type: "string" },
@@ -237,18 +235,8 @@ export const buildOpenApi = (cache: SchemaCache, schema: string, opts: OpenApiOp
     host,
     basePath: opts.basePath || "/",
     schemes: [scheme],
-    consumes: [
-      "application/json",
-      "application/vnd.pgrst.object+json;nulls=stripped",
-      "application/vnd.pgrst.object+json",
-      "text/csv",
-    ],
-    produces: [
-      "application/json",
-      "application/vnd.pgrst.object+json;nulls=stripped",
-      "application/vnd.pgrst.object+json",
-      "text/csv",
-    ],
+    consumes: MEDIA_TYPES,
+    produces: MEDIA_TYPES,
     paths,
     definitions,
     parameters,
@@ -266,11 +254,7 @@ const rpcPath = (fn: FunctionDef): Json => {
   }
   const post: Json = {
     tags: [`(rpc) ${fn.name}`],
-    produces: [
-      "application/json",
-      "application/vnd.pgrst.object+json;nulls=stripped",
-      "application/vnd.pgrst.object+json",
-    ],
+    produces: RPC_MEDIA_TYPES,
     parameters: [
       {
         name: "args",
@@ -287,11 +271,7 @@ const rpcPath = (fn: FunctionDef): Json => {
   if (fn.volatility !== "volatile") {
     path["get"] = {
       tags: [`(rpc) ${fn.name}`],
-      produces: [
-        "application/json",
-        "application/vnd.pgrst.object+json;nulls=stripped",
-        "application/vnd.pgrst.object+json",
-      ],
+      produces: RPC_MEDIA_TYPES,
       parameters: fn.args
         .filter((a) => a.name)
         .map((a) => ({ name: a.name, required: !a.hasDefault, in: "query", ...pgTypeToOpenApi(a.type) })),

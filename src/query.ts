@@ -11,6 +11,8 @@ import {
   useSchema,
 } from "./core";
 import { ApiError, PgRestError } from "./errors";
+import type { Operator } from "./parse/filter";
+import { OPERATORS_ORDER } from "./parse/syntax";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
 import { toApiError } from "./service";
 import type { JsonObject } from "./sql/write";
@@ -22,38 +24,32 @@ import type { JsonObject } from "./sql/write";
 /** A value a filter compares against. */
 export type Scalar = string | number | boolean | null;
 
-/** The PostgREST filter operators (https://docs.postgrest.org/en/v16/references/api/tables_views.html#operators). */
-export type FilterOp =
-  | "eq"
-  | "neq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "like"
-  | "ilike"
-  | "match"
-  | "imatch"
-  | "in"
-  | "is"
-  | "isdistinct"
-  | "fts"
-  | "plfts"
-  | "phfts"
-  | "wfts"
-  | "cs"
-  | "cd"
-  | "ov"
-  | "sl"
-  | "sr"
-  | "nxl"
-  | "nxr"
-  | "adj";
+/**
+ * A value of a [composite type](https://www.postgresql.org/docs/current/rowtypes.html): its fields
+ * by name, nested composites and arrays included. It travels as JSON and is turned into a row of
+ * the column's own type, so the fields may come in any order and a missing one is NULL.
+ *
+ * An object is read as a composite value only when it has no `op` key -- that is what tells it from
+ * a {@link FilterSpec}. A composite type with a field actually named `op` therefore cannot use this
+ * form; pass the JSON yourself, as a string: `{ item: '{"op":"and","name":"sock"}' }`.
+ */
+export interface CompositeValue {
+  readonly [field: string]: Scalar | CompositeValue | ReadonlyArray<Scalar | CompositeValue> | undefined;
+}
+
+/** What an operator compares a column against. */
+export type FilterValue = Scalar | CompositeValue;
+
+/**
+ * The PostgREST filter operators (https://docs.postgrest.org/en/v16/references/api/tables_views.html#operators).
+ * The same type the parser works with, from the one list in `parse/syntax.ts`.
+ */
+export type FilterOp = Operator;
 
 /** An operator with its modifiers: `not.`, a quantifier (`eq(any)`) or a text-search config (`fts(english)`). */
 export interface FilterSpec {
   readonly op: FilterOp;
-  readonly value?: Scalar | ReadonlyArray<Scalar> | undefined;
+  readonly value?: FilterValue | ReadonlyArray<FilterValue> | undefined;
   /** Invert the operator (`not.eq.1`). */
   readonly not?: boolean | undefined;
   /** Apply the operator to every element of an array column (`eq(any)`). */
@@ -64,9 +60,14 @@ export interface FilterSpec {
 
 /**
  * One condition. A plain value means `eq` (and `null` means `is.null`); a tuple is
- * `[operator, value]`; the object form adds the modifiers.
+ * `[operator, value]`; the object form adds the modifiers. An object without an `op` key is a
+ * {@link CompositeValue} compared with `eq`.
  */
-export type Filter = Scalar | readonly [FilterOp, Scalar | ReadonlyArray<Scalar>] | FilterSpec;
+export type Filter =
+  | Scalar
+  | CompositeValue
+  | readonly [FilterOp, FilterValue | ReadonlyArray<FilterValue>]
+  | FilterSpec;
 
 /**
  * Conditions on columns, ANDed together, plus the reserved keys `and` and `or` which
@@ -89,8 +90,19 @@ export type Order =
 /** Columns to return. A string is a column (`"id"`, `"name->>first"`, `"total::text"`, `"label:name"`). */
 export type Select = ReadonlyArray<string | { readonly [relation: string]: Select | Embed }>;
 
+/**
+ * The filters, order and paging one node of a query takes: its root, and every embedded resource.
+ * They are rendered by the same code, prefixed with the node's dotted path.
+ */
+export interface NodeFields {
+  readonly where?: Where | undefined;
+  readonly order?: ReadonlyArray<Order> | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
 /** An embedded resource, with its own columns, filters, order and paging. */
-export interface Embed {
+export interface Embed extends NodeFields {
   readonly select?: Select | undefined;
   /** Drop parent rows that have no match (`!inner`). */
   readonly inner?: boolean | undefined;
@@ -100,23 +112,15 @@ export interface Embed {
   readonly hint?: string | undefined;
   /** Rename the resource in the output (`client:clients(*)`). */
   readonly as?: string | undefined;
-  readonly where?: Where | undefined;
-  readonly order?: ReadonlyArray<Order> | undefined;
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
 }
 
 /** What a write returns: the affected rows, or nothing. */
 export type QueryReturning = "representation" | "minimal";
 
-interface Common {
+interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
   readonly select?: Select | undefined;
-  readonly where?: Where | undefined;
-  readonly order?: ReadonlyArray<Order> | undefined;
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
   /** Return one object instead of an array. 0 or 2+ rows is a 406 `PGRST116`, like `vnd.pgrst.object+json`. */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
@@ -232,33 +236,7 @@ export class QueryError extends ApiError {
 // input -> query parameters
 // ---------------------------------------------------------------------------
 
-const OPS: ReadonlySet<string> = new Set<FilterOp>([
-  "eq",
-  "neq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "like",
-  "ilike",
-  "match",
-  "imatch",
-  "in",
-  "is",
-  "isdistinct",
-  "fts",
-  "plfts",
-  "phfts",
-  "wfts",
-  "cs",
-  "cd",
-  "ov",
-  "sl",
-  "sr",
-  "nxl",
-  "nxr",
-  "adj",
-]);
+const OPS: ReadonlySet<string> = new Set<FilterOp>(OPERATORS_ORDER);
 
 /** Inside a list or a logic tree these read as something other than text, so such a string is quoted. */
 const KEYWORDS: ReadonlySet<string> = new Set(["null", "true", "false", "unknown"]);
@@ -272,8 +250,10 @@ const bad = (message: string, hint?: string): PgRestError =>
  * only a *delimited* context (a list or a logic tree, where `,` `)` and `.` separate)
  * needs quoting. `tests/compare` pins both against PostgREST.
  */
-const lit = (v: Scalar | undefined, delimited: boolean): string => {
+const lit = (v: FilterValue | undefined, delimited: boolean): string => {
   if (v === undefined || v === null) return "null";
+  // a composite value travels as JSON, which `valueSql` turns into a row of the column's type
+  if (typeof v === "object") return lit(JSON.stringify(v), delimited);
   if (typeof v !== "string") return String(v);
   if (!delimited) return v;
   const quote = v === "" || KEYWORDS.has(v.toLowerCase()) || /[,()[\]{}".\\]/.test(v) || /^\s|\s$/.test(v);
@@ -281,7 +261,7 @@ const lit = (v: Scalar | undefined, delimited: boolean): string => {
 };
 
 /** Array values are a list for `in` and a PostgreSQL array literal for the containment operators. */
-const listOf = (op: FilterOp, values: ReadonlyArray<Scalar>): string => {
+const listOf = (op: FilterOp, values: ReadonlyArray<FilterValue>): string => {
   const items = values.map((v) => lit(v, true)).join(",");
   return op === "in" ? `(${items})` : `{${items}}`;
 };
@@ -289,15 +269,17 @@ const listOf = (op: FilterOp, values: ReadonlyArray<Scalar>): string => {
 const toSpec = (column: string, f: Filter): FilterSpec => {
   if (f === null || typeof f !== "object") return { op: "eq", value: f };
   if (Array.isArray(f)) {
-    const [op, value] = f as readonly [FilterOp, Scalar | ReadonlyArray<Scalar>];
+    const [op, value] = f as readonly [FilterOp, FilterValue | ReadonlyArray<FilterValue>];
     if (typeof op !== "string" || !OPS.has(op)) {
       throw bad(
         `Unknown filter operator '${String(op)}' on '${column}'`,
         "A filter is a value, a [operator, value] tuple or { op, value }",
       );
     }
-    return { op, value: value as Scalar };
+    return { op, value };
   }
+  // an object that does not name an operator is a composite value, compared with `eq`
+  if (!("op" in f)) return { op: "eq", value: f as CompositeValue };
   const spec = f as FilterSpec;
   if (!OPS.has(spec.op)) throw bad(`Unknown filter operator '${String(spec.op)}' on '${column}'`);
   if (spec.quantifier && spec.config) {
@@ -316,8 +298,8 @@ const renderFilter = (column: string, f: Filter, delimited: boolean): string => 
   const modifier = spec.quantifier ?? spec.config;
   const op = `${spec.not ? "not." : ""}${spec.op}${modifier ? `(${modifier})` : ""}`;
   const value = Array.isArray(spec.value)
-    ? listOf(spec.op, spec.value as ReadonlyArray<Scalar>)
-    : lit(spec.value as Scalar | undefined, delimited);
+    ? listOf(spec.op, spec.value as ReadonlyArray<FilterValue>)
+    : lit(spec.value as FilterValue | undefined, delimited);
   return `${op}.${value}`;
 };
 
@@ -350,16 +332,7 @@ const renderOrder = (o: Order): string => {
 type Params = Array<[string, string]>;
 
 /** `where`, `order`, `limit` and `offset` of one node, prefixed with its dotted path. */
-const pushNode = (
-  node: {
-    readonly where?: Where | undefined;
-    readonly order?: ReadonlyArray<Order> | undefined;
-    readonly limit?: number | undefined;
-    readonly offset?: number | undefined;
-  },
-  path: ReadonlyArray<string>,
-  out: Params,
-): void => {
+const pushNode = (node: NodeFields, path: ReadonlyArray<string>, out: Params): void => {
   const at = path.length ? `${path.join(".")}.` : "";
   for (const [key, value] of Object.entries(node.where ?? {})) {
     if (value === undefined) continue;

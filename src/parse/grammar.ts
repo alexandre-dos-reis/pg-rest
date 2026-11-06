@@ -35,6 +35,7 @@ import {
   zero,
 } from "./parsec";
 import { PgRestError } from "../errors";
+import { FTS_ORDER, IS_VALUES_ORDER, QUANTIFIABLE_ORDER, SINGLE_VALUE_ORDER } from "./syntax";
 
 const ws = many(oneOf(" \t"));
 const lexeme = <T>(p: P<T>): P<T> => before(after(ws, p), ws);
@@ -155,25 +156,10 @@ const seq = <T>(ps: P<T>[]): P<T[]> =>
 const listElement = alt(tryP(before(quotedValue, notFollowedBy(noneOf(",)")))), map(many(noneOf(",)")), join));
 const listVal = before(after(lexeme(char("(")), sepBy1(listElement, char(","))), lexeme(char(")")));
 
-const isVal = label(
-  alt(
-    tryP(ciString("null")),
-    tryP(ciString("not_null")),
-    tryP(ciString("true")),
-    tryP(ciString("false")),
-    tryP(ciString("unknown")),
-  ),
-  "isVal: (null, not_null, true, false, unknown)",
-);
+const isVal = label(alt(...IS_VALUES_ORDER.map((v) => tryP(ciString(v)))), `isVal: (${IS_VALUES_ORDER.join(", ")})`);
 
-const simpleOperator = label(
-  alt(...["neq", "cs", "cd", "ov", "sl", "sr", "nxr", "nxl", "adj"].map((o) => tryP(string(o)))),
-  "unknown single value operator",
-);
-const quantOperator = label(
-  alt(...["eq", "gte", "gt", "lte", "lt", "like", "ilike", "match", "imatch"].map((o) => tryP(string(o)))),
-  "unknown single value operator",
-);
+const simpleOperator = label(alt(...SINGLE_VALUE_ORDER.map((o) => tryP(string(o)))), "unknown single value operator");
+const quantOperator = label(alt(...QUANTIFIABLE_ORDER.map((o) => tryP(string(o)))), "unknown single value operator");
 
 const opExpr = (singleVal: P<unknown>): P<unknown> => {
   const pIn = after(tryP(after(string("in"), delimiter)), listVal);
@@ -186,7 +172,7 @@ const opExpr = (singleVal: P<unknown>): P<unknown> => {
       after(delimiter, singleVal),
     ),
   );
-  const pFts = bind(alt(...["fts", "plfts", "phfts", "wfts"].map((o) => tryP(string(o)))), () =>
+  const pFts = bind(alt(...FTS_ORDER.map((o) => tryP(string(o)))), () =>
     after(optionMaybe(tryP(between(char("("), char(")"), identifier))), after(delimiter, singleVal)),
   );
   const operation = label(alt(pIn, pIs, pIsDist, tryP(pFts), tryP(pSimple), tryP(pQuant)), "operator (eq, gt, ...)");
