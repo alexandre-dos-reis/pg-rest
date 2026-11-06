@@ -1,6 +1,6 @@
 {
   "name": "@adrdp/pg-rest",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) — no JWT required.",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
