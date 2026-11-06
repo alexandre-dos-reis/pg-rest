@@ -116,6 +116,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 | [`docs/security.md`](docs/security.md)         | the role and RLS model, and how request values reach SQL          |
 | [`docs/performance.md`](docs/performance.md)   | measured against PostgREST 16, and which runtime to pick          |
 | [`docs/development.md`](docs/development.md)   | running the tests, the examples and the differential suite        |
+| [`docs/proposals.md`](docs/proposals.md)       | four additions under consideration, and what each would cost      |
 | [`PARITY.md`](PARITY.md)                       | PostgREST v16 feature by feature                                  |
 
 ## Examples

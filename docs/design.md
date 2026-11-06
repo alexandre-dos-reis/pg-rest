@@ -58,6 +58,10 @@ Both entry points converge on one pipeline on purpose; what that looks like is i
 
 ## What is simply not done yet
 
+Additions being weighed rather than planned — a transaction across several `query()` calls, observability hooks,
+guardrails for an exposed surface, a debug mode — are written out, with their cost, in
+[`proposals.md`](proposals.md).
+
 A handful of things are missing rather than refused — `PATCH`/`PUT` on a function's result, a few representation and
 header details. [`PARITY.md`](../PARITY.md) marks them ❌, as opposed to ➖ for the list above, and the differential test
 against the real PostgREST 16 binary is what keeps that table honest.
