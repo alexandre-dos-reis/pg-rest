@@ -16,9 +16,23 @@ check() { # description, expected, actual
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected [$2] got [$3]"; fail=1; fi
 }
 
-# An example without a server is a pair of scripts: generate the types, then use them.
+# An example without a server is a script, and what it prints is what its README promises.
 if [ ! -f server.ts ]; then
   fail=0
+  if [ ! -f gen-types.ts ]; then
+    tsc_out="$(bun run typecheck 2>&1)" || { echo "FAIL typecheck:"; echo "$tsc_out"; exit 1; }
+    check "it compiles" 0 $?
+    out="$(bun start 2>&1)"
+    line() { echo "$out" | grep "^$1 " || true; }
+    check "a transaction commits" "1 committed ledger #1 -> alice-main 60, bob-main 140" "$(line 1)"
+    check "an overdraft rolls the scope back" "2 refused 23514 invalid_data -> alice-main 60, bob-main 140" "$(line 2)"
+    check "the claims apply to the whole scope" "3 rls 42501 forbidden -> alice-main 60, bob-main 140" "$(line 3)"
+    check "a savepoint undoes one transfer, not the batch" "4 batch kept 2 refused b (23514) -> alice-main 75, bob-main 125" "$(line 4)"
+    check "rollback() leaves nothing behind" "5 dry run PGRSTX02 ledger 3 -> 3" "$(line 5)"
+    check "a read-only serializable snapshot" "6 report held 200 moved 55" "$(line 6)"
+    check "no ambient context is refused before the BEGIN" "7 no context PGRSTX01 no_context" "$(line 7)"
+    exit $fail
+  fi
   bun run gen:types >/dev/null
   # the generated file is committed, so the generator's output for this schema is pinned here
   # (only that file: the rest of the example may legitimately differ in a working tree)

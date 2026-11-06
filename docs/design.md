@@ -50,6 +50,9 @@ The same trade reversed: because it runs inside your process, it can do things a
   [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
   PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.
   The one deliberate departure from parity, marked ➕ in [`PARITY.md`](../PARITY.md). → [`query.md`](query.md#composite-types)
+- **Several queries, one transaction.** `transaction(fn, ctx)` lends a transaction to a callback, with the context
+  applied once for all of it: two writes that must land together stay inside the library instead of beside it. A server
+  cannot offer that, because the scope is a scope of *your* code. → [`query.md`](query.md#transactions)
 - **Your auth, not a scheme.** `resolveContext` is a function, so "who is the caller" can be anything your application
   already knows.
 - **One process, one pool.** Your app and the REST layer share a driver, a transaction discipline and a deployment.
@@ -58,9 +61,10 @@ Both entry points converge on one pipeline on purpose; what that looks like is i
 
 ## What is simply not done yet
 
-Additions being weighed rather than planned — a transaction across several `query()` calls, observability hooks,
-guardrails for an exposed surface, a debug mode — are written out, with their cost, in
-[`proposals.md`](proposals.md).
+Additions being weighed rather than planned — joining a transaction the application itself opened, observability
+hooks, guardrails for an exposed surface, a debug mode — are written out, with their cost, in
+[`proposals.md`](proposals.md). A transaction across several `query()` calls was one of them and is now built:
+[`query.md`](query.md#transactions).
 
 A handful of things are missing rather than refused — `PATCH`/`PUT` on a function's result, a few representation and
 header details. [`PARITY.md`](../PARITY.md) marks them ❌, as opposed to ➖ for the list above, and the differential test

@@ -77,6 +77,18 @@ if (error) throw error; // or hand `error.body` and `error.status` to your frame
 A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, a `summary` written
 out for whoever reads it, and a `kind` — `"conflict"`, `"not_single_row"`, `"forbidden"`… — which is a string union, so
 a `switch` on it is checked by the compiler instead of against a table of error codes. `query()` never rejects.
+
+Two writes that must land together get one transaction, with the context applied once for all of it:
+
+```ts
+const { data, error } = await pgRest.transaction(async (tx) => {
+  const todo = await tx.query({ table: "todos", action: "insert", rows: { title: "ship it" }, single: true });
+  if (todo.error) throw todo.error; //  rolls the transaction back
+  await tx.query({ table: "tags", action: "insert", rows: { todo_id: todo.data.id, label: "release" } });
+  return todo.data.id;
+}, { role: "authenticated", claims: { sub: user.id } });
+```
+
 → [`docs/query.md`](docs/query.md)
 
 One command writes the types for your database, and one type argument puts them to work:
@@ -116,7 +128,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 | [`docs/security.md`](docs/security.md)         | the role and RLS model, and how request values reach SQL          |
 | [`docs/performance.md`](docs/performance.md)   | measured against PostgREST 16, and which runtime to pick          |
 | [`docs/development.md`](docs/development.md)   | running the tests, the examples and the differential suite        |
-| [`docs/proposals.md`](docs/proposals.md)       | four additions under consideration, and what each would cost      |
+| [`docs/proposals.md`](docs/proposals.md)       | the additions under consideration, and what each would cost       |
 | [`PARITY.md`](PARITY.md)                       | PostgREST v16 feature by feature                                  |
 
 ## Examples
@@ -132,9 +144,11 @@ own README, schema and `server.ts`:
 | [`with-pglite`](examples/with-pglite)                   | Node.js ≥ 22.18 | `@electric-sql/pglite`                        | no (Postgres in WebAssembly)  |
 | [`with-better-auth`](examples/with-better-auth)         | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) | yes (docker-compose included) |
 | [`with-generated-types`](examples/with-generated-types) | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
+| [`with-transactions`](examples/with-transactions)       | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
 
 [`with-generated-types`](examples/with-generated-types) is the shortest way to see the typed path: two tables, an enum,
-a composite type, `bun run gen:types && bun start`.
+a composite type, `bun run gen:types && bun start`. [`with-transactions`](examples/with-transactions) is the other
+library-only one: money moving between two accounts, with the caller read from an `AsyncLocalStorage`.
 
 ## Development
 
