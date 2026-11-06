@@ -94,24 +94,24 @@ that owns the transaction:
 scope above lends one to your callback, this lends one to pg-rest:
 
 ```ts ignore
-const client = await pool.connect();
-try {
-  await client.query("BEGIN"); //                                      the boundary is yours
-  await myOwnStep(client); //                                          your SQL, Drizzle, an outbox row
+await sql.begin(async (tx) => {
+  //                                                  postgres.js owns BEGIN, COMMIT and ROLLBACK
+  await myOwnStep(tx); //                             your SQL, Drizzle, an outbox row
   const { error } = await pgRest.query(
     { table: "todos", insert: { title: "t" } },
-    { role: "authenticated", session: nodePostgresSession(client) }, // and pg-rest writes inside it
+    { role: "authenticated", session: postgresJsSession(tx) }, // and pg-rest writes inside it
   );
-  if (error) throw error;
-  await client.query("COMMIT");
-} finally {
-  client.release();
-}
+  if (error) throw error; //                          your transaction is what rolls back
+});
 ```
 
-A `PoolClient` is not a `DbSession`, hence the wrapper: the `session()` each adapter already builds internally would
-have to be exported. That part is additive, and so is a `session` the core honours by running its statements on it
-instead of calling `adapter.transaction`. What is not additive is everything that follows from not owning the boundary.
+Whatever your driver's transaction scope is — `sql.begin` here, `adapter.transaction`, a `pg` client with its own
+`BEGIN`/`ROLLBACK`/`COMMIT` — it stays the owner of the boundary, and pg-rest only posts statements inside it.
+
+A driver's transaction handle is not a `DbSession`, hence the wrapper: the `session()` each adapter already builds
+internally (`src/adapters/*`) would have to be exported. That part is additive, and so is a `session` the core honours
+by running its statements on it instead of calling `adapter.transaction`. What is not additive is everything that
+follows from not owning the boundary.
 
 **The context leaks forward.** `set_config(…, true)` is transaction-local, which is the whole mechanism: posted in
 *your* transaction, it stays there until your `COMMIT`. So the statement after the pg-rest call runs as
