@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ApiError, createPgRest, QueryError, type QueryInput } from "../src/index";
+import { ApiError, createPgRest, QueryError, type QueryInput, type RequestContext } from "../src/index";
 import { createTestDb, hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
 import { toParams } from "../src/query";
@@ -398,6 +399,80 @@ describe.skipIf(!hasDb)("query()", () => {
 
       await api.close();
       await db.drop();
+    });
+  });
+
+  describe("setContextQuery()", () => {
+    const store = new AsyncLocalStorage<RequestContext>();
+
+    test("the context comes from the store, across awaits", async () => {
+      const db = t.api.setContextQuery(() => store.getStore());
+      const deep = async () => {
+        await Promise.resolve();
+        return db({ table: "clients", select: ["name"], where: { id: 1 } });
+      };
+      const r = await store.run(authed(), () => deep());
+      expect(r.data).toEqual([{ name: "Ada" }]);
+      expect(r.error).toBeNull();
+    });
+
+    test("concurrent calls each see their own context", async () => {
+      // one bound `db`, one store, two requests in flight: this is the whole point of the shape
+      const db = t.api.setContextQuery(() => store.getStore());
+      const who = () => db<{ claims: { sub: string } }>({ rpc: "whoami" });
+      const [a, b] = await Promise.all([store.run(authed("user-a"), who), store.run(authed("user-b"), who)]);
+      expect(a.data?.claims.sub).toBe("user-a");
+      expect(b.data?.claims.sub).toBe("user-b");
+    });
+
+    test("a fixed context needs no store", async () => {
+      const db = t.api.setContextQuery(authed());
+      expect((await db({ table: "clients", select: ["name"], where: { id: 1 } })).data).toEqual([{ name: "Ada" }]);
+    });
+
+    test("an async source is awaited", async () => {
+      const db = t.api.setContextQuery(async () => {
+        await Promise.resolve();
+        return authed();
+      });
+      expect((await db({ table: "clients", select: ["name"], where: { id: 1 } })).data).toEqual([{ name: "Ada" }]);
+    });
+
+    test("a context passed to the call wins over the source", async () => {
+      // what the database saw is the proof: current_user is the overriding role, not the source's
+      const db = t.api.setContextQuery({ role: "anon" });
+      expect((await db<{ role: string }>({ rpc: "whoami" })).data?.role).toBe("anon");
+      expect((await db<{ role: string }>({ rpc: "whoami" }, authed())).data?.role).toBe("authenticated");
+    });
+
+    test("an empty source is an error, not the anonymous role", async () => {
+      const db = t.api.setContextQuery(() => store.getStore());
+      const r = await db({ table: "clients" });
+      expect(r.data).toBeNull();
+      expect(r.count).toBeUndefined();
+      expect(r.status).toBe(500);
+      expect(r.error).toBeInstanceOf(QueryError);
+      expect(r.error?.body.code).toBe("PGRSTX01");
+      expect(r.error?.input).toEqual({ table: "clients" });
+    });
+
+    test("a source that throws comes back as an error, not a rejection", async () => {
+      const db = t.api.setContextQuery(() => {
+        throw new Error("boom");
+      });
+      const r = await db({ table: "clients" });
+      expect(r.data).toBeNull();
+      expect(r.status).toBe(500);
+      expect(r.error).toBeInstanceOf(QueryError);
+      expect(r.error?.body.code).toBe("PGRSTX00");
+      expect((r.error?.cause as Error | undefined)?.message).toBe("boom");
+    });
+
+    test("it answers exactly like query() with the same context", async () => {
+      const input: QueryInput = { table: "orders", select: ["id", "total"], order: ["id"], count: "exact" };
+      const db = t.api.setContextQuery(() => store.getStore());
+      const bound = await store.run(authed(), () => db(input));
+      expect(bound).toEqual(await t.api.query(input, authed()));
     });
   });
 

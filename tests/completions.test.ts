@@ -165,6 +165,26 @@ describe("what an editor offers in a typed query", () => {
     expect(embed.docOf("inner")).toContain("drop the parent rows");
   });
 
+  test("a query bound to a context offers exactly what query() offers", () => {
+    // setContextQuery only drops `ctx`, so a bound call must keep the whole typed surface
+    const bound = `const db = pgRest.setContextQuery(() => undefined);`;
+    expect(completionsAt(`${bound}\nvoid db({ table: "profiles", select: ["#"] });`)).toEqual([
+      "*",
+      "bio",
+      "client_id",
+    ]);
+    expect(completionsAt(`${bound}\nvoid db({ table: "profiles", where: { # } });`)).toEqual([
+      "and",
+      "bio",
+      "client_id",
+      "or",
+    ]);
+    expect(completionsAt(`${bound}\nvoid db({ table: "#" });`)).toContain("clients");
+
+    const method = ask(`void pgRest.setContext#Query(() => undefined);`).hover;
+    expect(method).toContain("AsyncLocalStorage");
+  });
+
   test("the table names are the exposed ones", () => {
     const tables = completionsAt(`void pgRest.query({ table: "#" });`);
     expect(tables).toContain("clients");

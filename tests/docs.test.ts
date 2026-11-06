@@ -24,7 +24,9 @@ const root = new URL("..", import.meta.url).pathname;
  */
 const preamble = (dbTypes: string) => `
 import { createPgRest, QueryError } from "../src/index";
+import type { RequestContext } from "../src/index";
 import type { DbAdapter } from "../src/adapter";
+import type { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabasePgRest } from "${dbTypes}";
 
 type Database = DatabasePgRest;
@@ -38,10 +40,15 @@ declare const pg: { Pool: new (config: { connectionString?: string }) => unknown
 declare const writeFileSync: (path: string, data: string) => void;
 // the hosts the README mounts the handler in
 declare const serve: (options: { fetch: (req: Request) => Promise<Response>; port?: number }) => unknown;
-declare const app: { all: (path: string, handler: (c: { req: { raw: Request } }) => Promise<Response>) => void };
+declare const app: {
+  all: (path: string, handler: (c: { req: { raw: Request } }) => Promise<Response>) => void;
+  use: (handler: (c: { req: { raw: Request } }, next: () => Promise<void>) => Promise<void>) => void;
+};
+// the AsyncLocalStorage the setContextQuery examples read from
+declare const store: AsyncLocalStorage<RequestContext>;
 declare const generateTypes: (cache: unknown, options?: { name?: string }) => string;
 void [createPgRest, QueryError, pool, nodePostgresAdapter, pgRest, ctx, user];
-void [mySessionLookup, pg, writeFileSync, generateTypes, serve, app];
+void [mySessionLookup, pg, writeFileSync, generateTypes, serve, app, store];
 `;
 
 const DB_TYPES_OF = (page: string) =>

@@ -551,3 +551,47 @@ export const toFailedResult = (input: QueryInput, e: unknown): QueryFailed => {
         );
   return { data: null, count: undefined, status: error.status, error };
 };
+
+// ---------------------------------------------------------------------------
+// an implicit context
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a bound query reads its context from: a fixed one, or a function called at every call --
+ * which is what makes it work with an `AsyncLocalStorage`, a per-request store or anything else
+ * that answers "who is asking" for the task in flight.
+ */
+export type ContextSource = RequestContext | (() => RequestContext | undefined | Promise<RequestContext | undefined>);
+
+/**
+ * `query` with its context already decided. Passing one anyway overrides the source for that call,
+ * which is how an administrative call escapes the ambient context without leaving it.
+ */
+export type ContextQuery = <T = unknown>(input: QueryInput, ctx?: RequestContext) => Promise<QueryResult<T>>;
+
+/**
+ * A context source that came back with nothing: the store was never entered (a job, a test, a
+ * middleware that did not run). It is an error and not a fall back to the anonymous role, because
+ * silently dropping privileges is the kind of thing a query should refuse rather than guess.
+ */
+export const noContextResult = (input: QueryInput): QueryFailed =>
+  toFailedResult(
+    input,
+    new QueryError(
+      input,
+      new ApiError({
+        status: 500,
+        headers: {},
+        body: {
+          code: "PGRSTX01",
+          message: "No request context",
+          details: "The context source of setContextQuery() returned nothing",
+          hint: "Run the query inside the scope that provides it, or pass a context as the second argument",
+        },
+      }),
+    ),
+  );
+
+/** Resolve a {@link ContextSource} for one call; `undefined` means it had nothing to give. */
+export const resolveContextSource = async (source: ContextSource): Promise<RequestContext | undefined> =>
+  typeof source === "function" ? await source() : source;
