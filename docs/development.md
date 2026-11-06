@@ -2,13 +2,14 @@
 
 ```sh
 bun install
-mise install        # PostgREST 16.5, the official static release
+mise install        # PostgREST 16.5 (the official static release) and micromamba
 mise run db:start   # a throwaway Postgres 16 + PostGIS under .cache/ (also db:stop, db:reset)
 mise run test       # the whole suite, differential and GeoJSON cases included
 ```
 
-`mise.toml` pins the PostgREST binary the differential test needs and runs the cluster the integration tests use.
-Nothing is installed system-wide. PostGIS is **required**: the `application/geo+json` cases fail without it rather than
+`mise.toml` pins the PostgREST binary the differential test needs and runs the cluster the integration tests use. The
+server and PostGIS come as one prebuilt conda-forge environment that the first `db:start` downloads under `.cache/`
+(about 300 MB): no compiler, no container, no system package and no root. Nothing is installed system-wide. PostGIS is **required**: the `application/geo+json` cases fail without it rather than
 skipping, which is how nine stale parity differences were once found hiding behind a skip.
 
 Or bring your own Postgres 16 and PostgREST:

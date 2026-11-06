@@ -53,7 +53,7 @@ reference lives in `docs/`.
 
 ```bash
 bun install
-mise install           # the pinned PostgREST binary (tests/compare); see mise.toml
+mise install           # the pinned PostgREST binary (tests/compare) and micromamba; see mise.toml
 mise run db:start      # Postgres 16 + PostGIS on $PGPORT, under .cache/ (also db:stop, db:reset)
 mise run test          # the whole suite against that cluster and that binary
 bun run typecheck      # tsc --noEmit (src and tests only; bench/, scripts/ and examples/ are not typechecked)
@@ -71,7 +71,7 @@ bun run link:examples  # point the examples at the local build, without touching
   suite creates and drops its own database, so never point it at data you care about. A green `bun test` with no database proves little: run it
   with one.
 - That server **must have PostGIS**: the `application/geo+json` cases used to skip without it and now fail, which is how they were found to match
-  PostgREST all along while `PARITY.md` still listed eight differences as open. `mise run db:start` provides it; CI uses `postgis/postgis:16-3.6`.
+  PostgREST all along while `PARITY.md` still listed eight differences as open. `mise run db:start` provides it (PostGIS 3.5); CI uses `postgis/postgis:16-3.6`.
 - The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.5** static binary; `mise install` fetches it, CI downloads the same
   release). Run them whenever you touch parsing, SQL generation, error codes or response headers.
 - Examples depend on `pg-rest` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.

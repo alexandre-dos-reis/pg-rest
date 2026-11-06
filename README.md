@@ -161,7 +161,7 @@ library-only one: money moving between two accounts, with the caller read from a
 
 ```sh
 bun install
-mise install        # PostgREST 16.5, for the differential test
+mise install        # PostgREST 16.5 for the differential test, and micromamba
 mise run db:start   # a throwaway Postgres 16 + PostGIS under .cache/
 mise run test       # the whole suite
 ```

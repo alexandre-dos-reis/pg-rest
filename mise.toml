@@ -1,50 +1,63 @@
 # Everything the test suites need, with no system packages, no containers, no root and no extra config
 # files -- this is the only one:
-#   mise install          PostgREST 16.5 (official static release, attestations verified)
+#   mise install          PostgREST 16.5 (official static release, attestations verified), micromamba
 #   mise run db:start     Postgres 16 + PostGIS, a throwaway cluster under .cache/
 #   mise run test         the whole suite, GeoJSON and differential cases included
 #
-# PostgREST comes from mise directly. Postgres has to come through Nix: mise's own postgres plugins
-# build from source against host headers (here it fails on readline, then libcrypto), and PostGIS has
-# to live in the *same* package set as the server -- installing `nix:postgresql_16` and
-# `nix:postgresql16Packages.postgis` side by side leaves pg_available_extensions empty, because the
-# server only looks inside its own store path. Hence `withPackages`, a Nix expression, passed to
-# nix-shell below rather than declared under [bootstrap.packages], which does not accept expressions.
+# PostgREST comes from mise directly. Postgres cannot: mise's own postgres plugins build from source
+# against host headers (on NixOS that fails on readline, then uuid, and `POSTGRES_CONFIGURE_OPTIONS`
+# to close those gaps only encodes one machine), and a source build gives no PostGIS anyway -- it is
+# a third-party extension, needing geos, proj and libxml2, none of which mise has a backend for.
+# PostGIS also has to live in the *same* package set as the server: the server only looks in its own
+# sharedir, so a separately installed extension leaves pg_available_extensions empty. So the server
+# and the extension come as one prebuilt conda-forge environment, created by micromamba under
+# .cache/ on the first db:start: about 300 MB plus its package cache, and no compiler. It carries
+# PostGIS 3.5 where CI's postgis/postgis:16-3.6 image carries 3.6, so a difference between those two
+# shows up here before it shows up there (tests/geojson.test.ts already allows for one).
 [tools]
+micromamba = "latest"
 "github:PostgREST/postgrest" = "16.5"
 
 [env]
 PGPORT = "5433" # out of the way of a Postgres already on 5432 (the examples use that one)
 TEST_DATABASE_URL = "postgres://postgres@localhost:5433/postgres"
 PGDATA = "{{ config_root }}/.cache/pgdata"
-# One prebuilt package set holding the server and the extension.
-PG_NIX_EXPR = "postgresql_16.withPackages (p: [ p.postgis ])"
+# The one package set holding the server and the extension, and micromamba's own cache beside it, so
+# that everything this repo downloads stays under .cache/ and nothing lands in $HOME.
+PG_PREFIX = "{{ config_root }}/.cache/pgenv"
+MAMBA_ROOT_PREFIX = "{{ config_root }}/.cache/mamba"
+
+[tasks."db:ensure"]
+description = "Create the Postgres 16 + PostGIS environment under .cache/ (done by db:start)"
+run = '''
+[ -x "$PG_PREFIX/bin/postgres" ] && exit 0
+micromamba create -y -q -p "$PG_PREFIX" -c conda-forge "postgresql=16" postgis
+'''
 
 [tasks."db:start"]
 description = "Start the throwaway Postgres 16 + PostGIS cluster"
+depends = ["db:ensure"]
 run = '''
-nix-shell -p "$PG_NIX_EXPR" --run '
-  set -e
-  [ -d "$PGDATA" ] || initdb -U postgres --auth=trust --no-sync >/dev/null
-  pg_ctl status >/dev/null 2>&1 && { echo "already running on $PGPORT"; exit 0; }
-  # nixpkgs defaults the socket directory to /run/postgresql, which exists only under NixOS services
-  pg_ctl -l "$PGDATA/../postgres.log" -w start \
-    -o "-p $PGPORT -c listen_addresses=localhost -c unix_socket_directories=$PGDATA -c fsync=off" >/dev/null
-  echo -n "postgres on $PGPORT, postgis "
-  psql -h localhost -p "$PGPORT" -U postgres -tAc \
-    "SELECT CASE WHEN count(*) > 0 THEN '"'"'available'"'"' ELSE '"'"'MISSING'"'"' END
-       FROM pg_available_extensions WHERE name = '"'"'postgis'"'"'"
-'
+set -e
+export PATH="$PG_PREFIX/bin:$PATH"
+[ -d "$PGDATA" ] || initdb -U postgres --auth=trust --no-sync >/dev/null
+pg_ctl status >/dev/null 2>&1 && { echo "already running on $PGPORT"; exit 0; }
+pg_ctl -l "$PGDATA/../postgres.log" -w start \
+  -o "-p $PGPORT -c listen_addresses=localhost -c unix_socket_directories=$PGDATA -c fsync=off" >/dev/null
+echo -n "postgres on $PGPORT, postgis "
+psql -h localhost -p "$PGPORT" -U postgres -tAc \
+  "SELECT CASE WHEN count(*) > 0 THEN 'available' ELSE 'MISSING' END
+     FROM pg_available_extensions WHERE name = 'postgis'"
 '''
 
 [tasks."db:stop"]
 description = "Stop it"
-run = 'nix-shell -p "$PG_NIX_EXPR" --run "pg_ctl -m fast -w stop" || true'
+run = '"$PG_PREFIX/bin/pg_ctl" -m fast -w stop || true'
 
 [tasks."db:reset"]
-description = "Delete the cluster and start over"
+description = "Delete the cluster and start over (keeps the downloaded environment)"
 run = '''
-nix-shell -p "$PG_NIX_EXPR" --run "pg_ctl -m immediate -w stop" >/dev/null 2>&1 || true
+"$PG_PREFIX/bin/pg_ctl" -m immediate -w stop >/dev/null 2>&1 || true
 rm -rf "$PGDATA" "{{ config_root }}/.cache/postgres.log"
 '''
 
