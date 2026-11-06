@@ -22,22 +22,75 @@ one transaction, the role and claims set with `set_config` inside it — and is 
 to say so. The answer today is to leave the library: run the SQL yourself, and lose the parser, the embedding and the
 error mapping for those two statements.
 
-**The shape.** One scope, one transaction, one `set_config` of the context, rollback on a throw:
+**The shape.** One scope, one transaction, the context applied once for all of it, rollback when the callback throws.
+Both entry points carry it, because both are places application code runs a query:
 
 ```ts ignore
+// the context given at the scope
 const { data, error } = await pgRest.transaction(async (tx) => {
-  const { data: order } = await tx({ table: "orders", insert: { client_id: 1 }, single: true });
-  await tx({ table: "order_lines", insert: linesFor(order.id) });
+  const { data: order } = await tx.query({ table: "orders", insert: { client_id: 1 }, single: true });
+  await tx.query({ table: "order_lines", insert: linesFor(order.id) });
   return order;
-}, { role: "authenticated", claims: { sub: user.id } });
+}, { role: "authenticated", claims: { sub: user.id, email: user.email } });
+
+// the context already decided, read from wherever your middleware put it
+const pgQuery = pgRest.setContextQuery(() => store.getStore());
+
+const { data, error } = await pgQuery.transaction(async (tx) => {
+  await tx.query({ table: "orders", insert: { client_id: 1 } });
+});
 ```
 
-`tx` is a `ContextQuery` — the type `setContextQuery` already returns — so nothing new has to be learned to use it, and
-the context is applied once for the scope rather than per call. A failed query inside the scope is still returned, not
-thrown; what rolls the transaction back is the callback throwing, which is the discipline every driver already has.
+It asks nothing new of [`adapters.md`](adapters.md): `DbAdapter.transaction(fn)` already hands out a session for the
+extent of a callback, which is exactly the shape of the scope. The context is applied where it always was — once, in
+the transaction `set_config` runs in.
 
-**The harder, more valuable half.** Accepting a session the application already holds, so a pg-rest query *joins* a
-transaction it did not open:
+`transaction` answers a `QueryResult` like `query` does, around whatever the callback returned: `data` is that value,
+there is no `count`, and it never rejects. A throw inside the scope rolls the transaction back and comes back as
+`error` — a `QueryError` if it was one, a 500 carrying the original under `cause` if it was anything else.
+
+**`tx.query` takes no context, and cannot.** That is the one thing about the signature worth stating. The role and the
+claims are set with `set_config(…, true)`, which is transaction-local and issued once at the head of the transaction;
+honouring a per-call context would mean issuing `set_config` again halfway through, which scopes nothing — it changes
+the role for every statement that follows in the same transaction, in row order, with no way back. So `tx.query` is
+`query` minus its second parameter, and a context passed to it is a type error rather than an argument that is quietly
+ignored.
+
+What that moves, rather than removes, is `setContextQuery`'s escape hatch — a context passed to the call wins over the
+ambient one, which is how an administrative query steps out of it. Inside a scope it cannot exist; at the scope it can,
+and that is the granularity `set_config` already works at: `pgQuery.transaction(fn, ctx)` overrides the ambient context
+for the whole transaction, exactly as `pgQuery(input, ctx)` does for one query. Another role means another transaction.
+
+**Where the bound form reads its context.** `query` reads the `source` at *every* call, which is what lets one bound
+`pgQuery` serve a different context for every request in flight. A scope must read it **once, on entry**: the
+transaction has one `set_config`, so a source that answered differently halfway through could not be honoured anyway.
+A source that answers nothing is the `PGRSTX01` / `no_context` failure it already is, returned before the `BEGIN`
+rather than leaving an empty transaction open.
+
+**What it costs in types.** `ContextQuery` stops being a function type and becomes a callable interface with a
+`transaction` member — additive for everyone, since it is only ever a return type (`ContextSource`, the input, is
+untouched). Same for `TypedContextQuery<Db>`, and `TypedPgRestInstance` grows `transaction` in the `Omit` it already
+applies to `query` and `setContextQuery`, so the scope is typed by the database like everything else.
+
+It leaves one asymmetry: the bound query is callable (`pgQuery(input)`) while the scope is an object
+(`tx.query(input)`). Keeping both is deliberate — the callable form is what is documented and in use, and an object is
+what lets a scope name a second thing later without changing a signature again — but it is the kind of inconsistency
+worth disliking out loud before it ships.
+
+**What the scope has to decide.** Three behaviours are per-transaction today and currently decided by the single query
+that owns the transaction:
+
+- **An error poisons the rest of the scope.** `query()` returns failures rather than throwing, but PostgreSQL has still
+  aborted the transaction: the next `tx.query` answers `25P02`. One transaction per call makes that isolation free; a
+  shared scope has to choose between a `SAVEPOINT` around each query — plain statements, so nothing in the adapter
+  contract is in the way — and letting the first error condemn the scope.
+- **`SET TRANSACTION READ ONLY`** (`src/core.ts`) comes from the plan, so in a scope it would come from whichever query
+  went first. It has to be dropped inside one, or decided for the whole scope.
+- **The serialization retry** (up to 2 on `40001`) replays the transaction. pg-rest still owns the boundary here, so it
+  *could* — but replaying the transaction means replaying the callback, and what else that callback does is not the
+  library's to repeat. Off inside a scope, or opt-in with that said out loud.
+
+**The harder, separate half: joining a transaction the application opened.**
 
 ```ts ignore
 await pool.transaction(async (session) => {
@@ -46,14 +99,13 @@ await pool.transaction(async (session) => {
 });
 ```
 
-That is what makes the layer composable with the rest of the codebase — Drizzle, a job runner, a `pg` transaction in a
-webhook — and it is the one thing a PostgREST process can never offer, because it is not in the process. It needs
-`DbAdapter` to expose a session as a first-class value rather than only inside `transaction(fn)`, which is a breaking
-change to the adapter contract ([`adapters.md`](adapters.md)) and the reason this is a proposal and not a patch.
-
-**Open questions.** Whether `Prefer: tx=rollback` and the `maxRows` cap compose sensibly inside a user-held
-transaction; what a nested `transaction` call does; and whether the serialization-failure retry (up to 2 on `40001`)
-can survive at all once the transaction is not ours to replay.
+That is what would make the layer composable with the rest of the codebase — Drizzle, a job runner, a `pg` transaction
+in a webhook — and it is the one thing a PostgREST process can never offer, because it is not in the process. The cost
+is not the adapter interface either (a `session()` exported per adapter, plus a `ctx.session` the core honours, is
+additive). It is that the transaction semantics of `execute` are *defined* by owning the boundary: `RollbackWith`
+throws in order to force a `ROLLBACK`, which is how `Prefer: tx=rollback` and plan output work, and the `PGRST116` and
+`PGRST124` checks throw in order to undo the write they just measured. Neither is ours to do to a transaction we did
+not open — you cannot roll back the caller's work. That one stays a question; the scope above does not depend on it.
 
 ## 2. Observability hooks
 
