@@ -1,5 +1,83 @@
 # pg-rest
 
+## 0.3.0
+
+### Minor Changes
+
+- 9484100: Composite types are first class: in `query()`, in the SQL, and in the generated types.
+
+  A column of a [composite type](https://www.postgresql.org/docs/current/rowtypes.html) could already be read and written
+  — Postgres hands it over as a nested object, and `json_populate_record` writes one back — but its _fields_ were out of
+  reach, and the generated types called it `unknown`. Three changes:
+
+  - **`->`/`->>` into a composite column** (nested, and through an array of them) now work in `select`, `where` and
+    `order`, as they do on `jsonb`. pg-rest converts the column with `to_jsonb()` first unless its type is exactly
+    `json`/`jsonb` — which is PostgREST's own rule, and was a **parity gap**: `select=owner->>name` answered
+    `42883 operator does not exist` where PostgREST answers the field. The same rule applies to arrays and scalars, so
+    `select=id->>nope` now answers `null` instead of an error, again like PostgREST.
+  - **Comparing a whole composite value**, which is pg-rest's own: `where: { owner: { name: "Ada", home: { city: "Paris" } } }`
+    sends the value as JSON and turns it into a row of the column's type. The fields may come in any order and the ones
+    left out are NULL, exactly like the row literal it stands for. An object is read as a value only when it has no `op`
+    key, so the `{ op, value, not }` form is untouched. PostgREST answers `0A000` to any composite comparison (its
+    literal has no type to be read as); a bare row literal still does here too.
+  - **Generated types** describe the fields: one named type per composite type the schema reaches, nesting included, plus
+    the types of a function's composite arguments and result. On the way in the fields are optional, since a value
+    written or compared may leave them out. `SchemaCache` carries them under `composites`, and a column points at its
+    type with `Column.composite`.
+
+  Also fixed on the way, found by the new differential cases: a JSON path **ending on an index** is named after the last
+  key before it (`select=tags->0` is `tags`, `data->1->mycol->>2` is `mycol`), as PostgREST names it — it used to be
+  `0`/`2`. This affects `json`/`jsonb` columns too.
+
+- 54b5bde: **Breaking:** `query()` hands failures back in the result, and `querySafe()` is gone.
+
+  What `querySafe` did is what `query` does now, under the shorter name: `{ data, count, status, error }`, exactly one of
+  `data` and `error` set, and it **never rejects** — not even on a failure the library did not foresee, which arrives as a
+  500 `error` carrying the original under `cause`. One form instead of two, and no `try`/`catch` anywhere.
+
+  ```ts
+  const { data, error } = await pgRest.query({ table: "todos", select: ["id"] });
+  if (error) return c.json(error.body, error.status);
+  // data is narrowed from here on
+  ```
+
+  To migrate: rename `querySafe` to `query`, and replace a `try`/`catch` around `query` with `if (error)`. `error` is the
+  same `QueryError` the throwing form raised, so what you do with it does not change. The types follow: `QuerySafeResult`
+  is gone, `QueryResult` is now the union, and its two halves are exported as `QueryOk` and `QueryFailed`.
+
+  Also: `count` is typed from the `count` the query asked for, instead of always being `number | undefined`.
+
+  ```ts
+  const { data, count, error } = await pgRest.query({ table: "todos", select: ["id"], count: "exact" });
+  if (error) throw error;
+  // count: number -- asked for, so there is nothing to test for
+  ```
+
+  `"exact"` and `"estimated"` always answer with a number: when paging leaves nothing to look past, that number is the
+  page's own length. `"planned"` stays `number | undefined`, because it reads `Plan Rows` out of an `EXPLAIN` which can
+  come back with nothing usable. No `count` in the query is `undefined`, on both halves of the result. An instance created
+  without a type argument keeps `number | undefined`, as before.
+
+- 9b342a7: `setContextQuery(source)`: `query()` with the context decided once, so it stops being threaded through every layer that
+  happens to run a query.
+
+  `source` is either a fixed `RequestContext` or a function called at **every** call, which is what makes an
+  `AsyncLocalStorage` work: one `db` at module scope serves a different caller for every request in flight.
+
+  ```ts
+  const store = new AsyncLocalStorage<RequestContext>();
+  const db = pgRest.setContextQuery(() => store.getStore());
+
+  app.use(async (c, next) => store.run({ role: "authenticated", claims: { sub: userId } }, next));
+
+  const { data, error } = await db({ table: "todos", select: ["id", "title"] });
+  ```
+
+  pg-rest holds no store of its own — it stays dependency-free and runtime-neutral, and the context may come from
+  anywhere. A context passed to the call wins over `source`, for one administrative query without leaving the scope. A
+  `source` that returns nothing (the store was never entered) is a 500 `PGRSTX01` `error`, not a silent fall back to the
+  anonymous role. With a generated database type the bound query is typed exactly like `query`, minus `ctx`.
+
 ## 0.2.0
 
 ### Minor Changes
