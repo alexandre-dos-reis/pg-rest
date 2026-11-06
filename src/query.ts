@@ -10,7 +10,7 @@ import {
   planTable,
   useSchema,
 } from "./core";
-import { ApiError, PgRestError } from "./errors";
+import { ApiError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
 import type { Operator } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
@@ -219,8 +219,47 @@ export interface QueryFailed {
  */
 export type QueryResult<T = unknown, C extends number | undefined = number | undefined> = QueryOk<T, C> | QueryFailed;
 
+/** The resource a query names, as it would read in a sentence: `select on "api.clients"`. */
+const operationOf = (input: QueryInput): string => {
+  const at = input.schema ? `${input.schema}.` : "";
+  if ("rpc" in input) return `rpc "${at}${input.rpc}"`;
+  const target = "table" in input ? `"${at}${input.table}"` : "the database";
+  return `${input.action ?? "select"} on ${target}`;
+};
+
+/**
+ * The failure written out for a person: what was attempted, what the database or the parser said,
+ * what to do about it, and the classification last -- so the first line alone is useful in a log
+ * that cuts the rest off.
+ */
+const explain = (input: QueryInput, api: ApiError, kind: QueryErrorKind): string =>
+  [
+    `${operationOf(input)} failed: ${api.body.message || describeErrorKind(kind)}`,
+    api.body.details ? `  details: ${api.body.details}` : "",
+    api.body.hint ? `  hint: ${api.body.hint}` : "",
+    `  kind: ${kind} -- ${describeErrorKind(kind)} (${api.body.code}, HTTP ${api.status})`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
 /** A query that failed, with the PostgREST error body and the input that produced it. */
 export class QueryError extends ApiError {
+  /**
+   * What went wrong, as one string out of a closed union: the thing to `switch` on. The exact
+   * reason stays in `body.code`; this is the handful of cases that call for different reactions.
+   */
+  readonly kind: QueryErrorKind;
+
+  /**
+   * The same failure written out for whoever reads the log: the call it came from, then what the
+   * database or the parser said, then `details`, `hint` and the kind, each on its own line.
+   *
+   * `message` is left as it is -- one line, prefixed with the code, the summary `ApiError` builds
+   * for a response -- because something somewhere reads it, and a multi-line `Error.message` is
+   * not what a log collector expects. This is the readable form, and it is opt-in.
+   */
+  readonly summary: string;
+
   constructor(
     readonly input: QueryInput,
     api: ApiError,
@@ -228,6 +267,9 @@ export class QueryError extends ApiError {
   ) {
     super({ status: api.status, body: api.body, headers: api.headers });
     this.name = "QueryError";
+    this.kind = errorKind(api.status, api.body.code);
+    // a caller of query() holds the input too, which is what lets the explanation name the call
+    this.summary = explain(input, api, this.kind);
     if (options?.cause !== undefined) this.cause = options.cause;
   }
 }

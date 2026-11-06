@@ -22,6 +22,7 @@ drifts fails the build. The ones that are meant to be refused carry `@ts-expect-
 - [Who is asking](#who-is-asking)
   - [Binding it once](#binding-it-once)
 - [Errors](#errors)
+  - [`kind`: the error to switch on](#kind-the-error-to-switch-on)
 - [What the typed path does not describe](#what-the-typed-path-does-not-describe)
 - [Every field](#every-field)
   - [What comes back](#what-comes-back)
@@ -696,13 +697,15 @@ const { data, count, error } = await pgRest.query(
   ctx,
 );
 if (error) {
+  error.kind; //         "conflict" -- one of a closed set of strings, to switch on
   error.status; //       409
   error.body.code; //    "23505" -- the SQLSTATE, or a PGRSTxxx code
   error.body.message; // "duplicate key value violates unique constraint …"
   error.body.details;
   error.body.hint;
   error.input; //        the object you passed
-  error.message; //      "23505: duplicate key value … " -- for your logs
+  error.message; //      "23505: duplicate key … " -- one line, for your logs
+  error.summary; //      the same failure written out for a person to read (below)
 } else {
   data; //  non-null here, and `count` is the type the query asked for
   void count;
@@ -713,21 +716,95 @@ if (error) {
 Even a failure the library did not foresee arrives this way -- a 500 carrying the original under `cause` -- so no
 `try`/`catch` is needed anywhere.
 
-What you are likely to see:
+`error.summary` is the same failure written out for whoever reads it: the call it came from, then what the database or
+the parser said, then `details`, `hint` and the kind, each on its own line.
 
-| code | status | when |
-| --- | --- | --- |
-| `PGRST205` | 404 | no such table — with a `hint` suggesting the nearest name |
-| `PGRST204` | 400 | no such column in a write payload |
-| `PGRST200` / `PGRST201` | 400 / 300 | no relationship between two resources, or more than one (pass a `hint`) |
-| `PGRST116` | 406 | `single` matched something other than exactly one row |
-| `PGRST124` | 400 | `maxAffected` exceeded |
-| `PGRST302` | 401 | no context and anonymous access disabled |
-| `PGRSTX01` | 500 | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
-| `42501` | 401 / 403 | the role lacks the privilege |
-| `23505` / `23503` | 409 | unique / foreign key violation |
-| `PT4xx` | 4xx | your own `RAISE … USING ERRCODE = 'PT404'` |
-| `PGRST001` | 503 | the database connection failed |
+```
+insert on "clients" failed: duplicate key value violates unique constraint "clients_email_key"
+  details: Key (email)=(ada@example.com) already exists.
+  kind: conflict -- a unique or foreign key constraint rejected the row (23505, HTTP 409)
+```
+
+It is a separate field rather than the `message`, which stays the one-line `"23505: duplicate key … hint: …"` summary
+`ApiError` builds for a response: a multi-line `Error.message` is not what a log collector expects. `console.error(error.summary)`
+when you want the long form, `throw error` when you want the short one. `body` is untouched either way -- it stays
+exactly the JSON PostgREST answers with.
+
+### `kind`: the error to switch on
+
+`code` is exact and there are dozens of them; `kind` is the handful of cases that call for *different reactions*, as a
+string union, so a `switch` is checked by the compiler rather than by a table of codes you keep yourself:
+
+```ts
+const addClient = async (name: string, email: string) => {
+  const { data, error } = await pgRest.query(
+    { table: "clients", action: "insert", rows: { name, email }, single: true },
+    ctx,
+  );
+  if (!error) return { ok: true as const, client: data };
+
+  switch (error.kind) {
+    case "unauthenticated":
+    case "forbidden":
+      // about who is asking, not about what they asked
+      throw new Response(error.body.message, { status: error.status });
+    case "conflict":
+      return { ok: false as const, why: "that email is already taken" };
+    case "invalid_data":
+      // a check constraint or a NOT NULL: the database says which
+      return { ok: false as const, why: error.body.message };
+    case "raised":
+      // your own RAISE, so your own wording
+      return { ok: false as const, why: error.body.message };
+    case "unavailable":
+      return { ok: false as const, why: "the database is down, try again" };
+    default:
+      // invalid_query, invalid_payload, internal... a bug on this side, not the caller's
+      throw error;
+  }
+};
+```
+
+Every kind, and what it means:
+
+| `kind` | when |
+| --- | --- |
+| `invalid_query` | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
+| `invalid_payload` | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write |
+| `undefined_object` | no table, view or function by that name — a typo (read the `hint`), or a migration the schema cache has not seen |
+| `invalid_embed` | no relationship between two resources, or more than one, which needs a `hint` |
+| `not_single_row` | `single` matched other than exactly one row — both "not found" and "found several" |
+| `too_many_affected` | the write would have touched more rows than `maxAffected`, and was rolled back |
+| `unauthenticated` | no role in the context, or anonymous access disabled |
+| `forbidden` | the role lacks the privilege. RLS *hiding* rows is empty data, not an error |
+| `conflict` | a unique or foreign key constraint rejected the row |
+| `invalid_data` | the values themselves were refused: a check constraint, a `NOT NULL`, a failed cast |
+| `raised` | your own `RAISE` in SQL (`P0001`, `PTxyz`, `PGRST`), with the message you wrote |
+| `unsupported` | not implemented, or not over `query()` |
+| `unavailable` | the database could not be reached, is out of connections, or timed out — retrying may work |
+| `no_context` | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
+| `internal` | anything left: a bug, or an error pg-rest did not foresee. The original is under `cause` |
+
+A later version may map a code onto a kind it did not have before, and new kinds are additive — which is why the
+`default` above matters, and why `code` remains the thing to test when you need the exact reason. The same mapping is
+exported for an `ApiError` you hold from `handle()`: `errorKind(status, code)`, and `describeErrorKind(kind)` for its
+wording.
+
+The codes behind them, and what you are likely to see:
+
+| code | status | `kind` | when |
+| --- | --- | --- | --- |
+| `PGRST205` | 404 | `undefined_object` | no such table — with a `hint` suggesting the nearest name |
+| `PGRST204` | 400 | `invalid_payload` | no such column in a write payload |
+| `PGRST200` / `PGRST201` | 400 / 300 | `invalid_embed` | no relationship between two resources, or more than one (pass a `hint`) |
+| `PGRST116` | 406 | `not_single_row` | `single` matched something other than exactly one row |
+| `PGRST124` | 400 | `too_many_affected` | `maxAffected` exceeded |
+| `PGRST302` | 401 | `unauthenticated` | no context and anonymous access disabled |
+| `PGRSTX01` | 500 | `no_context` | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
+| `42501` | 401 / 403 | `unauthenticated` / `forbidden` | the role lacks the privilege |
+| `23505` / `23503` | 409 | `conflict` | unique / foreign key violation |
+| `PT4xx` | 4xx | `raised` | your own `RAISE … USING ERRCODE = 'PT404'` |
+| `PGRST001` | 503 | `unavailable` | the database connection failed |
 
 ## What the typed path does not describe
 

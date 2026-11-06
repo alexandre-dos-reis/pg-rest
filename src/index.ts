@@ -18,8 +18,8 @@ import { createSchemaStore, errorResponse, handleSafely, toApiError } from "./se
 
 export type { DbAdapter, DbSession, Row } from "./adapter";
 export type { PreRequestInfo, RequestContext } from "./core";
-export { ApiError, DbQueryError, PgRestError } from "./errors";
-export type { ErrorBody } from "./errors";
+export { ApiError, DbQueryError, PgRestError, describeErrorKind, errorKind } from "./errors";
+export type { ErrorBody, QueryErrorKind } from "./errors";
 export { QueryError } from "./query";
 export type {
   AnyDatabase,
