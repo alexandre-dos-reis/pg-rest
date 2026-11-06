@@ -61,7 +61,8 @@ Any PostgREST client works — the wire format is the whole contract. Including
 ## In the same process, with types from your schema
 
 No HTTP, no loopback call: the same parser, the same SQL and the same `set_config` of the role and claims, so Row Level
-Security applies as it would over the wire.
+Security applies as it would over the wire. If you know `postgrest-js`, `query()` is the same shape of request —
+without the server on the other end: no second process to run, and the pool stays yours.
 
 ```ts
 const { data, error } = await pgRest.query(
