@@ -30,28 +30,61 @@ drifts fails the build. The ones that are meant to be refused carry `@ts-expect-
 
 ```sql
 CREATE TABLE api.clients (
-  id serial PRIMARY KEY, name text NOT NULL, email text UNIQUE,
-  meta jsonb, tags text[], created_at timestamptz NOT NULL DEFAULT now()
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  email text UNIQUE,
+  meta jsonb,
+  tags text[],
+  created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE api.profiles (client_id int PRIMARY KEY REFERENCES api.clients(id), bio text);
+
+CREATE TABLE api.profiles (
+  client_id int PRIMARY KEY REFERENCES api.clients(id),
+  bio text
+);
+
 CREATE TABLE api.orders (
-  id serial PRIMARY KEY, client_id int NOT NULL REFERENCES api.clients(id),
-  status text NOT NULL DEFAULT 'new', total numeric(10,2) NOT NULL DEFAULT 0, placed_at date DEFAULT current_date
+  id serial PRIMARY KEY,
+  client_id int NOT NULL REFERENCES api.clients(id),
+  status text NOT NULL DEFAULT 'new',
+  total numeric(10,2) NOT NULL DEFAULT 0,
+  placed_at date DEFAULT current_date
 );
-CREATE TABLE api.products (id serial PRIMARY KEY, name text NOT NULL, price numeric(10,2) NOT NULL);
+
+CREATE TABLE api.products (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  price numeric(10,2) NOT NULL
+);
+
 CREATE TABLE api.order_items (
-  order_id int REFERENCES api.orders(id), product_id int REFERENCES api.products(id),
-  qty int NOT NULL DEFAULT 1, PRIMARY KEY (order_id, product_id)
+  order_id int REFERENCES api.orders(id),
+  product_id int REFERENCES api.products(id),
+  qty int NOT NULL DEFAULT 1,
+  PRIMARY KEY (order_id, product_id)
 );
-CREATE TABLE api.employees (id serial PRIMARY KEY, name text NOT NULL, manager_id int REFERENCES api.employees(id));
+
+CREATE TABLE api.employees (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  manager_id int REFERENCES api.employees(id)
+);
+
 CREATE TYPE api.mood AS ENUM ('sad', 'ok', 'happy');
+
 CREATE TABLE api.moods (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  mood api.mood NOT NULL DEFAULT 'ok', seen api.mood[], note text
+  mood api.mood NOT NULL DEFAULT 'ok',
+  seen api.mood[],
+  note text
 );
 
 -- notes is protected by row level security: a caller only sees and writes its own
-CREATE TABLE api.notes (id serial PRIMARY KEY, owner text NOT NULL DEFAULT (… ->> 'sub'), body text NOT NULL);
+CREATE TABLE api.notes (
+  id serial PRIMARY KEY,
+  owner text NOT NULL DEFAULT (… ->> 'sub'),
+  body text NOT NULL
+);
 
 CREATE VIEW api.big_orders AS SELECT * FROM api.orders WHERE total > 100;
 CREATE VIEW api.client_totals AS SELECT client_id, sum(total) AS revenue FROM api.orders GROUP BY client_id;
