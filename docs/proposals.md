@@ -90,22 +90,57 @@ that owns the transaction:
   *could* — but replaying the transaction means replaying the callback, and what else that callback does is not the
   library's to repeat. Off inside a scope, or opt-in with that said out loud.
 
-**The harder, separate half: joining a transaction the application opened.**
+**The harder, separate half: joining a transaction the application opened.** The same session, the other owner — the
+scope above lends one to your callback, this lends one to pg-rest:
 
 ```ts ignore
-await pool.transaction(async (session) => {
-  await myOwnMigrationStep(session);
-  await pgRest.query({ table: "todos", insert: { title: "t" } }, { role: "authenticated", session });
-});
+const client = await pool.connect();
+try {
+  await client.query("BEGIN"); //                                      the boundary is yours
+  await myOwnStep(client); //                                          your SQL, Drizzle, an outbox row
+  const { error } = await pgRest.query(
+    { table: "todos", insert: { title: "t" } },
+    { role: "authenticated", session: nodePostgresSession(client) }, // and pg-rest writes inside it
+  );
+  if (error) throw error;
+  await client.query("COMMIT");
+} finally {
+  client.release();
+}
 ```
 
-That is what would make the layer composable with the rest of the codebase — Drizzle, a job runner, a `pg` transaction
-in a webhook — and it is the one thing a PostgREST process can never offer, because it is not in the process. The cost
-is not the adapter interface either (a `session()` exported per adapter, plus a `ctx.session` the core honours, is
-additive). It is that the transaction semantics of `execute` are *defined* by owning the boundary: `RollbackWith`
-throws in order to force a `ROLLBACK`, which is how `Prefer: tx=rollback` and plan output work, and the `PGRST116` and
-`PGRST124` checks throw in order to undo the write they just measured. Neither is ours to do to a transaction we did
-not open — you cannot roll back the caller's work. That one stays a question; the scope above does not depend on it.
+A `PoolClient` is not a `DbSession`, hence the wrapper: the `session()` each adapter already builds internally would
+have to be exported. That part is additive, and so is a `session` the core honours by running its statements on it
+instead of calling `adapter.transaction`. What is not additive is everything that follows from not owning the boundary.
+
+**The context leaks forward.** `set_config(…, true)` is transaction-local, which is the whole mechanism: posted in
+*your* transaction, it stays there until your `COMMIT`. So the statement after the pg-rest call runs as
+`authenticated`, with its claims, its `search_path` and its `timezone` — and pg-rest cannot pop what it pushed. Either
+it reads the previous values and restores them (doable, and an approximation: there is a list of settings to get right,
+and `RESET` is not the same as the value that was there), or the leak is documented as the price. It is the same leak
+[`adapters.md`](adapters.md) warns about — "a request that is not in one would leak its caller into the next" — moved
+inside a single transaction.
+
+**Three behaviours stop being honourable**, all three because they are implemented *by* aborting the transaction:
+
+- `Prefer: tx=rollback` and plan output throw `RollbackWith` in order to force a `ROLLBACK`. On a borrowed transaction
+  there is nothing to force. They have to be refused in this mode rather than quietly ignored.
+- `single` and `maxAffected` (`PGRST116`, `PGRST124`) throw in order to undo the write they just measured. Here the
+  write stays, and since `query()` *returns* failures, a caller who logs the `error` and commits anyway has committed
+  something the library reported as a failure. They become assertions whose remedy is the caller's: rethrow, so your
+  own transaction rolls back. That is the footgun of the whole idea.
+- `SET TRANSACTION READ ONLY` is refused by PostgreSQL (`25001`) once a statement has been issued, so it has to go.
+
+The serialization retry goes with them: replaying a transaction we did not open is not ours to do.
+
+**And a question of shape.** `RequestContext`'s three fields all say *who* is asking (`role`, `claims`, `settings`); a
+session says *where* to run. Putting it there mixes identity with plumbing, and a third argument
+(`query(input, ctx, { session })`) would separate them at the cost of one more signature.
+
+What makes it worth any of this: it is the only way a pg-rest query and the application's own SQL land in **one**
+atomic unit — a job, a webhook, an outbox — which is what "one process, one pool" in [`design.md`](design.md) promises
+and does not yet deliver, and the one thing a PostgREST process can never offer, because it is not in the process. It
+stays a question; the scope above does not depend on it.
 
 ## 2. Observability hooks
 
