@@ -90,8 +90,19 @@ export type Order =
 /** Columns to return. A string is a column (`"id"`, `"name->>first"`, `"total::text"`, `"label:name"`). */
 export type Select = ReadonlyArray<string | { readonly [relation: string]: Select | Embed }>;
 
+/**
+ * The filters, order and paging one node of a query takes: its root, and every embedded resource.
+ * They are rendered by the same code, prefixed with the node's dotted path.
+ */
+export interface NodeFields {
+  readonly where?: Where | undefined;
+  readonly order?: ReadonlyArray<Order> | undefined;
+  readonly limit?: number | undefined;
+  readonly offset?: number | undefined;
+}
+
 /** An embedded resource, with its own columns, filters, order and paging. */
-export interface Embed {
+export interface Embed extends NodeFields {
   readonly select?: Select | undefined;
   /** Drop parent rows that have no match (`!inner`). */
   readonly inner?: boolean | undefined;
@@ -101,23 +112,15 @@ export interface Embed {
   readonly hint?: string | undefined;
   /** Rename the resource in the output (`client:clients(*)`). */
   readonly as?: string | undefined;
-  readonly where?: Where | undefined;
-  readonly order?: ReadonlyArray<Order> | undefined;
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
 }
 
 /** What a write returns: the affected rows, or nothing. */
 export type QueryReturning = "representation" | "minimal";
 
-interface Common {
+interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
   readonly select?: Select | undefined;
-  readonly where?: Where | undefined;
-  readonly order?: ReadonlyArray<Order> | undefined;
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
   /** Return one object instead of an array. 0 or 2+ rows is a 406 `PGRST116`, like `vnd.pgrst.object+json`. */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
@@ -329,16 +332,7 @@ const renderOrder = (o: Order): string => {
 type Params = Array<[string, string]>;
 
 /** `where`, `order`, `limit` and `offset` of one node, prefixed with its dotted path. */
-const pushNode = (
-  node: {
-    readonly where?: Where | undefined;
-    readonly order?: ReadonlyArray<Order> | undefined;
-    readonly limit?: number | undefined;
-    readonly offset?: number | undefined;
-  },
-  path: ReadonlyArray<string>,
-  out: Params,
-): void => {
+const pushNode = (node: NodeFields, path: ReadonlyArray<string>, out: Params): void => {
   const at = path.length ? `${path.join(".")}.` : "";
   for (const [key, value] of Object.entries(node.where ?? {})) {
     if (value === undefined) continue;

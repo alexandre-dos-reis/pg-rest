@@ -161,6 +161,19 @@ const schemaList = (schemas: ReadonlyArray<string>) => `ARRAY[${schemas.map(lite
 const asJson = (inner: string) => `SELECT coalesce(json_agg(r), '[]'::json)::text AS j FROM (${inner}) r`;
 
 /**
+ * Labels of the enum behind a type oid -- the type itself, or the element type of an array of it --
+ * in declaration order, or NULL when it is not an enum. A domain over an enum is not unwrapped, as
+ * {@link Column.enumLabels} says.
+ */
+const enumLabelsSql = (oid: string) => `(
+            SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder)
+              FROM pg_type ent
+              LEFT JOIN pg_type ene ON ene.oid = ent.typelem
+              JOIN pg_enum e ON e.enumtypid = CASE WHEN ent.typtype = 'e' THEN ent.oid
+                                                   WHEN ene.typtype = 'e' THEN ene.oid END
+             WHERE ent.oid = ${oid})`;
+
+/**
  * `{ schema, name }` of the composite type behind a type oid -- through arrays (`addr[]`) and
  * domains, which nest in any order -- or NULL when there is none. `format_type` cannot answer this:
  * `api.addr` and `api.jd` read the same way.
@@ -307,9 +320,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     `SELECT n.nspname AS schema, c.relname AS "table", a.attname AS name,
             format_type(a.atttypid, a.atttypmod) AS type,
             ${compositeOfSql("a.atttypid")} AS composite,
-            (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
-              WHERE e.enumtypid = CASE WHEN bt.typtype = 'e' THEN bt.oid
-                                       WHEN et.typtype = 'e' THEN et.oid END) AS enum_labels,
+            ${enumLabelsSql("a.atttypid")} AS enum_labels,
             NOT a.attnotnull AS nullable,
             (a.atthasdef OR a.attidentity <> '') AS has_default,
             pg_get_expr(d.adbin, d.adrelid) AS default_expr,
@@ -321,8 +332,6 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        JOIN pg_class c ON c.oid = a.attrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-       LEFT JOIN pg_type bt ON bt.oid = a.atttypid
-       LEFT JOIN pg_type et ON et.oid = bt.typelem
       WHERE n.nspname = ANY(${S})
         AND c.relkind IN ('r','v','m','f','p')
         AND NOT c.relispartition
@@ -410,9 +419,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     `SELECT n.nspname AS schema, p.proname AS name,
             p.proretset AS returns_set, p.provolatile::text AS volatility,
             format_type(p.prorettype, NULL) AS return_type,
-            (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
-               WHERE e.enumtypid = CASE WHEN rt.typtype = 'e' THEN rt.oid
-                                        WHEN ret_el.typtype = 'e' THEN ret_el.oid END) AS return_enum,
+            ${enumLabelsSql("p.prorettype")} AS return_enum,
             ${compositeOfSql("p.prorettype")} AS return_composite,
             rt.typtype::text AS return_typtype,
             coalesce(p.proargmodes && ARRAY['o','b','t']::"char"[], false) AS has_out,
@@ -430,12 +437,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
             (SELECT coalesce(json_agg(json_build_object(
                        'name', coalesce(p.proargnames[t.i], ''),
                        'type', format_type(t.typ, NULL),
-                       'enum', (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
-                                 WHERE e.enumtypid = (SELECT CASE WHEN at.typtype = 'e' THEN at.oid
-                                                                  WHEN ael.typtype = 'e' THEN ael.oid END
-                                                        FROM pg_type at
-                                                        LEFT JOIN pg_type ael ON ael.oid = at.typelem
-                                                       WHERE at.oid = t.typ)),
+                       'enum', ${enumLabelsSql("t.typ")},
                        'composite', ${compositeOfSql("t.typ")},
                        'mode', coalesce(p.proargmodes[t.i]::text, 'i')) ORDER BY t.i), '[]'::json)
                FROM unnest(coalesce(p.proallargtypes, string_to_array(p.proargtypes::text, ' ')::oid[]))
@@ -444,7 +446,6 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        FROM pg_proc p
        JOIN pg_namespace n ON n.oid = p.pronamespace
        JOIN pg_type rt ON rt.oid = p.prorettype
-       LEFT JOIN pg_type ret_el ON ret_el.oid = rt.typelem
       WHERE n.nspname = ANY(${S})
         AND p.prokind = 'f'
         AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
@@ -503,13 +504,9 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
                       'name', a.attname,
                       'type', format_type(a.atttypid, a.atttypmod),
                       'pos', a.attnum,
-                      'enum', (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
-                                WHERE e.enumtypid = CASE WHEN at.typtype = 'e' THEN at.oid
-                                                         WHEN ael.typtype = 'e' THEN ael.oid END),
+                      'enum', ${enumLabelsSql("a.atttypid")},
                       'composite', ${compositeOfSql("a.atttypid")}) ORDER BY a.attnum), '[]'::json)
                FROM pg_attribute a
-               JOIN pg_type at ON at.oid = a.atttypid
-               LEFT JOIN pg_type ael ON ael.oid = at.typelem
               WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND NOT a.attisdropped) AS attrs
        FROM walk w
        JOIN pg_type t ON t.oid = w.oid
