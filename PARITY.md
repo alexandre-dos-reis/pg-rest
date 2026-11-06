@@ -1,6 +1,6 @@
 # Parity with PostgREST v16
 
-Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope **by design** (it is a library: the host app owns it, see [`docs/design.md`](docs/design.md)), as opposed to ❌, which is simply not done yet.
+Legend: ✅ implemented and covered by tests · 🟡 partial / different (see notes) · ❌ not implemented · ➖ out of scope **by design** (it is a library: the host app owns it, see [`docs/design.md`](docs/design.md)), as opposed to ❌, which is simply not done yet · ➕ **more** than PostgREST: it answers an error where pg-rest answers, deliberately (the note says what and why).
 
 pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgREST are replaced by
 `createPgRest(options)` and `resolveContext`. Everything below is about the request/response behaviour of `handle()`.
@@ -32,7 +32,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| `select` columns, `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist |
+| `select` columns, `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist. A path on anything other than `json`/`jsonb` -- a composite type, an array, a scalar, or a column whose type is unknown -- goes through `to_jsonb()` first, as PostgREST does; a path ending on an index is named after the last key before it |
 | Horizontal filtering: `eq neq gt gte lt lte like ilike match imatch in is isdistinct cs cd ov sl sr nxl nxr adj` | ✅ | |
 | `not.` negation, `and()` / `or()` (nested) | ✅ | |
 | `any` / `all` quantifiers | ✅ | |
@@ -131,7 +131,9 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | OpenAPI (Swagger 2.0) at `/` | 🟡 | Tables, views, RPC, parameters, definitions; no security definitions, may differ in detail from PostgREST |
 | `OPTIONS` / CORS | 🟡 | `OPTIONS` handled with `Allow`; CORS headers are the host's responsibility |
 | Schema cache from `pg_catalog` | ✅ | Tables, views, columns, PK/UK/FK, functions, comments |
-| Domain types, enums, range/array/composite types | 🟡 | Passed through as Postgres returns them; only common types tested |
+| Domain types, enums, range/array types | 🟡 | Passed through as Postgres returns them; only common types tested |
+| Composite types: reading, writing, `->`/`->>` into their fields | ✅ | The fields are also in the schema cache (`SchemaCache.composites`) and in the generated types |
+| Comparing a whole composite value (`owner=eq.…`) | ➕ | PostgREST answers `0A000` (*input of anonymous composite types is not implemented*) for any such comparison. pg-rest reads a **JSON object** as a row of the column's own type, so `query({ where: { owner: { … } } })` works -- see [`docs/query.md`](docs/query.md#composite-types). A bare row literal still answers `0A000` |
 | Hot-reloading on DDL | ➖ | Needs a dedicated `LISTEN` connection (see the README); call `reloadSchema()` after migrations |
 
 ## Verification status

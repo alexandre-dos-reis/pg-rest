@@ -77,8 +77,44 @@ export type Database = {
 | `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the request path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the request will need one (`PGRST201`) |
 | `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, or `null` for `void` |
 | enums | the labels, as a union — `"sad" \| "ok" \| "happy"`, and `("sad" \| "ok")[]` for an array of them |
+| composite types | a named type per [composite type](https://www.postgresql.org/docs/current/rowtypes.html) the schema reaches, nesting included — see [below](#composite-types) |
 
 Every exposed schema is in there; `default` is the first one.
+
+### Composite types
+
+A column of a composite type gets the type's fields, not `unknown`. Each one is declared once, above the relations, and
+referred to by name — including the composites nested inside another, and those of a function's arguments or result:
+
+```ts ignore
+/** The `api.address` composite type. */
+type DatabaseCompositeApiAddress = {
+  city: string | null;
+  zip: string | null;
+};
+
+/** A composite value being written or compared: any of its fields may be left out. */
+type DatabaseCompositeInput<T> = T extends ReadonlyArray<infer E>
+  ? ReadonlyArray<DatabaseCompositeInput<E>>
+  : T extends object
+    ? { readonly [K in keyof T]?: DatabaseCompositeInput<T[K]> }
+    : T;
+
+type DatabaseApiRelations = {
+  venues: {
+    row: { id: number; owner: DatabaseCompositeApiContact | null; branches: DatabaseCompositeApiAddress[] | null };
+    insert: { owner?: DatabaseCompositeInput<DatabaseCompositeApiContact> | null };
+    // ...
+  };
+};
+```
+
+Every field is nullable in `row`, because a composite attribute cannot be `NOT NULL`. On the way **in** — an insert, an
+update, a function argument — the fields are optional instead: a value written or compared with fields left out has
+NULL there, which is what Postgres does with a short row literal. Comparing works the same way, so a `where` takes a
+partial value too. What that means for a query is in [`query.md`](query.md#composite-types).
+
+Only the composite types the module actually mentions are declared, so a `noUnusedLocals` build stays clean.
 
 ## A typed instance
 
@@ -129,8 +165,9 @@ the `select`.
 
 ## What it cannot describe
 
-Deliberately `unknown` rather than a plausible `string`: `json`/`jsonb`, domains, composites, PostGIS, and anything
-unrecognised. A type that is merely plausible is the one that bites.
+Deliberately `unknown` rather than a plausible `string`: `json`/`jsonb`, domains, PostGIS, and anything unrecognised. A
+type that is merely plausible is the one that bites. (Composite types *are* described — see
+[above](#composite-types) — because the catalog carries their fields.)
 
 Three more gaps, each for a reason:
 

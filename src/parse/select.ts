@@ -36,12 +36,19 @@ export interface EmbedItem {
 
 export type SelectItem = StarItem | FieldItem | AggregateItem | EmbedItem;
 
-/** Output key of a field in the JSON result. */
+/**
+ * Output key of a field in the JSON result. A JSON path is named after its last key -- and when it
+ * ends on an *index*, after the last key before it, so `data->1->mycol->>2` is `mycol` and `data->3`
+ * is `data` (PostgREST's `lastJsonKey`, in `Plan.hs`).
+ */
 export const outputName = (item: FieldItem | AggregateItem): string => {
   if (item.alias) return item.alias;
   if (item.kind === "aggregate") return item.fn;
-  const last = item.field.json[item.field.json.length - 1];
-  return last ? last.key : item.field.name;
+  const path = item.field.json;
+  const last = path[path.length - 1];
+  if (!last) return item.field.name;
+  if (!last.isIndex) return last.key;
+  return [...path].reverse().find((step) => !step.isIndex)?.key ?? item.field.name;
 };
 
 const parseItem = (raw: string): SelectItem => {

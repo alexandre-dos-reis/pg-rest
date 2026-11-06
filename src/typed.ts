@@ -237,14 +237,21 @@ type Shaped<Rel, Spec, R> = Rel extends { to: "many" } ? R[] : Spec extends { in
 // filters, order
 // ---------------------------------------------------------------------------
 
+/**
+ * What a column may be compared against. A composite value may leave fields out -- the row it is
+ * compared with has NULL there -- so the shape is the same one a write accepts.
+ */
+type Comparable<V> =
+  V extends ReadonlyArray<unknown> ? V : V extends object ? { readonly [K in keyof V]?: Comparable<V[K]> } : V;
+
 /** A condition on a column: the value itself (`eq`), a `[operator, value]` tuple, or the full form. */
-type Filter<V> =
-  | V
+type Filter<V, C = Comparable<V>> =
+  | C
   | null
-  | readonly [FilterOp, V | ReadonlyArray<V> | null]
+  | readonly [FilterOp, C | ReadonlyArray<C> | null]
   | {
       readonly op: FilterOp;
-      readonly value?: V | ReadonlyArray<V> | null;
+      readonly value?: C | ReadonlyArray<C> | null;
       readonly not?: boolean;
       readonly quantifier?: "any" | "all";
       readonly config?: string;

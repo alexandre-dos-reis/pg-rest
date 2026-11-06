@@ -177,6 +177,56 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data).toEqual([{ mood: "happy", seen: ["ok", "happy"] }]);
   });
 
+  test("a composite column is its fields, and a value written or compared may leave them out", async () => {
+    const { data } = ok(
+      await pgRest.query({
+        table: "venues",
+        select: ["label", "owner", "branches"],
+        where: { owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music", "large"] } },
+        single: true,
+      }),
+    );
+    type Address = { city: string | null; zip: string | null };
+    assertType<
+      Equal<
+        typeof data,
+        {
+          label: string;
+          owner: { name: string | null; home: Address | null; tags: string[] | null } | null;
+          branches: Address[] | null;
+        }
+      >
+    >();
+    expect(data.owner?.home?.city).toBe("Paris");
+
+    // a partial value is legal: the fields left out are compared against, or written as, NULL
+    const partial = ok(await pgRest.query({ table: "venues", select: ["id"], where: { owner: { name: "Ada" } } }));
+    expect(partial.data).toEqual([]);
+
+    const written = ok(
+      await pgRest.query(
+        {
+          table: "venues",
+          action: "insert",
+          rows: { label: "Typed hall", owner: { name: "Barbara", home: { city: "Brussels" } } },
+          select: ["owner"],
+          single: true,
+        },
+        authed,
+      ),
+    );
+    expect(written.data.owner).toEqual({ name: "Barbara", home: { city: "Brussels", zip: null }, tags: null });
+    await pgRest.query({ table: "venues", action: "delete", where: { label: "Typed hall" } }, authed);
+
+    // a function taking one, and one returning one
+    const city = ok(await pgRest.query({ rpc: "city_of", args: { who: { home: { city: "Delft" } } } }));
+    assertType<Equal<typeof city.data, string>>();
+    expect(city.data).toBe("Delft");
+    const made = ok(await pgRest.query({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } }));
+    assertType<Equal<typeof made.data, Address>>();
+    expect(made.data).toEqual({ city: "Lyon", zip: "69001" });
+  });
+
   test("writes take the insert and update shapes", async () => {
     const inserted = ok(
       await pgRest.query(
@@ -391,6 +441,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "clients", select: ["id"], returning: "minimal" }));
     // @ts-expect-error a query names a table or a function, not both
     void (() => pgRest.query({ table: "clients", rpc: "add" }));
+    // @ts-expect-error a field of a composite type is checked like any other value
+    void (() => pgRest.query({ table: "venues", where: { owner: { name: 42 } } }));
+    // @ts-expect-error ... and a field the composite type does not have is refused
+    void (() => pgRest.query({ table: "venues", action: "insert", rows: { label: "x", owner: { nope: "y" } } }));
     // @ts-expect-error an identity column cannot be written (the fixture's moods.id is one)
     void (() => pgRest.query({ table: "moods", action: "insert", rows: { id: 42, mood: "ok" } }));
     // the string forms that change or invent a column are not described by the types: a cast, a

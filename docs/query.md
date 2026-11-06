@@ -57,6 +57,18 @@ CREATE TABLE api.products (
   price numeric(10,2) NOT NULL
 );
 
+-- composite types, one nested in the other
+CREATE TYPE api.address AS (city text, zip text);
+CREATE TYPE api.contact AS (name text, home api.address, tags text[]);
+
+CREATE TABLE api.venues (
+  id serial PRIMARY KEY,
+  label text NOT NULL,
+  owner api.contact,
+  branches api.address[],
+  meta jsonb
+);
+
 CREATE TABLE api.order_items (
   order_id int REFERENCES api.orders(id),
   product_id int REFERENCES api.products(id),
@@ -380,6 +392,72 @@ const plain = await pgRest.query({ table: "orders", select: ["id"] });
 // `stripNulls` leaves the null fields out
 const lean = await pgRest.query({ table: "clients", select: ["name", "meta"], stripNulls: true });
 ```
+
+### Composite types
+
+A column of a [composite type](https://www.postgresql.org/docs/current/rowtypes.html) is an object, in both directions:
+it comes back as one, and a nested object is what writes it. A value with fields left out has NULL there, exactly like
+the row literal it stands for — so a partial value is a legitimate thing to write, and a narrower thing to compare
+against than it looks.
+
+```ts
+// the whole value, as the object Postgres returns
+const venue = await pgRest.query({
+  table: "venues",
+  select: ["label", "owner", "branches"],
+  where: { id: 1 },
+  single: true,
+});
+// venue.data.owner: { name: string | null; home: { city: string | null; zip: string | null } | null; tags: string[] | null } | null
+
+// filtering by a whole value: the fields may come in any order
+const byOwner = await pgRest.query({
+  table: "venues",
+  select: ["id"],
+  where: { owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music"] } },
+});
+
+// `{ name: "Ada" }` is not "whose name is Ada": it compares against a row whose other fields are
+// NULL. For one field, use its path -- on an instance created without a type argument, like any
+// other JSON path (see "What the typed path does not describe")
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const byName = await untyped.query({ table: "venues", select: ["id"], where: { "owner->>name": "Ada" } });
+
+// writing one: the fields left out are NULL
+const placed = await pgRest.query({
+  table: "venues",
+  action: "insert",
+  rows: { label: "New hall", owner: { name: "Barbara", home: { city: "Brussels" } } },
+  select: ["owner"],
+});
+// placed.data: [{ owner: { name: "Barbara", home: { city: "Brussels", zip: null }, tags: null } }]
+```
+
+The arrow operators reach a single field, and work on a composite column exactly as they do on `jsonb` — nested, and
+through an array — because pg-rest converts the column with `to_jsonb()` first, as PostgREST does:
+
+```ts
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const fields = await untyped.query({
+  table: "venues",
+  select: ["id", "owner->>name", "owner->home->>city", "city:branches->0->>city"],
+  where: { "owner->home->>city": "Lyon" },
+  order: ["owner->>name.desc"],
+});
+```
+
+Two things to know:
+
+- **A whole-value filter is pg-rest's own.** PostgREST answers `0A000` (*input of anonymous composite types is not
+  implemented*) to any comparison against a composite column, because the literal it sends has no type. pg-rest sends
+  the value as JSON and turns it into a row of the column's own type, so the comparison works — over `handle()` too,
+  since both entry points share one pipeline. A bare Postgres row literal (`owner=eq.(Ada,,)`) still answers `0A000`,
+  like PostgREST.
+- **An object that names an operator is the long form.** `{ owner: { op: "eq", value: … } }` is a filter spec, not a
+  composite value: an object is read as a value only when it has no `op` key. A composite type with a field actually
+  named `op` therefore cannot be compared through the object form — pass the JSON yourself, as a string:
+  `{ owner: '{"op":"and","name":"Ada"}' }`.
 
 ## Writing
 

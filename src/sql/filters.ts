@@ -1,16 +1,48 @@
 import { PgRestError } from "../errors";
 import type { FieldRef } from "../parse/field";
 import type { Filter, FilterNode, Operator, OrderTerm } from "../parse/filter";
-import { literal, quoteIdent } from "../quote";
+import { literal, quoteIdent, quoteQualified } from "../quote";
 import type { Relation } from "../schema";
 
-/** `"alias"."column"->'a'->>'b'` */
-export const fieldSql = (alias: string, field: FieldRef): string => {
-  let sql = `${quoteIdent(alias)}.${quoteIdent(field.name)}`;
+const declaredType = (rel: Relation | undefined, name: string): string | undefined =>
+  rel?.columns.find((c) => c.name === name)?.type.trim();
+
+/**
+ * Whether an arrow path has to go through `to_jsonb()`. Only `json` and `jsonb` take `->` directly;
+ * everything else -- a composite type, an array, a plain scalar, a domain over json, and a column
+ * whose type is not known at all (a function's result) -- is converted first, exactly as PostgREST
+ * does (`Plan.hs`, `resolveTypeOrUnknown`). It leaves json columns alone on purpose: wrapping them
+ * would stop their indexes from being used.
+ */
+const needsJsonb = (type: string | undefined): boolean => type !== "json" && type !== "jsonb";
+
+/** `"alias"."column"->'a'->>'b'`, or `to_jsonb("alias"."column")->'a'` for a non-json column. */
+export const fieldSql = (alias: string, field: FieldRef, rel?: Relation): string => {
+  const column = `${quoteIdent(alias)}.${quoteIdent(field.name)}`;
+  if (field.json.length === 0) return column;
+  let sql = needsJsonb(declaredType(rel, field.name)) ? `to_jsonb(${column})` : column;
   for (const step of field.json) {
     sql += ` ${step.arrow} ${step.isIndex ? String(Number(step.key)) : literal(step.key)}`;
   }
   return sql;
+};
+
+/**
+ * The right-hand side of a comparison. A composite column compared against a JSON object takes it
+ * as the fields of a row of its own type: `json_populate_record` builds that row, so the fields may
+ * come in any order and the missing ones are NULL, exactly like a JSON body of an insert.
+ *
+ * This is what `query({ where: { item: { name: "sock" } } })` carries. A bare row literal
+ * (`item=eq.(sock,17)`) is left alone: Postgres cannot read one without a type, and PostgREST
+ * answers `0A000` for it, so that stays as it is.
+ */
+const valueSql = (value: string, field: FieldRef, rel?: Relation): string => {
+  const column = field.json.length === 0 ? rel?.columns.find((c) => c.name === field.name) : undefined;
+  if (!column?.composite || column.type.trim().endsWith("[]") || !value.trimStart().startsWith("{")) {
+    return literal(value);
+  }
+  const type = quoteQualified(column.composite.schema, column.composite.name);
+  return `json_populate_record(null::${type}, (${literal(value)})::json)`;
 };
 
 const COMPARISON: Partial<Record<Operator, string>> = {
@@ -41,20 +73,17 @@ const FTS_FUNCTIONS: Partial<Record<Operator, string>> = {
   wfts: "websearch_to_tsquery",
 };
 
-const columnType = (rel: Relation | undefined, field: FieldRef): string | undefined =>
-  field.json.length === 0 ? rel?.columns.find((c) => c.name === field.name)?.type : undefined;
-
 const patternValue = (op: Operator, v: string): string => (op === "like" || op === "ilike" ? v.replace(/\*/g, "%") : v);
 
 /** SQL boolean expression for one filter. */
 export const filterSql = (f: Filter, alias: string, rel?: Relation): string => {
-  const lhs = fieldSql(alias, f.field);
+  const lhs = fieldSql(alias, f.field, rel);
   let expr: string;
 
   switch (f.op) {
     case "in": {
       const list = f.value as ReadonlyArray<string>;
-      expr = list.length === 0 ? "FALSE" : `${lhs} IN (${list.map(literal).join(", ")})`;
+      expr = list.length === 0 ? "FALSE" : `${lhs} IN (${list.map((v) => valueSql(v, f.field, rel)).join(", ")})`;
       break;
     }
     case "is": {
@@ -77,7 +106,7 @@ export const filterSql = (f: Filter, alias: string, rel?: Relation): string => {
       break;
     }
     case "isdistinct":
-      expr = `${lhs} IS DISTINCT FROM ${literal(f.value as string)}`;
+      expr = `${lhs} IS DISTINCT FROM ${valueSql(f.value as string, f.field, rel)}`;
       break;
     case "fts":
     case "plfts":
@@ -85,8 +114,9 @@ export const filterSql = (f: Filter, alias: string, rel?: Relation): string => {
     case "wfts": {
       const fn = FTS_FUNCTIONS[f.op]!;
       const cfg = f.lang ? `${literal(f.lang)}, ` : "";
-      // PostgREST applies to_tsvector() when the column is not already a tsvector.
-      const vector = columnType(rel, f.field) === "tsvector" ? lhs : `to_tsvector(${cfg}${lhs})`;
+      // PostgREST applies to_tsvector() when the column is not already a tsvector -- a JSON path
+      // into one does not change that: the column's own type is what it looks at.
+      const vector = declaredType(rel, f.field.name) === "tsvector" ? lhs : `to_tsvector(${cfg}${lhs})`;
       expr = `${vector} @@ ${fn}(${cfg}${literal(f.value as string)})`;
       break;
     }
@@ -95,7 +125,7 @@ export const filterSql = (f: Filter, alias: string, rel?: Relation): string => {
       const value = patternValue(f.op, f.value as string);
       expr = f.quantifier
         ? `${lhs} ${sqlOp} ${f.quantifier.toUpperCase()} (${literal(value)})`
-        : `${lhs} ${sqlOp} ${literal(value)}`;
+        : `${lhs} ${sqlOp} ${valueSql(value, f.field, rel)}`;
     }
   }
   return f.negate ? `NOT (${expr})` : expr;
@@ -109,7 +139,7 @@ export const nodeSql = (node: FilterNode, alias: string, rel?: Relation): string
   return node.negate ? `NOT ${wrapped}` : wrapped;
 };
 
-export const orderSql = (terms: ReadonlyArray<OrderTerm>, alias: string): string => {
+export const orderSql = (terms: ReadonlyArray<OrderTerm>, alias: string, rel?: Relation): string => {
   if (terms.length === 0) return "";
   const parts = terms.map((t) => {
     if (t.relation) {
@@ -122,7 +152,7 @@ export const orderSql = (terms: ReadonlyArray<OrderTerm>, alias: string): string
       );
     }
     const nulls = t.nulls ? ` NULLS ${t.nulls.toUpperCase()}` : "";
-    return `${fieldSql(alias, t.field)} ${t.dir.toUpperCase()}${nulls}`;
+    return `${fieldSql(alias, t.field, rel)} ${t.dir.toUpperCase()}${nulls}`;
   });
   return `ORDER BY ${parts.join(", ")}`;
 };

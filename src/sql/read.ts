@@ -55,15 +55,15 @@ interface Ctx {
   readonly aliases: Aliases;
 }
 
-const fieldExpr = (item: FieldItem, alias: string): string => {
-  const base = fieldSql(alias, item.field);
+const fieldExpr = (item: FieldItem, alias: string, rel: Relation): string => {
+  const base = fieldSql(alias, item.field, rel);
   const expr = item.cast ? `${base}::${item.cast}` : base;
   const plain = !item.cast && item.field.json.length === 0 && !item.alias;
   return plain ? expr : `${expr} AS ${quoteIdent(outputName(item))}`;
 };
 
-const aggregateExpr = (item: AggregateItem, alias: string): string => {
-  const arg = item.field ? fieldSql(alias, item.field) : "*";
+const aggregateExpr = (item: AggregateItem, alias: string, rel: Relation): string => {
+  const arg = item.field ? fieldSql(alias, item.field, rel) : "*";
   let expr = `${item.fn}(${arg})`;
   if (item.cast) expr = `(${expr})::${item.cast}`;
   return `${expr} AS ${quoteIdent(outputName(item))}`;
@@ -94,7 +94,7 @@ const orderClause = (
   const q = quoteIdent;
   const parts = terms.map((t) => {
     const tail = `${t.dir.toUpperCase()}${t.nulls ? ` NULLS ${t.nulls.toUpperCase()}` : ""}`;
-    if (!t.relation) return `${fieldSql(alias, t.field)} ${tail}`;
+    if (!t.relation) return `${fieldSql(alias, t.field, rel)} ${tail}`;
     const embed = items.find((i): i is EmbedItem => i.kind === "embed" && (i.alias ?? i.target) === t.relation);
     if (!embed) {
       throw new PgRestError(
@@ -131,10 +131,10 @@ const orderClause = (
     }
     const o = ctx.aliases.next("pgrst_o");
     if (r.computed) {
-      return `(SELECT ${fieldSql(o, t.field)} FROM ${quoteQualified(r.computed.schema, r.computed.name)}(${q(alias)}) AS ${q(o)} LIMIT 1) ${tail}`;
+      return `(SELECT ${fieldSql(o, t.field, r.to)} FROM ${quoteQualified(r.computed.schema, r.computed.name)}(${q(alias)}) AS ${q(o)} LIMIT 1) ${tail}`;
     }
     const cond = r.toCols.map((c, i) => `${q(o)}.${q(c)} = ${q(alias)}.${q(r.fromCols[i]!)}`).join(" AND ");
-    return `(SELECT ${fieldSql(o, t.field)} FROM ${quoteQualified(r.to.schema, r.to.name)} AS ${q(o)} WHERE ${cond} LIMIT 1) ${tail}`;
+    return `(SELECT ${fieldSql(o, t.field, r.to)} FROM ${quoteQualified(r.to.schema, r.to.name)} AS ${q(o)} WHERE ${cond} LIMIT 1) ${tail}`;
   });
   return `ORDER BY ${parts.join(", ")}`;
 };
@@ -163,11 +163,11 @@ const buildItems = (
         } else cols.push(`${quoteIdent(alias)}.*`);
         break;
       case "field":
-        cols.push(fieldExpr(item, alias));
-        if (aggregated) groupBy.push(fieldSql(alias, item.field));
+        cols.push(fieldExpr(item, alias, rel));
+        if (aggregated) groupBy.push(fieldSql(alias, item.field, rel));
         break;
       case "aggregate":
-        cols.push(aggregateExpr(item, alias));
+        cols.push(aggregateExpr(item, alias, rel));
         break;
       case "embed": {
         const e = buildEmbed(ctx, item, rel, alias, path);

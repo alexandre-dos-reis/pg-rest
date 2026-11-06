@@ -2,6 +2,29 @@ import type { DbSession } from "./adapter";
 import { PgRestError } from "./errors";
 import { literal } from "./quote";
 
+/** A composite type (https://www.postgresql.org/docs/current/rowtypes.html), by schema and name. */
+export interface CompositeRef {
+  readonly schema: string;
+  readonly name: string;
+}
+
+/** One field of a composite type. A composite attribute is always nullable: it cannot be `NOT NULL`. */
+export interface CompositeAttribute {
+  readonly name: string;
+  /** Result of `format_type`, like {@link Column.type}. */
+  readonly type: string;
+  readonly enumLabels?: ReadonlyArray<string> | undefined;
+  /** The composite type of the attribute, when it is one (or an array of one): composites nest. */
+  readonly composite?: CompositeRef | undefined;
+  readonly position: number;
+}
+
+/** A composite type and its fields, in declaration order. */
+export interface CompositeType extends CompositeRef {
+  readonly attributes: ReadonlyArray<CompositeAttribute>;
+  readonly comment: string | null;
+}
+
 export interface Column {
   readonly name: string;
   /** Result of `format_type`, e.g. `integer`, `character varying(10)`, `text[]`. */
@@ -11,6 +34,11 @@ export interface Column {
    * Domains over an enum are not unwrapped.
    */
   readonly enumLabels?: ReadonlyArray<string> | undefined;
+  /**
+   * The composite type of the column, when it is one -- through an array (`addr[]`) or a domain over
+   * one. `SchemaCache.composites` holds its fields.
+   */
+  readonly composite?: CompositeRef | undefined;
   /**
    * For a view column read straight from a table column, that column -- followed through
    * view-over-view chains. `nullable` still reports what the catalog says of the *view*, which is
@@ -63,6 +91,8 @@ export interface FunctionArg {
   readonly variadic: boolean;
   /** Labels of the enum type, when the argument is an enum or an array of one. */
   readonly enumLabels?: ReadonlyArray<string> | undefined;
+  /** The composite type of the argument, when it is one (or an array of one). */
+  readonly composite?: CompositeRef | undefined;
 }
 
 export interface FunctionDef {
@@ -72,6 +102,8 @@ export interface FunctionDef {
   readonly returnType: string;
   /** Labels of the enum type, when the function returns an enum or an array of one. */
   readonly returnEnumLabels?: ReadonlyArray<string> | undefined;
+  /** The composite type the function returns, when it is a standalone one rather than a table's row type. */
+  readonly returnComposite?: CompositeRef | undefined;
   readonly returnsSet: boolean;
   /** True if the function returns a composite / record / TABLE(...) row type. */
   readonly returnsComposite: boolean;
@@ -105,9 +137,21 @@ export interface SchemaCache {
   readonly relations: ReadonlyMap<string, Relation>;
   readonly foreignKeys: ReadonlyArray<ForeignKey>;
   readonly functions: ReadonlyMap<string, ReadonlyArray<FunctionDef>>;
+  /**
+   * The composite types the exposed schemas reach, keyed by `schema.name` -- those of a column, a
+   * function argument or a return type, and the ones nested inside them, wherever they live.
+   */
+  readonly composites: ReadonlyMap<string, CompositeType>;
 }
 
 export const relKey = (schema: string, name: string) => `${schema}.${name}`;
+
+/** The composite type of a column or attribute, from the cache. */
+export const compositeOf = (
+  cache: SchemaCache,
+  of: { readonly composite?: CompositeRef | undefined },
+): CompositeType | undefined =>
+  of.composite ? cache.composites.get(relKey(of.composite.schema, of.composite.name)) : undefined;
 
 const kindOf = (k: string): RelationKind =>
   k === "v" ? "view" : k === "m" ? "matview" : k === "f" ? "foreign" : k === "p" ? "partitioned" : "table";
@@ -115,6 +159,26 @@ const kindOf = (k: string): RelationKind =>
 const schemaList = (schemas: ReadonlyArray<string>) => `ARRAY[${schemas.map(literal).join(",")}]::text[]`;
 
 const asJson = (inner: string) => `SELECT coalesce(json_agg(r), '[]'::json)::text AS j FROM (${inner}) r`;
+
+/**
+ * `{ schema, name }` of the composite type behind a type oid -- through arrays (`addr[]`) and
+ * domains, which nest in any order -- or NULL when there is none. `format_type` cannot answer this:
+ * `api.addr` and `api.jd` read the same way.
+ */
+const compositeOfSql = (oid: string) => `(
+            WITH RECURSIVE under(oid, depth) AS (
+              SELECT ${oid}, 0
+              UNION ALL
+              SELECT CASE WHEN t.typtype = 'd' THEN t.typbasetype ELSE t.typelem END, u.depth + 1
+                FROM under u JOIN pg_type t ON t.oid = u.oid
+               WHERE u.depth < 8 AND t.typrelid = 0 AND (t.typtype = 'd' OR t.typcategory = 'A')
+            )
+            SELECT json_build_object('schema', tn.nspname, 'name', t.typname)
+              FROM under u
+              JOIN pg_type t ON t.oid = u.oid
+              JOIN pg_class tc ON tc.oid = t.typrelid AND tc.relkind = 'c'
+              JOIN pg_namespace tn ON tn.oid = t.typnamespace
+             LIMIT 1)`;
 
 const run = async <T>(db: DbSession, sql: string): Promise<T[]> => {
   const rows = await db.query(asJson(sql));
@@ -237,10 +301,12 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     comment: string | null;
     pos: number;
     enum_labels: string[] | null;
+    composite: CompositeRef | null;
   }>(
     db,
     `SELECT n.nspname AS schema, c.relname AS "table", a.attname AS name,
             format_type(a.atttypid, a.atttypmod) AS type,
+            ${compositeOfSql("a.atttypid")} AS composite,
             (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
               WHERE e.enumtypid = CASE WHEN bt.typtype = 'e' THEN bt.oid
                                        WHEN et.typtype = 'e' THEN et.oid END) AS enum_labels,
@@ -337,7 +403,8 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     ret_rel: { schema: string; name: string } | null;
     ret_media: { name: string; bytea: boolean } | null;
     return_enum: string[] | null;
-    args: Array<{ name: string; type: string; mode: string; enum: string[] | null }>;
+    return_composite: CompositeRef | null;
+    args: Array<{ name: string; type: string; mode: string; enum: string[] | null; composite: CompositeRef | null }>;
   }>(
     db,
     `SELECT n.nspname AS schema, p.proname AS name,
@@ -346,6 +413,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
             (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
                WHERE e.enumtypid = CASE WHEN rt.typtype = 'e' THEN rt.oid
                                         WHEN ret_el.typtype = 'e' THEN ret_el.oid END) AS return_enum,
+            ${compositeOfSql("p.prorettype")} AS return_composite,
             rt.typtype::text AS return_typtype,
             coalesce(p.proargmodes && ARRAY['o','b','t']::"char"[], false) AS has_out,
             p.pronargdefaults AS n_defaults,
@@ -368,6 +436,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
                                                         FROM pg_type at
                                                         LEFT JOIN pg_type ael ON ael.oid = at.typelem
                                                        WHERE at.oid = t.typ)),
+                       'composite', ${compositeOfSql("t.typ")},
                        'mode', coalesce(p.proargmodes[t.i]::text, 'i')) ORDER BY t.i), '[]'::json)
                FROM unnest(coalesce(p.proallargtypes, string_to_array(p.proargtypes::text, ' ')::oid[]))
                     WITH ORDINALITY AS t(typ, i)
@@ -383,6 +452,70 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       -- the catalog scan returns, which differs between a database and a copy of it, and the
       -- generated types churn
       ORDER BY 1, 2, pg_get_function_identity_arguments(p.oid)`,
+  );
+
+  // Composite types are reached from the exposed schemas rather than listed by schema: the type of a
+  // column may live anywhere, and a composite nests other composites.
+  const compRows = await run<{
+    schema: string;
+    name: string;
+    comment: string | null;
+    attrs: Array<{ name: string; type: string; pos: number; enum: string[] | null; composite: CompositeRef | null }>;
+  }>(
+    db,
+    `WITH RECURSIVE seed(oid) AS (
+            SELECT a.atttypid
+              FROM pg_attribute a
+              JOIN pg_class c ON c.oid = a.attrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = ANY(${S}) AND c.relkind IN ('r','v','m','f','p')
+               AND a.attnum > 0 AND NOT a.attisdropped
+            UNION
+            SELECT t.typ
+              FROM pg_proc p
+              JOIN pg_namespace n ON n.oid = p.pronamespace
+              CROSS JOIN LATERAL unnest(array_append(
+                      coalesce(p.proallargtypes, string_to_array(p.proargtypes::text, ' ')::oid[]),
+                      p.prorettype)) AS t(typ)
+             WHERE n.nspname = ANY(${S}) AND p.prokind = 'f'
+          ),
+          -- down through arrays, domains and the fields of a composite, until nothing new shows up
+          walk(oid) AS (
+            SELECT oid FROM seed
+            UNION
+            SELECT x.oid
+              FROM walk w
+              JOIN pg_type t ON t.oid = w.oid
+              CROSS JOIN LATERAL (
+                SELECT t.typelem AS oid WHERE t.typcategory = 'A'
+                UNION ALL
+                SELECT t.typbasetype WHERE t.typtype = 'd'
+                UNION ALL
+                SELECT a.atttypid
+                  FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid
+                 WHERE c.oid = t.typrelid AND c.relkind = 'c' AND a.attnum > 0 AND NOT a.attisdropped
+              ) x
+             WHERE x.oid <> 0
+          )
+     SELECT tn.nspname AS schema, t.typname AS name,
+            obj_description(t.oid, 'pg_type') AS comment,
+            (SELECT coalesce(json_agg(json_build_object(
+                      'name', a.attname,
+                      'type', format_type(a.atttypid, a.atttypmod),
+                      'pos', a.attnum,
+                      'enum', (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e
+                                WHERE e.enumtypid = CASE WHEN at.typtype = 'e' THEN at.oid
+                                                         WHEN ael.typtype = 'e' THEN ael.oid END),
+                      'composite', ${compositeOfSql("a.atttypid")}) ORDER BY a.attnum), '[]'::json)
+               FROM pg_attribute a
+               JOIN pg_type at ON at.oid = a.atttypid
+               LEFT JOIN pg_type ael ON ael.oid = at.typelem
+              WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND NOT a.attisdropped) AS attrs
+       FROM walk w
+       JOIN pg_type t ON t.oid = w.oid
+       JOIN pg_class c ON c.oid = t.typrelid AND c.relkind = 'c'
+       JOIN pg_namespace tn ON tn.oid = t.typnamespace
+      ORDER BY 1, 2`,
   );
 
   const handlerRows = await run<{
@@ -463,6 +596,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       name: c.name,
       type: c.type,
       ...(c.enum_labels ? { enumLabels: c.enum_labels } : {}),
+      ...(c.composite ? { composite: c.composite } : {}),
       ...(source ? { source } : {}),
       nullable: c.nullable,
       hasDefault: c.has_default,
@@ -505,6 +639,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       hasDefault: i >= f.args.length - nDefaults,
       variadic: a.mode === "v",
       ...(a.enum ? { enumLabels: a.enum } : {}),
+      ...(a.composite ? { composite: a.composite } : {}),
     }));
     const def: FunctionDef = {
       schema: f.schema,
@@ -512,6 +647,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       args,
       returnType: f.return_type,
       ...(f.return_enum ? { returnEnumLabels: f.return_enum } : {}),
+      ...(f.return_composite ? { returnComposite: f.return_composite } : {}),
       returnsSet: f.returns_set,
       returnsComposite: f.has_out || f.return_typtype === "c" || f.return_type === "record",
       returnsVoid: f.return_type === "void",
@@ -526,7 +662,23 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     functions.set(key, [...(functions.get(key) ?? []), def]);
   }
 
-  return { schemas, relations, foreignKeys, functions, mediaHandlers };
+  const composites = new Map<string, CompositeType>();
+  for (const c of compRows) {
+    composites.set(relKey(c.schema, c.name), {
+      schema: c.schema,
+      name: c.name,
+      attributes: c.attrs.map((a) => ({
+        name: a.name,
+        type: a.type,
+        ...(a.enum ? { enumLabels: a.enum } : {}),
+        ...(a.composite ? { composite: a.composite } : {}),
+        position: a.pos,
+      })),
+      comment: c.comment,
+    });
+  }
+
+  return { schemas, relations, foreignKeys, functions, mediaHandlers, composites };
 };
 
 // ---------------------------------------------------------------------------

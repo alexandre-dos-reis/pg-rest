@@ -77,6 +77,18 @@ CREATE TABLE api.moods (
   note  text
 );
 
+-- Composite types (https://www.postgresql.org/docs/current/rowtypes.html): one nested inside
+-- another, as a column, as an array of them, and as a function argument.
+CREATE TYPE api.address AS (city text, zip text);
+CREATE TYPE api.contact AS (name text, home api.address, tags text[]);
+CREATE TABLE api.venues (
+  id       serial PRIMARY KEY,
+  label    text NOT NULL,
+  owner    api.contact,
+  branches api.address[],
+  meta     jsonb
+);
+
 CREATE TABLE v2.things (id serial PRIMARY KEY, label text NOT NULL);
 
 -- Functions
@@ -86,6 +98,8 @@ CREATE FUNCTION api.greet(name text DEFAULT 'world') RETURNS text LANGUAGE sql I
 CREATE FUNCTION api.orders_by_status(s text) RETURNS SETOF api.orders LANGUAGE sql STABLE AS $$ SELECT * FROM api.orders WHERE status = s $$;
 CREATE FUNCTION api.client_summary(cid int) RETURNS TABLE(client_id int, order_count bigint, revenue numeric)
   LANGUAGE sql STABLE AS $$ SELECT cid, count(*), coalesce(sum(total), 0) FROM api.orders WHERE client_id = cid $$;
+CREATE FUNCTION api.city_of(who api.contact) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT (who.home).city $$;
+CREATE FUNCTION api.make_address(city text, zip text) RETURNS api.address LANGUAGE sql IMMUTABLE AS $$ SELECT ROW(city, zip)::api.address $$;
 CREATE FUNCTION api.nothing() RETURNS void LANGUAGE sql AS $$ SELECT $$;
 CREATE FUNCTION api.whoami() RETURNS json LANGUAGE sql STABLE AS $$
   SELECT json_build_object(
@@ -155,6 +169,11 @@ INSERT INTO api.products (name, price) VALUES ('Keyboard', 120), ('Mouse', 30), 
 INSERT INTO api.order_items VALUES (1,1,1),(1,2,2),(2,2,1),(4,3,1),(4,1,1);
 INSERT INTO api.employees (name, manager_id) VALUES ('Boss', NULL), ('Alice', 1), ('Bob', 1), ('Carol', 2);
 INSERT INTO api.moods (mood, seen, note) VALUES ('happy', '{ok,happy}', 'first'), ('sad', NULL, NULL);
+INSERT INTO api.venues (label, owner, branches, meta) VALUES
+  ('Concert hall', ROW('Ada', ROW('Paris', '75001')::api.address, '{music,large}')::api.contact,
+   ARRAY[ROW('Lyon', '69001')::api.address, ROW('Nice', '06000')::api.address], '{"seats": 900}'),
+  ('Back room', ROW('Grace', ROW('Lyon', '69002')::api.address, '{small}')::api.contact,
+   ARRAY[ROW('Paris', '75002')::api.address], '{"seats": 40}');
 INSERT INTO v2.things (label) VALUES ('one'), ('two');
 
 -- Privileges

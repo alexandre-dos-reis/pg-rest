@@ -43,6 +43,26 @@ const { data: created, status } = await pgRest.query({
 // created: Array<{ id: number; priority: "low" | "normal" | "high" }>
 console.log(`created ${status}:`, created);
 
+// A composite column is an object, both ways: its fields are typed, and a value being written or
+// compared may leave some out -- the ones left out are NULL, as they would be in a row literal.
+const { data: placed } = await pgRest.query({
+  table: "todos",
+  select: ["title", "at"], //                    `at` is api.place: { room: string | null; floor: number | null }
+  where: { at: { room: "Lab", floor: 2 } }, //   the whole value; `{ room: "Lab" }` would compare floor against NULL
+});
+if (placed?.[0]) console.log(`in ${placed[0].at?.room} on floor ${placed[0].at?.floor}:`, placed[0].title);
+
+const { data: moved } = await pgRest.query({
+  table: "todos",
+  action: "update",
+  set: { at: { room: "Lab", floor: 3 } }, //     a nested object is the composite value
+  where: { title: "Try pg-rest" },
+  select: ["at"],
+});
+console.log("moved:", moved);
+// Reaching a single field (`select: ["at->>room"]`, `where: { "at->>floor": 3 }`) works at runtime
+// and is not described by the types, like any other JSON path: use an untyped instance for those.
+
 const { data: open } = await pgRest.query({
   rpc: "open_todos", //                          the functions of the schema, instead of `table`
   select: ["title"], //                          its result is a row like any other: todos', here
