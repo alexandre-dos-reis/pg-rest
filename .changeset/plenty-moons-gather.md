@@ -12,7 +12,6 @@ statements. `transaction(fn, ctx)` is one scope, one transaction:
 ```ts
 const { data, error } = await pgRest.transaction(async (tx) => {
   const order = await tx.query({ table: "orders", action: "insert", rows: { client_id: 1 }, single: true });
-  if (order.error) throw order.error; //  rolls the transaction back
   await tx.query({ table: "order_items", action: "insert", rows: itemsFor(order.data.id) });
   return order.data.id; //                this is the result's `data`
 }, { role: "authenticated", claims: { sub: user.id } });
@@ -22,17 +21,25 @@ It answers a `QueryResult` around whatever the callback returned (`data` is that
 rejects, like `query()`. Both entry points carry it: `pgRest.transaction(fn, ctx)`, and `pgQuery.transaction(fn)` on a
 bound query, which reads its context source **once, on entry**.
 
-- **`tx.query` takes no context, and cannot.** The role and the claims are `set_config(…, true)`, transaction-local and
-  issued once at the head of the transaction; re-issuing them halfway through scopes nothing. A context passed to
-  `tx.query` is a type error rather than an argument quietly ignored — the per-call override moves to the scope, which
-  is the granularity `set_config` works at: `pgQuery.transaction(fn, { role: "admin" })`.
-- **Any failed query rolls the scope back**, even when the callback goes on and returns a value: `single` and
-  `maxAffected` are checks raised _after_ a statement that worked, and a scope that committed would keep the row and
-  report it as refused. The first failure is what the result carries, and a query issued after one is refused with
-  `PGRSTX03` rather than PostgreSQL's `25P02`.
-- **`tx.transaction(fn)`** is a nested scope on a `SAVEPOINT`: it rolls back on its own, so a query that is _allowed_ to
-  fail goes in one and its failure comes back as that call's `error`. **`tx.rollback()`** undoes the scope it is called
-  in and leaves it (`PGRSTX02`).
+`tx.query` differs from `query` in exactly two ways, and both of them follow from sharing a transaction.
+
+- **It takes no context, and cannot.** The role and the claims are `set_config(…, true)`, transaction-local and issued
+  once at the head of the transaction; re-issuing them halfway through scopes nothing. A context passed to `tx.query`
+  is a type error rather than an argument quietly ignored — the per-call override moves to the scope, which is the
+  granularity `set_config` works at: `pgQuery.transaction(fn, { role: "admin" })`.
+- **It rejects on failure instead of answering an `error`.** A query that failed is a transaction that will not commit,
+  so leaving is the only correct next step and the library takes it rather than asking every call site to. What comes
+  back is therefore the success — `data` is not null, `count` is the number the query asked for, and
+  `if (error) throw error` disappears. The promise that never rejects moved from the query to the **scope**, where it
+  is the only one that can mean anything. What it throws is the same `QueryError` `query()` would have returned.
+- **Any failed query stops the scope from committing**, even when a `catch` swallowed it and the callback returned a
+  value: `single` and `maxAffected` are checks raised _after_ a statement that worked, and a scope that committed would
+  keep the row and report it as refused. The first failure is what the result carries, and a query issued after one is
+  refused with `PGRSTX03` rather than PostgreSQL's `25P02`.
+- **`tx.transaction(fn)`** is a nested scope on a `SAVEPOINT`, and the one place a transaction may carry on after a
+  failure — so unlike `tx.query` it answers a `QueryResult` rather than rejecting: a query that is _allowed_ to fail
+  goes in one, and its failure is an `error` you read. **`tx.rollback()`** undoes the scope it is called in and leaves
+  it (`PGRSTX02`).
 - **`readOnly`**, **`isolationLevel`** and **`retry`** are per-transaction, so the scope decides them rather than
   whichever query went first: `{ readOnly: true }` and `{ isolationLevel: "serializable" }` go in as the transaction's
   first statement, and `{ retry: { attempts, on, delayMs } }` replays the scope on a serialization failure — off by

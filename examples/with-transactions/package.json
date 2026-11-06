@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "gen:types": "bun gen-types.ts",
     "start": "bun main.ts",
     "typecheck": "tsc --noEmit"
   },

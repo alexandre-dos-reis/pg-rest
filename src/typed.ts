@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { ContextSource, CountFrom, FilterOp, QueryResult, Scalar, TransactionOptions } from "./query";
+import type { ContextSource, CountFrom, FilterOp, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -553,9 +553,14 @@ export interface TypedContextQuery<Db extends AnyDatabase> {
  * the context, which a scope decides once, on entry.
  */
 export interface TypedTransaction<Db extends AnyDatabase> {
+  /**
+   * Run a query in this transaction. It **rejects** on failure rather than answering an `error`, so
+   * the result is the success: `data` is not null and `count` is the number the query asked for.
+   * The scope catches it, rolls back, and hands it to you as its own `error`.
+   */
   query<const Q extends TypedQuery<Db>>(
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-  ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+  ): Promise<QueryOk<QueryData<Db, Q>, CountFrom<Q>>>;
   /** A nested scope on a `SAVEPOINT`: it rolls back on its own, leaving this one usable. */
   transaction<A>(fn: (tx: TypedTransaction<Db>) => Promise<A>): Promise<QueryResult<A, undefined>>;
   /** Roll this scope back and leave it. */
@@ -614,11 +619,10 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<
    * @example
    * const { data, error } = await pgRest.transaction(async (tx) => {
    *   const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Ada" }, single: true });
-   *   if (client.error) throw client.error; // rolls the transaction back
    *   await tx.query({ table: "orders", action: "insert", rows: { client_id: client.data.id, total: 10 } });
    *   return client.data.id;
    * }, { role: "authenticated" });
-   * // data: number | null
+   * // data: number | null -- null when the scope failed, which `error` is what explains
    */
   transaction<A>(
     fn: (tx: TypedTransaction<Db>) => Promise<A>,

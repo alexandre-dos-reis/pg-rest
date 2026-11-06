@@ -704,19 +704,17 @@ const { data, error } = await pgRest.transaction(async (tx) => {
     rows: { client_id: 1, total: 42 },
     single: true,
   });
-  if (order.error) throw order.error; //           rolls the transaction back
 
-  const items = await tx.query({
+  await tx.query({
     table: "order_items",
     action: "insert",
     rows: [{ order_id: order.data.id, product_id: 1, qty: 2 }],
   });
-  if (items.error) throw items.error;
 
   return order.data.id; //                         this is the result's `data`
 }, ctx);
 
-error?.status; // the failure, if there was one -- `transaction()` never rejects either
+error?.status; // the failure, if there was one -- `transaction()` never rejects
 data; //          number | null
 ```
 
@@ -724,11 +722,36 @@ The result is a `QueryResult` around whatever the callback returned: `data` is t
 status is `200`. A failure comes back the way `query()`'s does — a `QueryError` if it was one, a 500 carrying the
 original under `cause` if it was anything else.
 
-**`tx.query` takes no context, and cannot.** The role and the claims are set with `set_config(…, true)`, which is
+**`tx.query` differs from `query` in exactly two ways**, and both of them follow from sharing a transaction.
+
+**It takes no context, and cannot.** The role and the claims are set with `set_config(…, true)`, which is
 transaction-local and issued once at the head of the transaction; honouring a per-call context would mean issuing
 `set_config` again halfway through, which scopes nothing — it changes the role for every statement that follows, in row
-order, with no way back. So `tx.query` is `query` minus its second parameter, and a context passed to it is a type
-error rather than an argument quietly ignored. Another role means another transaction.
+order, with no way back. So a context passed to `tx.query` is a type error rather than an argument quietly ignored.
+Another role means another transaction.
+
+**It rejects on failure instead of answering an `error`** — which is why nothing is narrowed above. A query that failed
+is a transaction that will not commit, so there is nothing left for the rest of the callback to do with it; leaving is
+the only correct next step, and the library takes it rather than asking every call site to. What comes back is
+therefore the *success*: `data` is not null and `count` is the number the query asked for.
+
+```ts
+const { data, count } = await pgRest.transaction(async (tx) => {
+  const { data: rows, count: total } = await tx.query({
+    table: "clients",
+    select: ["id", "name"],
+    count: "exact",
+    limit: 10,
+  });
+  // rows: Array<{ id: number; name: string }> -- not `| null`
+  // total: number -- not `number | undefined`
+  return `${rows.length} of ${total}`;
+}, ctx);
+```
+
+The promise that never rejects did not disappear; it moved from the query to the **scope**, which is the only place it
+can mean anything now that several of them share a transaction. What `tx.query` throws is the same `QueryError`
+`query()` would have returned, so a `catch` can read it — and the section below is about why you rarely want to.
 
 What the context does _not_ cover is per-statement: the `search_path`, the `request.*` settings SQL reads and the
 `timezone` are issued with every query inside the scope, which is what lets two queries of one transaction name two
@@ -736,80 +759,76 @@ schemas.
 
 ### What rolls a scope back
 
-Three things, and the third is the one worth reading twice:
-
 ```ts
-// 1. a throw -- yours, or an `error` you rethrow
+// 1. a failed query -- it leaves the scope, and the write before it is undone with it
+const refused = await pgRest.transaction(async (tx) => {
+  await tx.query({ table: "clients", action: "insert", rows: { name: "Ada", email: "a@b.c" } });
+  await tx.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "a@b.c" } });
+  return "unreachable"; //                       the second insert collides, so this is never reached
+}, ctx);
+refused.error?.body.code; // "23505" -- the query's own failure, carried out of the scope
+
+// 2. a throw of your own, for a reason the database knows nothing about
 await pgRest.transaction(async (tx) => {
   await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
   throw new Error("changed my mind");
 }, ctx);
 
-// 2. rollback(), when nothing went wrong and you still do not want it
+// 3. rollback(), when nothing went wrong and you still do not want it
 const left = await pgRest.transaction(async (tx) => {
   await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
   tx.rollback();
 }, ctx);
 left.error?.body.code; // "PGRSTX02", kind "rolled_back"
-
-// 3. *any* query that failed, even if the callback went on and returned
-const kept = await pgRest.transaction(async (tx) => {
-  await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
-  const none = await tx.query({ table: "notes", where: { body: "nobody" }, single: true });
-  return none.error?.body.code ?? "committed"; //  a value, from a callback that ignored a failure
-}, ctx);
-kept.data; //            null -- the scope rolled back anyway
-kept.error?.status; //   406: the PGRST116 of the query that failed, carried out of the scope
 ```
 
-The third rule exists because a failed query is not always a failed transaction as far as PostgreSQL is concerned.
-`single` and `maxAffected` (`PGRST116`, `PGRST124`) are the library's own checks, raised _after_ a statement that
-worked, and they exist in order to undo the write they just measured. A scope that committed on a callback's return
-value would keep the row and hand you an `error` describing it as refused. So the scope refuses to commit, and the
-first failure is what the result carries.
-
-It follows that a scope has no use after a failure: PostgreSQL has aborted the transaction and the next statement
-answers `25P02`, whatever it is. pg-rest says so instead — `PGRSTX03`, with the way out in its `hint`:
+A fourth case is worth naming because it is the one that could have been wrong. `single` and `maxAffected`
+(`PGRST116`, `PGRST124`) are the library's own checks, raised _after_ a statement that worked, in order to undo the
+write they just measured. Nothing has aborted the transaction when they fire — so a scope that committed because the
+callback returned would keep the row and hand you an `error` describing it as refused. **Any query that failed stops
+the scope from committing**, even if you caught what it threw and carried on:
 
 ```ts
-const r = await pgRest.transaction(async (tx) => {
-  const bad = await tx.query({ table: "clients", action: "insert", rows: { name: "a", email: "taken@x.com" } });
-  const next = await tx.query({ table: "clients", select: ["id"] });
-  next.error?.body.code; // "PGRSTX03" -- refused, not sent
-  return bad.error?.body.code;
+const kept = await pgRest.transaction(async (tx) => {
+  await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
+  try {
+    await tx.query({ table: "notes", where: { body: "nobody" }, single: true });
+  } catch {
+    return "committed anyway?"; //                 a value, from a callback that swallowed a failure
+  }
+  return "unreachable";
 }, ctx);
-r.error?.body.code; // the first failure: "23505"
+kept.data; //            null -- the scope rolled back regardless
+kept.error?.status; //   406: the PGRST116 of the query that failed
 ```
+
+Which is also why catching inside a scope buys little: PostgreSQL has aborted the transaction, the next statement
+answers `25P02` whatever it is, and the scope will not commit. pg-rest says so rather than passing that on —
+`PGRSTX03`, with the way out in its `hint`. The way out is the next section.
 
 ### Letting one query fail: a nested scope
 
-`tx.transaction()` is a scope on a `SAVEPOINT`. It rolls back on its own when it fails, which leaves the transaction
-around it usable — so a query that is _allowed_ to fail goes in one, and its failure comes back as that call's `error`
-rather than condemning everything:
+`tx.transaction()` is a scope on a `SAVEPOINT`, and it is the one place a transaction can carry on after a failure: the
+savepoint undoes it, the transaction around it stays usable. So it answers a `QueryResult` rather than rejecting — a
+nested scope is where an `error` is a thing you can read and decide about:
 
 ```ts
 await pgRest.transaction(async (tx) => {
   const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Ada" }, single: true });
-  if (client.error) throw client.error;
 
   // the profile is optional: if it collides, the client still stands
-  const profile = await tx.transaction(async (nested) => {
-    const r = await nested.query({
-      table: "profiles",
-      action: "insert",
-      rows: { client_id: client.data.id, bio: "hi" },
-    });
-    if (r.error) throw r.error; //        rolls back to the savepoint, and no further
-    return r.data;
-  });
+  const profile = await tx.transaction((nested) =>
+    nested.query({ table: "profiles", action: "insert", rows: { client_id: client.data.id, bio: "hi" } }),
+  );
+  profile.error?.body.code; //  "23505" perhaps -- and the scope is still good
 
   return { client: client.data.id, profile: profile.error === null };
 }, ctx);
 ```
 
-A nested scope answers a `QueryResult` like the outer one does, rather than rethrowing: the enclosing scope decides
-whether to carry on or to rethrow. `nested.rollback()` undoes the savepoint only. It takes no context and no options —
-neither the identity nor `READ ONLY` can change once the transaction has started.
+Nothing in there has to rethrow: the nested scope catches what the query threw, rolls back to its savepoint, and hands
+the failure to its caller. `nested.rollback()` undoes the savepoint only. A nested scope takes no context and no
+options — neither the identity nor `READ ONLY` can change once the transaction has started.
 
 ### What the scope decides, and not the query
 
@@ -862,8 +881,9 @@ const pgQuery = pgRest.setContextQuery(() => store.getStore());
 
 await pgQuery.transaction(async (tx) => tx.query({ table: "notes", action: "insert", rows: { body: "mine" } }));
 
-// `readOnly` and `retry` alone leave the ambient context in place; naming a role replaces it for
-// the whole scope, which is the per-call override moved to the granularity set_config works at
+// `readOnly`, `isolationLevel` and `retry` alone leave the ambient context in place; naming a role
+// replaces it for the whole scope, which is the per-call override moved to the granularity
+// set_config works at
 await pgQuery.transaction(async (tx) => tx.query({ table: "notes", select: ["id"] }), { role: "admin" });
 ```
 
@@ -873,7 +893,9 @@ second thing — `transaction`, `rollback` — without changing a signature agai
 
 What a scope is not is a transaction **your** application opened: here pg-rest owns the `BEGIN`, the `COMMIT` and the
 `ROLLBACK`, and lends a session to your callback. Running a pg-rest query inside a `sql.begin` of your own is the other
-half, still under consideration in [`proposals.md`](proposals.md).
+half, still under consideration in [`proposals.md`](proposals.md) — along with
+[the line none of these may cross](proposals.md#the-line-none-of-these-may-cross), which is where a page of additions
+says what it refuses to become.
 
 All of the above runs, end to end, in [`examples/with-transactions`](../examples/with-transactions): money moving
 between two accounts, the caller read from an `AsyncLocalStorage`, and one scope per rule here.

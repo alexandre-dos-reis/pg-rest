@@ -461,22 +461,28 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   test("a transaction scope is typed like the instance, minus the context", async () => {
     const { data } = ok(
       await pgRest.transaction(async (tx) => {
-        const client = ok(await tx.query({ table: "clients", action: "insert", rows: { name: "Tx" }, single: true }));
+        // no `ok()` and no narrowing: `tx.query` rejects on failure, so its result is the success
+        const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Tx" }, single: true });
         assertType<
           Equal<
             typeof client.data,
             { id: number; name: string; email: string | null; meta: unknown; tags: string[] | null; created_at: string }
           >
         >();
-        const order = ok(
-          await tx.query({
-            table: "orders",
-            action: "insert",
-            rows: { client_id: client.data.id, total: 5 },
-            select: ["id", { clients: ["name"] }],
-          }),
-        );
+        assertType<Equal<typeof client.error, null>>();
+
+        const order = await tx.query({
+          table: "orders",
+          action: "insert",
+          rows: { client_id: client.data.id, total: 5 },
+          select: ["id", { clients: ["name"] }],
+        });
         assertType<Equal<typeof order.data, Array<{ id: number; clients: { name: string } | null }>>>();
+
+        // the count a query asked for is a number, not a maybe
+        const counted = await tx.query({ table: "clients", select: ["id"], count: "exact" });
+        assertType<Equal<typeof counted.count, number>>();
+
         return order.data[0]!.clients?.name;
       }, authed),
     );
@@ -484,8 +490,13 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data).toBe("Tx");
 
     // the scope's value is the data, and there is never a count
-    const counted = ok(await pgRest.transaction(async () => 1, authed));
-    assertType<Equal<typeof counted.count, undefined>>();
+    const scope = ok(await pgRest.transaction(async () => 1, authed));
+    assertType<Equal<typeof scope.count, undefined>>();
+
+    // a nested scope answers a result, because a savepoint is where a failure is recoverable
+    const nested = ok(await pgRest.transaction(async (tx) => tx.transaction(async () => "inner"), authed));
+    assertType<Equal<typeof nested.data.data, string | null>>();
+    expect(nested.data.data).toBe("inner");
 
     // @ts-expect-error a query inside a scope takes no context: the transaction already has one
     void (() => pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["id"] }, authed)));

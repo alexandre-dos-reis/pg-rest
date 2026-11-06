@@ -83,11 +83,13 @@ Two writes that must land together get one transaction, with the context applied
 ```ts
 const { data, error } = await pgRest.transaction(async (tx) => {
   const todo = await tx.query({ table: "todos", action: "insert", rows: { title: "ship it" }, single: true });
-  if (todo.error) throw todo.error; //  rolls the transaction back
   await tx.query({ table: "tags", action: "insert", rows: { todo_id: todo.data.id, label: "release" } });
   return todo.data.id;
 }, { role: "authenticated", claims: { sub: user.id } });
 ```
+
+Inside a scope a query that fails leaves it, so the transaction rolls back and `data` needs no narrowing — the promise
+that never rejects is the scope's. `tx.transaction()`, a savepoint, is how one query is *allowed* to fail.
 
 → [`docs/query.md`](docs/query.md)
 

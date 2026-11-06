@@ -177,20 +177,22 @@ export interface PgRestInstance {
    * ```ts ignore
    * const { data, error } = await pgRest.transaction(async (tx) => {
    *   const order = await tx.query({ table: "orders", action: "insert", rows: { client_id: 1 }, single: true });
-   *   if (order.error) throw order.error;
    *   await tx.query({ table: "order_items", action: "insert", rows: itemsFor(order.data.id) });
    *   return order.data;
    * }, { role: "authenticated", claims: { sub: user.id } });
    * ```
    *
-   * `tx.query` is {@link PgRestInstance.query} minus its context: the role and the claims are
-   * transaction-local and issued once at the head of the transaction, so a per-call context would
-   * change the role for every statement that follows instead of scoping anything.
+   * `tx.query` differs from {@link PgRestInstance.query} in two ways, both of them consequences of
+   * sharing a transaction. It takes **no context**: the role and the claims are transaction-local
+   * and issued once at the head of the transaction, so a per-call context would change the role for
+   * every statement that follows instead of scoping anything. And it **rejects** on failure instead
+   * of answering an `error`, because a query that failed is a transaction that will not commit --
+   * which makes its result the success, with `data` and `count` needing no narrowing.
    *
-   * The result is a {@link QueryResult} around whatever the callback returned -- `data` is that
-   * value, there is no `count` -- and it never rejects. **Any query that failed rolls the scope
-   * back**, even if the callback went on and returned: `error` must not come back from a
-   * transaction that kept the row. `tx.transaction()` is the way to let one fail, on a savepoint.
+   * The scope is where the promise that does not reject lives: this answers a {@link QueryResult}
+   * around whatever the callback returned -- `data` is that value, there is no `count` -- and the
+   * failure that left it is its `error`. `tx.transaction()`, a savepoint, is how a query is allowed
+   * to fail without taking the rest of the transaction with it.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>, options?: TransactionOptions): Promise<QueryResult<A, undefined>>;
   /** Re-read the database catalog (after migrations). */

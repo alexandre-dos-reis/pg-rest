@@ -1,8 +1,11 @@
 // Application code. It runs queries and knows nothing about who is asking: no role, no claims, no
 // user id, no `ctx` threaded through its signatures. That is what the AsyncLocalStorage in
 // context.ts is for -- and a transaction reads it once, on entry.
-import type { Transaction } from "@adrdp/pg-rest";
+import type { TypedTransaction } from "@adrdp/pg-rest";
+import type { DatabasePgRest } from "./db.types.ts";
 import { pgQuery } from "./context.ts";
+
+type Tx = TypedTransaction<DatabasePgRest>;
 
 export interface Transfer {
   readonly payer: string;
@@ -11,53 +14,48 @@ export interface Transfer {
   readonly memo?: string;
 }
 
-interface Account {
-  readonly id: string;
-  readonly balance: number;
-}
-
 /**
  * The three writes that have to land together: the debit, the credit, and the row that says it
- * happened. Every failure is rethrown, which is what rolls the scope back -- and a scope that
- * reaches the end with an `error` it ignored would not commit either.
+ * happened.
+ *
+ * There is no error handling here, and that is the design rather than an omission. `tx.query`
+ * rejects when a query fails, because a query that failed is a transaction that will not commit --
+ * so the scope catches it, rolls everything back and answers with it. What is left is the happy
+ * path, with `data` already narrowed: the failures are named in the comments, and handled by the
+ * caller choosing to read the scope's `error`.
  */
-const move = async (tx: Transaction, t: Transfer): Promise<number> => {
-  const read = await tx.query<Account[]>({
+const move = async (tx: Tx, t: Transfer): Promise<number> => {
+  const { data: accounts } = await tx.query({
     table: "accounts",
     select: ["id", "balance"],
     where: { id: ["in", [t.payer, t.payee]] },
   });
-  if (read.error) throw read.error;
-  const payer = read.data.find((a) => a.id === t.payer);
-  const payee = read.data.find((a) => a.id === t.payee);
+  const payer = accounts.find((a) => a.id === t.payer);
+  const payee = accounts.find((a) => a.id === t.payee);
   if (!payer || !payee) throw new Error(`no such account: ${t.payer} -> ${t.payee}`);
 
   // The balance is read here and written back below, which is a lost update waiting to happen if
   // two of these run at once -- hence the isolation level and the retry declared at the scope.
-  const debit = await tx.query({
+  await tx.query({
     table: "accounts",
     action: "update",
-    set: { balance: payer.balance - t.amount },
+    set: { balance: payer.balance - t.amount }, //  23514: the CHECK refuses an overdrawn account
     where: { id: t.payer },
   });
-  if (debit.error) throw debit.error; //   23514: the CHECK refuses an overdrawn account
-
-  const credit = await tx.query({
+  await tx.query({
     table: "accounts",
     action: "update",
     set: { balance: payee.balance + t.amount },
     where: { id: t.payee },
   });
-  if (credit.error) throw credit.error;
 
-  const row = await tx.query<{ id: number }>({
+  const { data: row } = await tx.query({
     table: "ledger",
     action: "insert",
     rows: { payer: t.payer, payee: t.payee, amount: t.amount, memo: t.memo ?? null },
-    single: true,
+    single: true, //                               42501: the policy only allows your own account
   });
-  if (row.error) throw row.error; //       42501: the policy only allows your own account
-  return row.data.id;
+  return row.id;
 };
 
 /**
@@ -72,7 +70,8 @@ export const transfer = (t: Transfer) =>
 
 /**
  * A batch, in **one** transaction, with each transfer in a savepoint of its own: a refusal undoes
- * that transfer and comes back as its `error`, and the ones that worked still commit at the end.
+ * that transfer and comes back as its `error` -- the one place a transaction may carry on after a
+ * failure -- and the ones that worked still commit at the end.
  */
 export const batch = (list: ReadonlyArray<Transfer>) =>
   pgQuery.transaction(async (tx) => {
@@ -98,13 +97,11 @@ export const dryRun = (t: Transfer) =>
 export const report = () =>
   pgQuery.transaction(
     async (tx) => {
-      const accounts = await tx.query<Account[]>({ table: "accounts", select: ["id", "balance"] });
-      if (accounts.error) throw accounts.error;
-      const moved = await tx.query<Array<{ amount: number }>>({ table: "ledger", select: ["amount"] });
-      if (moved.error) throw moved.error;
+      const { data: accounts } = await tx.query({ table: "accounts", select: ["balance"] });
+      const { data: moved } = await tx.query({ table: "ledger", select: ["amount"] });
       return {
-        held: accounts.data.reduce((n, a) => n + a.balance, 0),
-        moved: moved.data.reduce((n, l) => n + l.amount, 0),
+        held: accounts.reduce((n, a) => n + a.balance, 0),
+        moved: moved.reduce((n, l) => n + l.amount, 0),
       };
     },
     { readOnly: true, isolationLevel: "serializable" },

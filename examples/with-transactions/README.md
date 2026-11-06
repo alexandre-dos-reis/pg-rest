@@ -6,7 +6,8 @@ pg-rest a REST process cannot offer: `transaction()` lends a transaction to **yo
 
 ```sh
 bun install
-bun start        # seven scopes, one process
+bun run gen:types   # read the catalog, write db.types.ts
+bun start           # seven scopes, one process
 bun run typecheck
 ```
 
@@ -37,12 +38,18 @@ bun run link:examples with-transactions
 Line 2 is the point of the whole example: the debit was refused by a `CHECK`, so the credit that
 followed it and the ledger row never happened — the balances are exactly what they were.
 
-## The four files
+## The files
 
 **`schema.sql`** — two accounts, a ledger, `CHECK (balance >= 0)` as the database's last word, and a
 Row Level Security policy that lets a member record a transfer only out of their own account.
 
-**`db.ts`** — PGlite, the schema loaded in memory, and the instance.
+**`db.ts`** and **`gen-types.ts`** — PGlite, the schema loaded in memory, the options, and the
+generator that writes `db.types.ts` from the catalog (`bun run gen:types`, again after a migration).
+See [`with-generated-types`](../with-generated-types) for what that file looks like and why it is a
+separate step.
+
+**`client.ts`** — the instance, typed by it: `createPgRest<DatabasePgRest>(options)`. That one type
+argument reaches inside the scopes too, which is why nothing below declares a row shape.
 
 **`context.ts`** — who is asking, read from an `AsyncLocalStorage`:
 
@@ -68,6 +75,12 @@ Use `store.run`, not `store.enterWith`: `run` is bounded by its callback.
 mentions no role, no claims and no user id; nothing is threaded through its signatures:
 
 ```ts
+const move = async (tx: Tx, t: Transfer): Promise<number> => {
+  const { data: accounts } = await tx.query({ table: "accounts", select: ["id", "balance"], where: { … } });
+  //    ^ Array<{ id: string; balance: number }> -- typed, and not `| null`
+  …
+};
+
 export const transfer = (t: Transfer) =>
   pgQuery.transaction((tx) => move(tx, t), {
     isolationLevel: "repeatable read",
@@ -83,24 +96,26 @@ scope — the per-call override, moved to the granularity `set_config` works at.
 
 ## What each scope shows
 
-**1. Three writes, one transaction.** `tx.query` is `query` minus its second parameter: the role and
-the claims are transaction-local and issued once at the head of the transaction, so a per-call
-context would change the role for every statement that follows instead of scoping anything. Passing
-one is a type error, not an argument quietly ignored.
+**1. Three writes, one transaction.** `tx.query` differs from `query` in exactly two ways. It takes
+no context — the role and the claims are transaction-local and issued once at the head of the
+transaction, so a per-call context would change the role for every statement that follows instead of
+scoping anything. And it rejects on failure instead of answering an `error`, which is why `move()`
+in `transfers.ts` has no error handling at all: what is left is the happy path, with `data` already
+narrowed.
 
-**2. A rollback, from the database's own refusal.** `move()` rethrows every `error` it gets, and a
-throw inside the scope rolls it back. Even if it had not: **any query that failed stops the scope
-from committing**, because `single` and `maxAffected` are checks raised *after* a statement that
-worked, and a scope that committed on the callback's return value would keep the row while
-reporting it as refused.
+**2. A rollback, from the database's own refusal.** The debit is refused by the `CHECK`, so that
+query leaves the scope and the scope rolls back. Even a callback that *caught* it could not commit:
+`single` and `maxAffected` are checks raised *after* a statement that worked, and a scope that
+committed on the callback's return value would keep the row while reporting it as refused.
 
 **3. The claims apply to the whole scope.** Bob gets as far as the ledger row and no further: the
 policy reads the claims that were set once, on entry, and the two balance updates are undone with
 it.
 
-**4. One transfer allowed to fail: `tx.transaction()`.** A nested scope is a `SAVEPOINT`. It rolls
-back on its own and comes back as *that call's* `error`, so the batch keeps the two transfers that
-worked and still commits them — one transaction, three savepoints.
+**4. One transfer allowed to fail: `tx.transaction()`.** A nested scope is a `SAVEPOINT`, and the one
+place a transaction may carry on after a failure — so unlike `tx.query` it answers a `QueryResult`
+rather than rejecting. The batch reads that `error`, keeps the two transfers that worked, and still
+commits them: one transaction, three savepoints.
 
 **5. `tx.rollback()`.** Do the work, measure it, decline to keep it. The scope's `error` is
 `PGRSTX02`, kind `"rolled_back"`.

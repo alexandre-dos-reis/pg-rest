@@ -686,12 +686,29 @@ export interface TransactionOptions extends RequestContext {
  * anything -- so a context here is a type error rather than an argument quietly ignored.
  */
 export interface Transaction {
-  /** Run a query in this transaction. Same parser, same SQL, same errors as `query()`. */
-  query<T = unknown>(input: QueryInput): Promise<QueryResult<T>>;
+  /**
+   * Run a query in this transaction: same parser, same SQL, same errors as `query()`. What differs
+   * is the failure, and for one reason -- a query that failed is a transaction that will not
+   * commit, so there is nothing for the rest of the callback to do with it.
+   *
+   * It **rejects** instead of answering an `error`, which is what makes the result the success:
+   * `data` is not null, `count` is the number the query asked for, and nothing has to be narrowed.
+   * `transaction()` catches it, rolls the transaction back and hands it to you as its own `error`,
+   * so the promise that does not reject is still there -- it is the scope's now, not the query's.
+   *
+   * ```ts ignore
+   * const { data, count } = await tx.query({ table: "todos", select: ["id"], count: "exact" });
+   * ```
+   *
+   * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint
+   * is the only place a transaction can carry on after one.
+   */
+  query<T = unknown, C extends number | undefined = number | undefined>(input: QueryInput): Promise<QueryOk<T, C>>;
   /**
    * A nested scope, on a `SAVEPOINT`: it rolls back on its own when it fails, leaving the
-   * transaction around it usable. That is how one query is allowed to fail inside a scope -- the
-   * failure comes back as this call's `error` rather than condemning everything.
+   * transaction around it usable. That is how one query is allowed to fail inside a scope -- and
+   * unlike `query`, this answers a {@link QueryResult} rather than rejecting, because here the
+   * failure is recoverable: the savepoint undid it, and the enclosing scope decides what next.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>): Promise<QueryResult<A, undefined>>;
   /** Roll this scope back and leave it: the savepoint for a nested one, the transaction otherwise. */
@@ -721,11 +738,11 @@ class AbortScope extends Error {
   }
 }
 
+const scopeError = (code: string, message: string, details: string | null, hint: string | null): QueryError =>
+  new QueryError(TRANSACTION, new ApiError({ status: 500, headers: {}, body: { code, message, details, hint } }));
+
 const scopeFailure = (code: string, message: string, details: string | null, hint: string | null): QueryFailed =>
-  toFailedResult(
-    TRANSACTION,
-    new QueryError(TRANSACTION, new ApiError({ status: 500, headers: {}, body: { code, message, details, hint } })),
-  );
+  toFailedResult(TRANSACTION, scopeError(code, message, details, hint));
 
 /** The first failure in a scope: it cannot commit any more, and says so rather than answering `25P02`. */
 interface ScopeState {
@@ -755,29 +772,35 @@ const runScope = async <A>(
   const state: ScopeState = {};
   const session = env.session!;
 
-  // Once a query has failed, PostgreSQL has aborted the transaction: the next statement answers
-  // `25P02`, whatever it is. Saying so here, with the way out, beats passing that on.
-  const refuse = <T>(): QueryResult<T, undefined> =>
-    scopeFailure(
+  // Reachable by catching what `tx.query` throws and carrying on: PostgreSQL has aborted the
+  // transaction, so the next statement answers `25P02` whatever it is. Saying so, with the way out,
+  // beats passing that on -- and the scope cannot commit either way.
+  const refused = (): QueryError =>
+    scopeError(
       "PGRSTX03",
       "Transaction already failed",
       `An earlier query in this transaction failed (${state.failed!.body.code}), so it will roll back`,
       "Wrap the queries allowed to fail in tx.transaction(), which runs them in a savepoint of their own",
-    ) as QueryResult<T, undefined>;
+    );
 
   const tx: Transaction = {
-    query: async <T = unknown>(input: QueryInput): Promise<QueryResult<T>> => {
-      if (state.failed) return refuse<T>();
-      const result = (await runQuery(env, input, ctx)) as QueryResult<T>;
+    query: async <T = unknown, C extends number | undefined = number | undefined>(
+      input: QueryInput,
+    ): Promise<QueryOk<T, C>> => {
+      if (state.failed) throw refused();
+      const result = (await runQuery(env, input, ctx)) as QueryResult<T, C>;
       // A failure the library raised to undo its own write (PGRST116, PGRST124) did not abort
-      // anything by itself, so the scope records it and refuses to commit: `error` must not come
-      // back from a transaction that kept the row.
-      if (result.error) state.failed = result.error;
+      // anything by itself, so the scope records it before leaving: `error` must not come back
+      // from a transaction that kept the row, whatever the callback does next.
+      if (result.error) {
+        state.failed = result.error;
+        throw result.error;
+      }
       return result;
     },
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {
-      if (state.failed) return refuse<B>();
+      if (state.failed) return toFailedResult(TRANSACTION, refused()) as QueryResult<B, undefined>;
       const name = `pgrst_sp_${++names.n}`;
       const broke = (e: unknown): QueryResult<B, undefined> => {
         // The savepoint machinery itself failed: the enclosing scope cannot be trusted either.

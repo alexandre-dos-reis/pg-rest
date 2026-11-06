@@ -2,7 +2,8 @@
 //
 // Everything below goes through `pgQuery.transaction`, which reads who is asking from the
 // AsyncLocalStorage in context.ts -- so not one call here passes a role or a claim.
-import { balances, ledgerCount, pgRest, pglite } from "./db.ts";
+import { balances, ledgerCount, pgRest } from "./client.ts";
+import { pglite } from "./db.ts";
 import { asUser } from "./context.ts";
 import { batch, dryRun, report, transfer } from "./transfers.ts";
 
