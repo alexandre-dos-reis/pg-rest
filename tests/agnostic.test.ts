@@ -19,11 +19,12 @@ describe("runtime-agnostic library", () => {
   });
 
   /**
-   * The driver examples are one app ported to each driver, so their schemas must not drift. Two
-   * differ on purpose: with-better-auth (todos.owner_id references the Better Auth user) and
-   * with-generated-types (a different, smaller app, with an enum to show in the generated types).
+   * The driver examples are one app ported to each driver, so their schemas must not drift. Three
+   * differ on purpose: with-better-auth (todos.owner_id references the Better Auth user),
+   * with-generated-types (a different, smaller app, with an enum to show in the generated types)
+   * and with-transactions (accounts and a ledger, where "both writes or neither" is the point).
    */
-  const SAME_SCHEMA_EXCEPT = ["with-better-auth", "with-generated-types"];
+  const SAME_SCHEMA_EXCEPT = ["with-better-auth", "with-generated-types", "with-transactions"];
   test("the examples ship the same schema.sql (they are independent copies)", async () => {
     const files: string[] = [];
     for await (const f of new Glob("examples/*/schema.sql").scan(".")) {

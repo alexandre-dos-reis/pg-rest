@@ -39,6 +39,11 @@ a feature or a fix lands in one place.
    and your settings, then `preRequest` if you declared one, then the statement. `Prefer: tx=rollback` and a plan
    request roll back instead of committing, and a serialization failure (`40001`) is retried twice, since the whole
    transaction rolled back.
+
+   Inside a scope (`transaction()`, `query.runTransaction`) the transaction is already open and already carries the
+   identity: `Env.session` is set, so this step posts its statements there instead of calling `adapter.transaction`,
+   and issues only the half of the `set_config` that is per statement — the `search_path`, the `request.*` settings and
+   the time zone. `READ ONLY` and the replay belong to the scope, which is the only thing holding the boundary.
 5. **Respond** (`core.buildResponse`). Status (`201`, `204`, `206`, `416`…), `Content-Range`, `Location`,
    `Content-Type`, `Preference-Applied`, and the headers and status a function set through `response.headers` /
    `response.status`.
@@ -47,18 +52,21 @@ a feature or a fix lands in one place.
 and reads the `Response` back into `{ data, count, status }`. The HTTP-only parts — content negotiation, `Range`,
 plans, `OPTIONS`, OpenAPI — stay on `handle()`.
 
+`transaction()` (`src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
+`tx.query` through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
+
 ## Where things live
 
 | path | |
 | --- | --- |
-| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `setContextQuery`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
 | `src/core.ts` | routing, content negotiation, planning, the transaction, response building |
 | `src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement` |
 | `src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
 | `src/service.ts` | the schema store (serialised reloads), error mapping, `handleSafely` |
 | `src/errors.ts` | `PgRestError`, `ApiError`, `DbQueryError`, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
-| `src/query.ts` | the object API: `QueryInput` → query parameters, and `QueryError` |
+| `src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
 | `src/typed.ts` | types only: the typed input and the result inference over a generated database type |
 | `src/types.ts` | `generateTypes`, published as `@adrdp/pg-rest/types`, loaded on demand |
 | `src/openapi.ts` | the Swagger 2.0 document |

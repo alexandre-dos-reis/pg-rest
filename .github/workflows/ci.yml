@@ -71,7 +71,7 @@ jobs:
       - name: Run the built library on Node
         run: node scripts/node-smoke.ts
 
-  # One job for the six examples: one checkout, one install, one build, one database server.
+  # One job for the seven examples: one checkout, one install, one build, one database server.
   examples:
     name: Examples
     runs-on: ubuntu-latest
@@ -123,7 +123,7 @@ jobs:
             echo "::endgroup::"
           done
           # and the ones that carry the database in-process (PGlite)
-          for example in with-pglite with-generated-types; do
+          for example in with-pglite with-generated-types with-transactions; do
             echo "::group::$example"
             scripts/check-example.sh "$example" || fail=1
             echo "::endgroup::"

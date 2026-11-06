@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { ContextSource, CountFrom, FilterOp, QueryResult, Scalar } from "./query";
+import type { ContextSource, CountFrom, FilterOp, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -536,12 +536,41 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
  *
  * `handle` is unchanged: HTTP requests are strings from outside and cannot be typed.
  */
-export type TypedContextQuery<Db extends AnyDatabase> = <const Q extends TypedQuery<Db>>(
-  input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-  ctx?: RequestContext,
-) => Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+export interface TypedContextQuery<Db extends AnyDatabase> {
+  <const Q extends TypedQuery<Db>>(
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
+    ctx?: RequestContext,
+  ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+  /** {@link TypedPgRestInstance.transaction} with the context read from the source, once, on entry. */
+  transaction<A>(
+    fn: (tx: TypedTransaction<Db>) => Promise<A>,
+    options?: TransactionOptions,
+  ): Promise<QueryResult<A, undefined>>;
+}
 
-export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRestInstance, "query" | "setContextQuery"> {
+/**
+ * The scope `transaction()` hands out, whose `query` is typed by the database, like the instance's own -- minus
+ * the context, which a scope decides once, on entry.
+ */
+export interface TypedTransaction<Db extends AnyDatabase> {
+  /**
+   * Run a query in this transaction. It **rejects** on failure rather than answering an `error`, so
+   * the result is the success: `data` is not null and `count` is the number the query asked for.
+   * The scope catches it, rolls back, and hands it to you as its own `error`.
+   */
+  query<const Q extends TypedQuery<Db>>(
+    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
+  ): Promise<QueryOk<QueryData<Db, Q>, CountFrom<Q>>>;
+  /** A nested scope on a `SAVEPOINT`: it rolls back on its own, leaving this one usable. */
+  transaction<A>(fn: (tx: TypedTransaction<Db>) => Promise<A>): Promise<QueryResult<A, undefined>>;
+  /** Roll this scope back and leave it. */
+  rollback(): never;
+}
+
+export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<
+  PgRestInstance,
+  "query" | "setContextQuery" | "transaction"
+> {
   /**
    * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
    * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`
@@ -582,4 +611,21 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<PgRest
    * // data: Array<{ id: number; title: string }>
    */
   setContextQuery(source: ContextSource): TypedContextQuery<Db>;
+
+  /**
+   * Several queries in one transaction, typed like `query`. The context is applied once for the
+   * whole scope, so `tx.query` takes none; the callback's return value is the result's `data`.
+   *
+   * @example
+   * const { data, error } = await pgRest.transaction(async (tx) => {
+   *   const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Ada" }, single: true });
+   *   await tx.query({ table: "orders", action: "insert", rows: { client_id: client.data.id, total: 10 } });
+   *   return client.data.id;
+   * }, { role: "authenticated" });
+   * // data: number | null -- null when the scope failed, which `error` is what explains
+   */
+  transaction<A>(
+    fn: (tx: TypedTransaction<Db>) => Promise<A>,
+    options?: TransactionOptions,
+  ): Promise<QueryResult<A, undefined>>;
 }

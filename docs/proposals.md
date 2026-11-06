@@ -1,97 +1,72 @@
 # Proposals
 
-Four additions under consideration, none of them built. They are here to be argued with before they are written: the
-API sketches are illustrative, and the code blocks on this page are fenced so the documentation test does not compile
-them against a library that does not have them yet.
+Three additions under consideration, plus the half of a fourth that shipped without it. They are here to be argued with
+before they are written: the API sketches are illustrative, and the code blocks on this page are fenced so the
+documentation test does not compile them against a library that does not have them yet.
 
 They share a premise. Parity with PostgREST v16 is nearly complete and the differential suite keeps it honest
 ([`PARITY.md`](../PARITY.md)), so what is left to add is not more parity — it is what only a **library** can do, and
 what a library owes an application it runs inside of. [`design.md`](design.md) draws that line: ➖ is refused on
 purpose, ❌ is not done yet. Everything below is a third thing: considered, and not decided.
 
-- [1. A transaction across several queries](#1-a-transaction-across-several-queries)
+- [The line none of these may cross](#the-line-none-of-these-may-cross)
+- [1. Joining a transaction the application opened](#1-joining-a-transaction-the-application-opened)
 - [2. Observability hooks](#2-observability-hooks)
 - [3. Guardrails for an exposed surface](#3-guardrails-for-an-exposed-surface)
 - [4. A debug mode](#4-a-debug-mode)
 
-## 1. A transaction across several queries
+## The line none of these may cross
 
-**Today.** Every call opens its own transaction (`execute`, `src/core.ts`), which is right for a request — one request,
-one transaction, the role and claims set with `set_config` inside it — and is the whole story for `handle()`. But
-`query()` is called from application code, where two writes that must land together are ordinary, and there is no way
-to say so. The answer today is to leave the library: run the SQL yourself, and lose the parser, the embedding and the
-error mapping for those two statements.
+Every addition on this page makes pg-rest look a little more like an ORM, and the transaction scope
+([`query.md`](query.md#transactions)) is where that becomes a fair thing to say out loud: it is the first API in the
+library with no HTTP counterpart. So the line has to be a criterion rather than a feeling, and the criterion is not how
+many functions the instance has. **It is who owns the query language.**
 
-**The shape.** One scope, one transaction, the context applied once for all of it, rollback when the callback throws.
-Both entry points carry it, because both are places application code runs a query:
+The database does. `generateTypes()` reads `pg_catalog`, in one direction: there is no schema to declare, which is the
+first thing an ORM owns and the thing everything else of its follows from. And the query language is PostgREST's, which
+is a closed grammar — so what pg-rest does *not* have is not a backlog:
 
-```ts ignore
-// the context given at the scope
-const { data, error } = await pgRest.transaction(async (tx) => {
-  const { data: order } = await tx.query({ table: "orders", insert: { client_id: 1 }, single: true });
-  await tx.query({ table: "order_lines", insert: linesFor(order.id) });
-  return order;
-}, { role: "authenticated", claims: { sub: user.id, email: user.email } });
+- no expressions: `set` takes JSON values, so `balance = balance - amount` is unsayable
+- no joins of your choosing: an embed follows a declared foreign key, or it is `PGRST200`
+- no escape hatch: there is no `sql` tag, anywhere
+- no identity map, no dirty tracking, no lazy loading, no entities — the rows are serialised by Postgres (`json_agg`,
+  inside the one statement) and never become objects that are mapped back
 
-// the context already decided, read from wherever your middleware put it
-const pgQuery = pgRest.setContextQuery(() => store.getStore());
+Which gives the test an addition has to pass: **can anything new be said to the database?** A scope passes it, and that
+is checkable rather than arguable — `tx.query` is `runQuery` unchanged, and the only statements `transaction()` adds are
+`BEGIN`/`COMMIT`, `SAVEPOINT`/`ROLLBACK TO` and `SET TRANSACTION`. Transaction control, not grammar. A scope is a
+**boundary around** requests, which is why `tx.query` is `query` minus its context and nothing else.
 
-const { data, error } = await pgQuery.transaction(async (tx) => {
-  await tx.query({ table: "orders", insert: { client_id: 1 } });
-});
-```
+What the invariant was: every input to pg-rest is a PostgREST request. What it is now: every *query* is a PostgREST
+request, and anything else can only be a boundary. That is weaker, and it is written down here because it is the
+sentence that will be quoted to justify the next addition.
 
-It asks nothing new of [`adapters.md`](adapters.md): `DbAdapter.transaction(fn)` already hands out a session for the
-extent of a callback, which is exactly the shape of the scope. The context is applied where it always was — once, in
-the transaction `set_config` runs in.
+**Where the pressure actually comes from**, and it is this library's own doing:
+[`examples/with-transactions`](../examples/with-transactions) reads a balance and writes it back *only* because
+`balance - amount` cannot be said — and that read-modify-write is what drags in `repeatable read` and a retry. Anyone
+who lives with that will ask for three things, in order: `FOR UPDATE`, an expression in `set`, and a `sql` tag inside
+the scope. All three add to the grammar, so all three are refused ([`design.md`](design.md#what-it-will-never-do) is
+where they belong, next to the rest):
 
-`transaction` answers a `QueryResult` like `query` does, around whatever the callback returned: `data` is that value,
-there is no `count`, and it never rejects. A throw inside the scope rolls the transaction back and comes back as
-`error` — a `QueryError` if it was one, a 500 carrying the original under `cause` if it was anything else.
+| the ask | why not | instead |
+| --- | --- | --- |
+| `FOR UPDATE` / `SKIP LOCKED` | a lock is a clause of the statement, and PostgREST has no way to spell one | a function (`rpc`), which is SQL you own and version |
+| an expression in `set` (`{ balance: raw("balance - 1") }`) | this is a query builder with one feature, and it never stays at one | a function, or the borrowed transaction below |
+| a `sql` escape hatch | the line itself. An ORM is a library that eventually lets you write anything | your own driver — which is exactly [1](#1-joining-a-transaction-the-application-opened) |
 
-**`tx.query` takes no context, and cannot.** That is the one thing about the signature worth stating. The role and the
-claims are set with `set_config(…, true)`, which is transaction-local and issued once at the head of the transaction;
-honouring a per-call context would mean issuing `set_config` again halfway through, which scopes nothing — it changes
-the role for every statement that follows in the same transaction, in row order, with no way back. So `tx.query` is
-`query` minus its second parameter, and a context passed to it is a type error rather than an argument that is quietly
-ignored.
+That is what reconsiders the proposal below. Letting pg-rest write inside a transaction **you** opened is not a
+convenience: it is what makes refusing the three rows above sustainable, because the escape hatch then lives where it
+belongs — in your driver, your SQL, your Drizzle — and not in this library's input type.
 
-What that moves, rather than removes, is `setContextQuery`'s escape hatch — a context passed to the call wins over the
-ambient one, which is how an administrative query steps out of it. Inside a scope it cannot exist; at the scope it can,
-and that is the granularity `set_config` already works at: `pgQuery.transaction(fn, ctx)` overrides the ambient context
-for the whole transaction, exactly as `pgQuery(input, ctx)` does for one query. Another role means another transaction.
+## 1. Joining a transaction the application opened
 
-**Where the bound form reads its context.** `query` reads the `source` at *every* call, which is what lets one bound
-`pgQuery` serve a different context for every request in flight. A scope must read it **once, on entry**: the
-transaction has one `set_config`, so a source that answered differently halfway through could not be honoured anyway.
-A source that answers nothing is the `PGRSTX01` / `no_context` failure it already is, returned before the `BEGIN`
-rather than leaving an empty transaction open.
+**Done, and not this.** A transaction across several `query()` calls was the first half of this proposal and is now
+built: `transaction(fn, ctx)` lends a session to a callback, applies the context once for all of it, commits when the
+callback returns and rolls back when it throws or when any query in it failed — see
+[`query.md`](query.md#transactions). pg-rest owns the boundary there.
 
-**What it costs in types.** `ContextQuery` stops being a function type and becomes a callable interface with a
-`transaction` member — additive for everyone, since it is only ever a return type (`ContextSource`, the input, is
-untouched). Same for `TypedContextQuery<Db>`, and `TypedPgRestInstance` grows `transaction` in the `Omit` it already
-applies to `query` and `setContextQuery`, so the scope is typed by the database like everything else.
-
-It leaves one asymmetry: the bound query is callable (`pgQuery(input)`) while the scope is an object
-(`tx.query(input)`). Keeping both is deliberate — the callable form is what is documented and in use, and an object is
-what lets a scope name a second thing later without changing a signature again — but it is the kind of inconsistency
-worth disliking out loud before it ships.
-
-**What the scope has to decide.** Three behaviours are per-transaction today and currently decided by the single query
-that owns the transaction:
-
-- **An error poisons the rest of the scope.** `query()` returns failures rather than throwing, but PostgreSQL has still
-  aborted the transaction: the next `tx.query` answers `25P02`. One transaction per call makes that isolation free; a
-  shared scope has to choose between a `SAVEPOINT` around each query — plain statements, so nothing in the adapter
-  contract is in the way — and letting the first error condemn the scope.
-- **`SET TRANSACTION READ ONLY`** (`src/core.ts`) comes from the plan, so in a scope it would come from whichever query
-  went first. It has to be dropped inside one, or decided for the whole scope.
-- **The serialization retry** (up to 2 on `40001`) replays the transaction. pg-rest still owns the boundary here, so it
-  *could* — but replaying the transaction means replaying the callback, and what else that callback does is not the
-  library's to repeat. Off inside a scope, or opt-in with that said out loud.
-
-**The harder, separate half: joining a transaction the application opened.** The same session, the other owner — the
-scope above lends one to your callback, this lends one to pg-rest:
+**The harder, separate half.** The same session, the other owner: the scope lends one to your callback, this lends one
+to pg-rest.
 
 ```ts ignore
 await sql.begin(async (tx) => {
@@ -110,8 +85,8 @@ Whatever your driver's transaction scope is — `sql.begin` here, `adapter.trans
 
 A driver's transaction handle is not a `DbSession`, hence the wrapper: the `session()` each adapter already builds
 internally (`src/adapters/*`) would have to be exported. That part is additive, and so is a `session` the core honours
-by running its statements on it instead of calling `adapter.transaction`. What is not additive is everything that
-follows from not owning the boundary.
+by running its statements on it instead of calling `adapter.transaction` — `Env.session` already exists, which is what
+the scope is built on. What is not additive is everything that follows from not owning the boundary.
 
 **The context leaks forward.** `set_config(…, true)` is transaction-local, which is the whole mechanism: posted in
 *your* transaction, it stays there until your `COMMIT`. So the statement after the pg-rest call runs as
@@ -128,7 +103,8 @@ inside a single transaction.
 - `single` and `maxAffected` (`PGRST116`, `PGRST124`) throw in order to undo the write they just measured. Here the
   write stays, and since `query()` *returns* failures, a caller who logs the `error` and commits anyway has committed
   something the library reported as a failure. They become assertions whose remedy is the caller's: rethrow, so your
-  own transaction rolls back. That is the footgun of the whole idea.
+  own transaction rolls back. That is the footgun of the whole idea, and it is the one thing the scope *can* answer —
+  it refuses to commit after a failed query, because it is the one holding the `COMMIT`.
 - `SET TRANSACTION READ ONLY` is refused by PostgreSQL (`25001`) once a statement has been issued, so it has to go.
 
 The serialization retry goes with them: replaying a transaction we did not open is not ours to do.
@@ -139,8 +115,7 @@ session says *where* to run. Putting it there mixes identity with plumbing, and 
 
 What makes it worth any of this: it is the only way a pg-rest query and the application's own SQL land in **one**
 atomic unit — a job, a webhook, an outbox — which is what "one process, one pool" in [`design.md`](design.md) promises
-and does not yet deliver, and the one thing a PostgREST process can never offer, because it is not in the process. It
-stays a question; the scope above does not depend on it.
+and does not yet deliver, and the one thing a PostgREST process can never offer, because it is not in the process.
 
 ## 2. Observability hooks
 

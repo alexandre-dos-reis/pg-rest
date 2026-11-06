@@ -12,6 +12,10 @@ mTLS — and hand over a role and claims, applied with `set_config` so Row Level
 PostgREST. **No HTTP needed either:** the same queries run in the calling process, typed from your own schema. And no
 runtime dependencies, nothing but web standards in the core, your driver staying yours.
 
+> **Not an ORM:** there is no model of your database here to drift from it. The types are read out of the catalog, one
+> way, and the query language stays PostgREST's.
+> → [the line none of these may cross](docs/proposals.md#the-line-none-of-these-may-cross)
+
 ```sh
 npm i @adrdp/pg-rest pg      # or: bun add @adrdp/pg-rest (Bun.sql is built in), postgres, @electric-sql/pglite
 ```
@@ -57,7 +61,8 @@ Any PostgREST client works — the wire format is the whole contract. Including
 ## In the same process, with types from your schema
 
 No HTTP, no loopback call: the same parser, the same SQL and the same `set_config` of the role and claims, so Row Level
-Security applies as it would over the wire.
+Security applies as it would over the wire. If you know `postgrest-js`, `query()` is the same shape of request —
+without the server on the other end: no second process to run, and the pool stays yours.
 
 ```ts
 const { data, error } = await pgRest.query(
@@ -77,6 +82,20 @@ if (error) throw error; // or hand `error.body` and `error.status` to your frame
 A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, a `summary` written
 out for whoever reads it, and a `kind` — `"conflict"`, `"not_single_row"`, `"forbidden"`… — which is a string union, so
 a `switch` on it is checked by the compiler instead of against a table of error codes. `query()` never rejects.
+
+Two writes that must land together get one transaction, with the context applied once for all of it:
+
+```ts
+const { data, error } = await pgRest.transaction(async (tx) => {
+  const todo = await tx.query({ table: "todos", action: "insert", rows: { title: "ship it" }, single: true });
+  await tx.query({ table: "tags", action: "insert", rows: { todo_id: todo.data.id, label: "release" } });
+  return todo.data.id;
+}, { role: "authenticated", claims: { sub: user.id } });
+```
+
+Inside a scope a query that fails leaves it, so the transaction rolls back and `data` needs no narrowing — the promise
+that never rejects is the scope's. `tx.transaction()`, a savepoint, is how one query is *allowed* to fail.
+
 → [`docs/query.md`](docs/query.md)
 
 One command writes the types for your database, and one type argument puts them to work:
@@ -116,7 +135,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 | [`docs/security.md`](docs/security.md)         | the role and RLS model, and how request values reach SQL          |
 | [`docs/performance.md`](docs/performance.md)   | measured against PostgREST 16, and which runtime to pick          |
 | [`docs/development.md`](docs/development.md)   | running the tests, the examples and the differential suite        |
-| [`docs/proposals.md`](docs/proposals.md)       | four additions under consideration, and what each would cost      |
+| [`docs/proposals.md`](docs/proposals.md)       | the additions under consideration, and what each would cost       |
 | [`PARITY.md`](PARITY.md)                       | PostgREST v16 feature by feature                                  |
 
 ## Examples
@@ -132,15 +151,17 @@ own README, schema and `server.ts`:
 | [`with-pglite`](examples/with-pglite)                   | Node.js ≥ 22.18 | `@electric-sql/pglite`                        | no (Postgres in WebAssembly)  |
 | [`with-better-auth`](examples/with-better-auth)         | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) | yes (docker-compose included) |
 | [`with-generated-types`](examples/with-generated-types) | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
+| [`with-transactions`](examples/with-transactions)       | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
 
 [`with-generated-types`](examples/with-generated-types) is the shortest way to see the typed path: two tables, an enum,
-a composite type, `bun run gen:types && bun start`.
+a composite type, `bun run gen:types && bun start`. [`with-transactions`](examples/with-transactions) is the other
+library-only one: money moving between two accounts, with the caller read from an `AsyncLocalStorage`.
 
 ## Development
 
 ```sh
 bun install
-mise install        # PostgREST 16.5, for the differential test
+mise install        # PostgREST 16.5 for the differential test, and micromamba
 mise run db:start   # a throwaway Postgres 16 + PostGIS under .cache/
 mise run test       # the whole suite
 ```

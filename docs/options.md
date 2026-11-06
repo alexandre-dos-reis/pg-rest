@@ -24,7 +24,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `basePath` | a URL prefix to strip, so the handler can be mounted anywhere (`/api/rest`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
 | `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on |
-| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`) |
+| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path |
 | `allowTxOverride` | honour `Prefer: tx=rollback` (`db-tx-end`). Default off |
 | `planEnabled` | answer `Accept: application/vnd.pgrst.plan` with the query plan (`db-plan-enabled`). A plan reveals the shape of the database: keep it off in production. Default off |
 | `openApi` | serve the Swagger 2.0 document at `/`. Default on |
@@ -37,6 +37,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `handle(request, ctx?)` | the HTTP entry point. An explicit `ctx` overrides `resolveContext` |
 | `query(input, ctx?)` | the same thing from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
 | `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
+| `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
 | `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
 | `schemaCache()` | the introspected catalog |
 | `reloadSchema()` | re-read it after a migration. A failed reload keeps the previous cache |
