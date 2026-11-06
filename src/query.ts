@@ -1,3 +1,4 @@
+import type { DbSession } from "./adapter";
 import {
   type Caller,
   type Env,
@@ -8,9 +9,10 @@ import {
   execute,
   planRpc,
   planTable,
+  transactionSetup,
   useSchema,
 } from "./core";
-import { ApiError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
+import { ApiError, DbQueryError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
 import type { Operator } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
@@ -221,6 +223,7 @@ export type QueryResult<T = unknown, C extends number | undefined = number | und
 
 /** The resource a query names, as it would read in a sentence: `select on "api.clients"`. */
 const operationOf = (input: QueryInput): string => {
+  if (input === TRANSACTION) return "transaction";
   const at = input.schema ? `${input.schema}.` : "";
   if ("rpc" in input) return `rpc "${at}${input.rpc}"`;
   const target = "table" in input ? `"${at}${input.table}"` : "the database";
@@ -538,11 +541,21 @@ export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext 
   try {
     return { ...(await run(env, input, ctx)), error: null };
   } catch (e) {
-    const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
-    // An unexpected error keeps its stack under `cause`; over HTTP it would only be a 500 body.
-    const unexpected = api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError);
-    return toFailedResult(input, new QueryError(input, api, unexpected ? { cause: e } : undefined));
+    return failureOf(env, ctx, input, e);
   }
+};
+
+/**
+ * Map anything thrown into the failed half of a result, the way `query()` does: a `QueryError`
+ * keeps the input it already names, a `PgRestError` keeps its status and body, and anything else
+ * becomes a 500 with the original under `cause`.
+ */
+const failureOf = (env: Env, ctx: RequestContext, input: QueryInput, e: unknown): QueryFailed => {
+  if (e instanceof QueryError) return toFailedResult(e.input, e);
+  const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
+  // An unexpected error keeps its stack under `cause`; over HTTP it would only be a 500 body.
+  const unexpected = api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError);
+  return toFailedResult(input, new QueryError(input, api, unexpected ? { cause: e } : undefined));
 };
 
 /**
@@ -581,8 +594,21 @@ export type ContextSource = RequestContext | (() => RequestContext | undefined |
 /**
  * `query` with its context already decided. Passing one anyway overrides the source for that call,
  * which is how an administrative call escapes the ambient context without leaving it.
+ *
+ * It is callable, and it carries `transaction`: a scope is the other place application code runs a
+ * query, and it reads the same source -- once, on entry, because the transaction has one
+ * `set_config`.
  */
-export type ContextQuery = <T = unknown>(input: QueryInput, ctx?: RequestContext) => Promise<QueryResult<T>>;
+export interface ContextQuery {
+  <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /**
+   * {@link runTransaction} with the context read from the source. Naming a `role`, `claims` or
+   * `settings` in `options` overrides the ambient context for the whole transaction, exactly as a
+   * context passed to a call overrides it for one query; the scope's own options alone leave it in
+   * place. Another role means another transaction.
+   */
+  transaction<A>(fn: (tx: Transaction) => Promise<A>, options?: TransactionOptions): Promise<QueryResult<A, undefined>>;
+}
 
 /**
  * A context source that came back with nothing: the store was never entered (a job, a test, a
@@ -610,3 +636,252 @@ export const noContextResult = (input: QueryInput): QueryFailed =>
 /** Resolve a {@link ContextSource} for one call; `undefined` means it had nothing to give. */
 export const resolveContextSource = async (source: ContextSource): Promise<RequestContext | undefined> =>
   typeof source === "function" ? await source() : source;
+
+// ---------------------------------------------------------------------------
+// a transaction across several queries
+// ---------------------------------------------------------------------------
+
+/**
+ * When a scope may be replayed. A serialization failure (`40001`) or a deadlock (`40P01`) means the
+ * whole transaction rolled back, so running it again is sound -- but running it again means running
+ * **your callback** again, with whatever else it does. Hence off by default, and asked for here.
+ */
+export interface TransactionRetry {
+  /** How many times the callback may run in all. `1` (the default) is no retry; `3` means two replays. */
+  readonly attempts?: number | undefined;
+  /** The SQLSTATEs worth replaying. Default `["40001"]`; add `"40P01"` for deadlocks. */
+  readonly on?: ReadonlyArray<string> | undefined;
+  /** Wait this long before a replay. Default `0`. */
+  readonly delayMs?: number | undefined;
+}
+
+/**
+ * The [isolation level](https://www.postgresql.org/docs/current/transaction-iso.html) a scope runs
+ * at, lower-cased as PostgreSQL spells it. `read uncommitted` is not here on purpose: PostgreSQL
+ * accepts it and runs `read committed` anyway, so it would be a synonym pretending to be a level.
+ *
+ * Above `read committed`, a concurrent write can abort the transaction with a serialization failure
+ * (`40001`) that retrying is the remedy for -- which is what {@link TransactionRetry} is.
+ */
+export type IsolationLevel = "read committed" | "repeatable read" | "serializable";
+
+/**
+ * What a scope takes: who is asking -- the same `role`, `claims` and `settings` as a single query,
+ * applied once for all of it -- and the three things that belong to a transaction rather than to a
+ * statement.
+ */
+export interface TransactionOptions extends RequestContext {
+  /** `SET TRANSACTION READ ONLY` for the whole scope. A write inside it is refused by PostgreSQL (`25006`). */
+  readonly readOnly?: boolean | undefined;
+  /** The isolation level for the whole scope. Default: the database's own (`read committed` unless configured otherwise). */
+  readonly isolationLevel?: IsolationLevel | undefined;
+  /** Replay the callback on a serialization failure. Off by default: see {@link TransactionRetry}. */
+  readonly retry?: TransactionRetry | undefined;
+}
+
+/**
+ * One transaction, several queries. `query` is {@link runQuery} minus its context: the role and the
+ * claims were set with `set_config(..., true)` once at the head of the transaction, and re-issuing
+ * them halfway through would change the role for every statement that follows instead of scoping
+ * anything -- so a context here is a type error rather than an argument quietly ignored.
+ */
+export interface Transaction {
+  /** Run a query in this transaction. Same parser, same SQL, same errors as `query()`. */
+  query<T = unknown>(input: QueryInput): Promise<QueryResult<T>>;
+  /**
+   * A nested scope, on a `SAVEPOINT`: it rolls back on its own when it fails, leaving the
+   * transaction around it usable. That is how one query is allowed to fail inside a scope -- the
+   * failure comes back as this call's `error` rather than condemning everything.
+   */
+  transaction<A>(fn: (tx: Transaction) => Promise<A>): Promise<QueryResult<A, undefined>>;
+  /** Roll this scope back and leave it: the savepoint for a nested one, the transaction otherwise. */
+  rollback(): never;
+}
+
+/**
+ * The input a scope-level failure names: there is no one query to blame when the callback threw,
+ * when `rollback()` was called or when the context source answered nothing. Compared by identity,
+ * so `operationOf` can say "transaction" instead of inventing a table.
+ */
+const TRANSACTION = Object.freeze({ table: "", action: "select" }) as QueryInput;
+
+/** `tx.rollback()`: not a failure to map, a decision to carry out. */
+class RollbackSignal extends Error {
+  constructor() {
+    super("rollback");
+    this.name = "RollbackSignal";
+  }
+}
+
+/** Carries a decided result out through the driver's callback, which is what makes it roll back. */
+class AbortScope extends Error {
+  constructor(readonly failed: QueryFailed) {
+    super("transaction rolled back");
+    this.name = "AbortScope";
+  }
+}
+
+const scopeFailure = (code: string, message: string, details: string | null, hint: string | null): QueryFailed =>
+  toFailedResult(
+    TRANSACTION,
+    new QueryError(TRANSACTION, new ApiError({ status: 500, headers: {}, body: { code, message, details, hint } })),
+  );
+
+/** The first failure in a scope: it cannot commit any more, and says so rather than answering `25P02`. */
+interface ScopeState {
+  failed?: QueryError | undefined;
+}
+
+/** What a scope's callback left behind: a value to commit on, or the failure to roll back for. */
+type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly failed: QueryFailed };
+
+const okResult = <A>(value: A): QueryResult<A, undefined> => ({
+  data: value,
+  count: undefined,
+  status: 200,
+  error: null,
+});
+
+/**
+ * Run `fn` against a scope on `env.session` and classify what came out of it. Nothing here touches
+ * the transaction: the caller decides whether that is a `COMMIT`, a `ROLLBACK` or a savepoint.
+ */
+const runScope = async <A>(
+  env: Env,
+  ctx: RequestContext,
+  names: { n: number },
+  fn: (tx: Transaction) => Promise<A>,
+): Promise<Outcome<A>> => {
+  const state: ScopeState = {};
+  const session = env.session!;
+
+  // Once a query has failed, PostgreSQL has aborted the transaction: the next statement answers
+  // `25P02`, whatever it is. Saying so here, with the way out, beats passing that on.
+  const refuse = <T>(): QueryResult<T, undefined> =>
+    scopeFailure(
+      "PGRSTX03",
+      "Transaction already failed",
+      `An earlier query in this transaction failed (${state.failed!.body.code}), so it will roll back`,
+      "Wrap the queries allowed to fail in tx.transaction(), which runs them in a savepoint of their own",
+    ) as QueryResult<T, undefined>;
+
+  const tx: Transaction = {
+    query: async <T = unknown>(input: QueryInput): Promise<QueryResult<T>> => {
+      if (state.failed) return refuse<T>();
+      const result = (await runQuery(env, input, ctx)) as QueryResult<T>;
+      // A failure the library raised to undo its own write (PGRST116, PGRST124) did not abort
+      // anything by itself, so the scope records it and refuses to commit: `error` must not come
+      // back from a transaction that kept the row.
+      if (result.error) state.failed = result.error;
+      return result;
+    },
+
+    transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {
+      if (state.failed) return refuse<B>();
+      const name = `pgrst_sp_${++names.n}`;
+      const broke = (e: unknown): QueryResult<B, undefined> => {
+        // The savepoint machinery itself failed: the enclosing scope cannot be trusted either.
+        const failed = failureOf(env, ctx, TRANSACTION, e);
+        state.failed = failed.error;
+        return failed as QueryResult<B, undefined>;
+      };
+      try {
+        await session.query(`SAVEPOINT ${name}`);
+      } catch (e) {
+        return broke(e);
+      }
+      const outcome = await runScope<B>(env, ctx, names, nested);
+      try {
+        if (!outcome.ok) await session.query(`ROLLBACK TO SAVEPOINT ${name}`);
+        await session.query(`RELEASE SAVEPOINT ${name}`);
+      } catch (e) {
+        return broke(e);
+      }
+      return outcome.ok ? okResult(outcome.value) : (outcome.failed as QueryResult<B, undefined>);
+    },
+
+    rollback: (): never => {
+      throw new RollbackSignal();
+    },
+  };
+
+  try {
+    const value = await fn(tx);
+    // The callback returned, but a query in it failed and the transaction is not committable.
+    if (state.failed) return { ok: false, failed: toFailedResult(state.failed.input, state.failed) };
+    return { ok: true, value };
+  } catch (e) {
+    if (e instanceof RollbackSignal) {
+      return {
+        ok: false,
+        failed: scopeFailure("PGRSTX02", "Transaction rolled back", "rollback() was called in the scope", null),
+      };
+    }
+    return { ok: false, failed: failureOf(env, ctx, TRANSACTION, e) };
+  }
+};
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * One scope, one transaction: the context applied once for all of it, a commit when the callback
+ * returns, a rollback when it throws **or** when any query in it failed.
+ *
+ * Answers a {@link QueryResult} around whatever the callback returned -- `data` is that value,
+ * there is no `count` -- and never rejects, like `query()`.
+ */
+export const runTransaction = async <A>(
+  env: Env,
+  fn: (tx: Transaction) => Promise<A>,
+  options: TransactionOptions = {},
+): Promise<QueryResult<A, undefined>> => {
+  const { readOnly, isolationLevel, retry, ...ctx } = options;
+  // One statement, and it has to be the first one: PostgreSQL refuses either of these (`25001`)
+  // once the transaction has issued anything. The levels are a closed union, so they go in as text.
+  const mode = [isolationLevel ? `ISOLATION LEVEL ${isolationLevel.toUpperCase()}` : "", readOnly ? "READ ONLY" : ""]
+    .filter(Boolean)
+    .join(" ");
+  try {
+    assertRole(env, ctx);
+  } catch (e) {
+    return failureOf(env, ctx, TRANSACTION, e) as QueryResult<A, undefined>;
+  }
+  const attempts = Math.max(1, Math.trunc(retry?.attempts ?? 1));
+  const replayable = new Set(retry?.on ?? ["40001"]);
+
+  for (let attempt = 1; ; attempt++) {
+    const again = (code: string): boolean => attempt < attempts && replayable.has(code);
+    try {
+      return await env.db.transaction(async (session: DbSession) => {
+        const scoped: Env = { ...env, session };
+        if (mode) await session.query(`SET TRANSACTION ${mode}`);
+        const setup = transactionSetup(scoped, ctx);
+        await session.query(setup.sql, setup.params);
+        const outcome = await runScope<A>(scoped, ctx, { n: 0 }, fn);
+        // Throwing is how the driver is told to roll back; the result rides along.
+        if (!outcome.ok) throw new AbortScope(outcome.failed);
+        return okResult(outcome.value);
+      });
+    } catch (e) {
+      if (e instanceof AbortScope) {
+        if (again(e.failed.error.body.code)) {
+          if (retry?.delayMs) await wait(retry.delayMs);
+          continue;
+        }
+        return e.failed as QueryResult<A, undefined>;
+      }
+      // The `COMMIT` itself can fail this way, and it is the driver that issues it.
+      if (e instanceof DbQueryError && again(e.sqlState)) {
+        if (retry?.delayMs) await wait(retry.delayMs);
+        continue;
+      }
+      return failureOf(env, ctx, TRANSACTION, e) as QueryResult<A, undefined>;
+    }
+  }
+};
+
+/** A scope that failed before the `BEGIN`, or outside everything `runTransaction` can map. */
+export const failedTransaction = (e: unknown): QueryFailed => toFailedResult(TRANSACTION, e);
+
+/** {@link noContextResult} for a scope: the source answered nothing, and no transaction was opened. */
+export const noContextTransaction = (): QueryFailed => noContextResult(TRANSACTION);

@@ -69,6 +69,11 @@ export interface Env {
   readonly db: DbAdapter;
   readonly config: CoreConfig;
   readonly cache: SchemaCache;
+  /**
+   * A transaction already open, when the call runs inside a scope (`transaction()`): statements go
+   * to it instead of to a transaction of their own, and the boundary belongs to the scope.
+   */
+  readonly session?: DbSession | undefined;
 }
 
 /**
@@ -166,35 +171,15 @@ const parseCookies = (header: string | null): Record<string, string> => {
   return out;
 };
 
-const applyCtxSql = (
-  env: Env,
-  ctx: RequestContext,
-  role: string,
-  claims: Record<string, unknown>,
-  caller: Caller,
-  method: Method,
-  schema: string,
-  prefer: Preferences,
-): { sql: string; params: string[] } => {
-  const entries: Array<[string, string]> = [
-    ["role", role],
-    ["request.jwt.claims", JSON.stringify(claims)],
-  ];
-  if (env.config.requestSettings) {
-    const headers: Record<string, string> = {};
-    caller.headers?.forEach((v, k) => {
-      headers[k] = v;
-    });
-    entries.push(
-      ["request.method", method],
-      ["request.path", caller.path],
-      ["request.headers", JSON.stringify(headers)],
-      ["request.cookies", JSON.stringify(parseCookies(caller.headers?.get("cookie") ?? null))],
-    );
-  }
-  const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
-  entries.push(["search_path", searchPath]);
-  if (prefer.timezone) entries.push(["timezone", prefer.timezone]);
+/** Who is asking, as the database reads it. In a scope this half is issued once, on entry. */
+const whoEntries = (role: string, claims: Record<string, unknown>): Array<[string, string]> => [
+  ["role", role],
+  ["request.jwt.claims", JSON.stringify(claims)],
+];
+
+/** The caller's own settings, which go last so one of them wins over a setting of ours it names. */
+const settingsEntries = (ctx: RequestContext): Array<[string, string]> => {
+  const out: Array<[string, string]> = [];
   for (const [k, v] of Object.entries(ctx.settings ?? {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$/.test(k)) {
       throw new PgRestError(
@@ -205,12 +190,62 @@ const applyCtxSql = (
         "Custom settings need a prefix, e.g. app.tenant_id",
       );
     }
-    entries.push([k, v]);
+    out.push([k, v]);
   }
-  return {
-    sql: `SELECT ${entries.map(([k], i) => `set_config(${literal(k)}, $${i + 1}::text, true)`).join(", ")}`,
-    params: entries.map(([, v]) => v),
-  };
+  return out;
+};
+
+/**
+ * The `set_config(..., true)` one call needs. `"statement"` is the half that says where the
+ * statement runs -- the schema, the request SQL reads, the time zone it asked for -- and is all a
+ * query inside a transaction scope issues: the identity was set once, on entry, because
+ * `set_config` is transaction-local and re-issuing the role halfway through scopes nothing. This
+ * half stays per statement, which is what lets two queries of one scope name two schemas.
+ */
+const ctxEntries = (
+  env: Env,
+  ctx: RequestContext,
+  role: string,
+  claims: Record<string, unknown>,
+  caller: Caller,
+  method: Method,
+  schema: string,
+  prefer: Preferences,
+  part: "statement" | "both",
+): Array<[string, string]> => {
+  const where: Array<[string, string]> = [];
+  if (env.config.requestSettings) {
+    const headers: Record<string, string> = {};
+    caller.headers?.forEach((v, k) => {
+      headers[k] = v;
+    });
+    where.push(
+      ["request.method", method],
+      ["request.path", caller.path],
+      ["request.headers", JSON.stringify(headers)],
+      ["request.cookies", JSON.stringify(parseCookies(caller.headers?.get("cookie") ?? null))],
+    );
+  }
+  const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
+  where.push(["search_path", searchPath]);
+  if (prefer.timezone) where.push(["timezone", prefer.timezone]);
+  if (part === "statement") return where;
+  return [...whoEntries(role, claims), ...where, ...settingsEntries(ctx)];
+};
+
+const setConfigSql = (entries: ReadonlyArray<readonly [string, string]>): { sql: string; params: string[] } => ({
+  sql: `SELECT ${entries.map(([k], i) => `set_config(${literal(k)}, $${i + 1}::text, true)`).join(", ")}`,
+  params: entries.map(([, v]) => v),
+});
+
+/**
+ * What a transaction scope issues on entry: who is asking, for the whole of it. The schema and the
+ * `request.*` settings are not here -- every query inside the scope sets its own.
+ */
+export const transactionSetup = (env: Env, ctx: RequestContext): { sql: string; params: string[] } => {
+  const role = ctx.role ?? env.config.anonymousRole!;
+  const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
+  return setConfigSql([...whoEntries(role, claims), ...settingsEntries(ctx)]);
 };
 
 /** Parsed `response.headers` GUC: `[{"X-A": "b"}, ...]`. */
@@ -791,14 +826,20 @@ export const execute = async (
 ): Promise<Response> => {
   const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
-  const setup = applyCtxSql(env, ctx, role, claims, caller, method, schema, prefer);
+  // Inside a scope the transaction is already open and already carries the identity: this call
+  // only says where its own statement runs, and owns neither the boundary nor what READ ONLY and a
+  // replay would decide for every other query in the same transaction.
+  const session = env.session;
+  const setup = setConfigSql(
+    ctxEntries(env, ctx, role, claims, caller, method, schema, prefer, session ? "statement" : "both"),
+  );
   const strict = prefer.handling === "strict";
   const rollback = (honoredTx && prefer.tx === "rollback") || wantsPlan !== undefined;
 
   const attempt = async (): Promise<RawResult> => {
     try {
-      return await env.db.transaction(async (s) => {
-        if (plan.readOnly) await s.query("SET TRANSACTION READ ONLY");
+      const body = async (s: DbSession): Promise<RawResult> => {
+        if (plan.readOnly && !session) await s.query("SET TRANSACTION READ ONLY");
         await s.query(setup.sql, setup.params);
 
         const pre = env.config.preRequest;
@@ -882,7 +923,8 @@ export const execute = async (
         }
         if (rollback) throw new RollbackWith(raw);
         return raw;
-      });
+      };
+      return session ? await body(session) : await env.db.transaction(body);
     } catch (e) {
       if (e instanceof RollbackWith) return e.value as RawResult;
       // The root table is aliased internally; PostgreSQL error texts should name the real table.
@@ -902,7 +944,8 @@ export const execute = async (
       result = await attempt();
       break;
     } catch (e) {
-      if (e instanceof DbQueryError && e.sqlState === "40001" && i < 2) continue;
+      // A scope decides its own replay: rerunning the transaction means rerunning its callback.
+      if (e instanceof DbQueryError && e.sqlState === "40001" && i < 2 && !session) continue;
       throw e;
     }
   }

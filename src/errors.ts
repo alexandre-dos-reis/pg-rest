@@ -264,6 +264,8 @@ export type QueryErrorKind =
   | "unavailable"
   /** The context source of a bound query returned nothing -- the store it reads was never entered. A wiring bug, not a request problem. */
   | "no_context"
+  /** A transaction scope will not commit: `rollback()` was called, or a query in it already failed. Everything it did is undone. */
+  | "rolled_back"
   /** Anything left: a bug in pg-rest, or an error it did not foresee. The original is under `cause`. */
   | "internal";
 
@@ -306,6 +308,8 @@ const CODE_KINDS: Readonly<Record<string, QueryErrorKind>> = {
   PGRST001: "unavailable",
   PGRSTX00: "internal",
   PGRSTX01: "no_context",
+  PGRSTX02: "rolled_back",
+  PGRSTX03: "rolled_back",
   // SQLSTATEs a caller is likely to act on
   "23502": "invalid_data",
   "23503": "conflict",
@@ -376,6 +380,7 @@ const KIND_SUMMARIES: Readonly<Record<QueryErrorKind, string>> = {
   unsupported: "not supported",
   unavailable: "the database is unavailable",
   no_context: "the context source returned nothing",
+  rolled_back: "the transaction rolled back",
   internal: "unexpected internal error",
 };
 

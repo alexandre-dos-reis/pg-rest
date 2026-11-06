@@ -1,4 +1,4 @@
-import type { DbAdapter } from "./adapter";
+import type { DbAdapter, DbSession } from "./adapter";
 import type { CoreConfig, RequestContext } from "./core";
 import { ApiError, normalizeDbError } from "./errors";
 import {
@@ -6,9 +6,14 @@ import {
   type ContextSource,
   type QueryInput,
   type QueryResult,
+  type Transaction,
+  type TransactionOptions,
+  failedTransaction,
   noContextResult,
+  noContextTransaction,
   resolveContextSource,
   runQuery,
+  runTransaction,
   toFailedResult,
 } from "./query";
 import type { SchemaCache } from "./schema";
@@ -28,6 +33,7 @@ export type {
   AnySignature,
   QueryData,
   TypedContextQuery,
+  TypedTransaction,
   TypedPgRestInstance,
   TypedQuery,
 } from "./typed";
@@ -44,6 +50,7 @@ export type {
   FilterSpec,
   FilterValue,
   InsertQuery,
+  IsolationLevel,
   Order,
   QueryFailed,
   QueryInput,
@@ -54,6 +61,9 @@ export type {
   Scalar,
   Select,
   SelectQuery,
+  Transaction,
+  TransactionOptions,
+  TransactionRetry,
   UpdateQuery,
   Where,
 } from "./query";
@@ -159,6 +169,30 @@ export interface PgRestInstance {
    * role. Like `query`, it never rejects.
    */
   setContextQuery(source: ContextSource): ContextQuery;
+  /**
+   * Run several queries in **one** transaction: the context applied once for all of it, a commit
+   * when the callback returns, a rollback when it throws -- two writes that must land together, in
+   * the library rather than beside it.
+   *
+   * ```ts ignore
+   * const { data, error } = await pgRest.transaction(async (tx) => {
+   *   const order = await tx.query({ table: "orders", action: "insert", rows: { client_id: 1 }, single: true });
+   *   if (order.error) throw order.error;
+   *   await tx.query({ table: "order_items", action: "insert", rows: itemsFor(order.data.id) });
+   *   return order.data;
+   * }, { role: "authenticated", claims: { sub: user.id } });
+   * ```
+   *
+   * `tx.query` is {@link PgRestInstance.query} minus its context: the role and the claims are
+   * transaction-local and issued once at the head of the transaction, so a per-call context would
+   * change the role for every statement that follows instead of scoping anything.
+   *
+   * The result is a {@link QueryResult} around whatever the callback returned -- `data` is that
+   * value, there is no `count` -- and it never rejects. **Any query that failed rolls the scope
+   * back**, even if the callback went on and returned: `error` must not come back from a
+   * transaction that kept the row. `tx.transaction()` is the way to let one fail, on a savepoint.
+   */
+  transaction<A>(fn: (tx: Transaction) => Promise<A>, options?: TransactionOptions): Promise<QueryResult<A, undefined>>;
   /** Re-read the database catalog (after migrations). */
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
@@ -201,17 +235,22 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
   }
   const user = options.db;
   // Driver errors are recognised by their SQLSTATE, whatever the driver, so adapters stay trivial.
-  const adapter: DbAdapter = {
+  // Every statement is normalised where it is issued, and not only on the way out of a
+  // transaction: inside a scope the failure is caught before it reaches that boundary.
+  const normalized = (s: DbSession): DbSession => ({
     async query(text, params) {
       try {
-        return await user.query(text, params);
+        return await s.query(text, params);
       } catch (e) {
         throw normalizeDbError(e);
       }
     },
+  });
+  const adapter: DbAdapter = {
+    query: normalized(user).query,
     async transaction(fn) {
       try {
-        return await user.transaction(fn);
+        return await user.transaction((s) => fn(normalized(s)));
       } catch (e) {
         throw normalizeDbError(e);
       }
@@ -257,10 +296,22 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
     }
   };
 
+  const transaction = async <A>(
+    fn: (tx: Transaction) => Promise<A>,
+    scope?: TransactionOptions,
+  ): Promise<QueryResult<A, undefined>> => {
+    try {
+      return await runTransaction<A>({ db: adapter, config, cache: store.current() }, fn, scope);
+    } catch (e) {
+      // runTransaction does not throw; this covers everything around it, so the promise cannot reject
+      return failedTransaction(e) as QueryResult<A, undefined>;
+    }
+  };
+
   const setContextQuery = (source: ContextSource): ContextQuery => {
     // The source is read per call, not once here: that is what makes an AsyncLocalStorage useful,
     // one bound `db` serving a different context for every request in flight.
-    return async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
+    const call = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
       let context = ctx;
       if (!context) {
         try {
@@ -272,12 +323,35 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
       }
       return query<T>(input, context);
     };
+
+    // A scope reads the source **once**, on entry: the transaction has one `set_config`, so a
+    // source answering differently halfway through could not be honoured anyway. And it is read
+    // before the `BEGIN`, so nothing answering gives back a `PGRSTX01` rather than an open
+    // transaction with nothing in it.
+    const bound = async <A>(
+      fn: (tx: Transaction) => Promise<A>,
+      scope?: TransactionOptions,
+    ): Promise<QueryResult<A, undefined>> => {
+      const overrides = scope?.role !== undefined || scope?.claims !== undefined || scope?.settings !== undefined;
+      if (overrides) return transaction<A>(fn, scope);
+      let context: RequestContext | undefined;
+      try {
+        context = await resolveContextSource(source);
+      } catch (e) {
+        return failedTransaction(e) as QueryResult<A, undefined>;
+      }
+      if (!context) return noContextTransaction() as QueryResult<A, undefined>;
+      return transaction<A>(fn, { ...context, ...(scope ?? {}) });
+    };
+
+    return Object.assign(call, { transaction: bound });
   };
 
   return {
     handle,
     query,
     setContextQuery,
+    transaction,
     // Type generation is a build-time job: importing it here would put the generator in the bundle
     // of every server that only serves requests, so it is fetched when it is actually wanted.
     generateTypes: async (forTypes?: GenerateTypesOptions) =>
