@@ -9,10 +9,54 @@ They share a premise. Parity with PostgREST v16 is nearly complete and the diffe
 what a library owes an application it runs inside of. [`design.md`](design.md) draws that line: ➖ is refused on
 purpose, ❌ is not done yet. Everything below is a third thing: considered, and not decided.
 
+- [The line none of these may cross](#the-line-none-of-these-may-cross)
 - [1. Joining a transaction the application opened](#1-joining-a-transaction-the-application-opened)
 - [2. Observability hooks](#2-observability-hooks)
 - [3. Guardrails for an exposed surface](#3-guardrails-for-an-exposed-surface)
 - [4. A debug mode](#4-a-debug-mode)
+
+## The line none of these may cross
+
+Every addition on this page makes pg-rest look a little more like an ORM, and the transaction scope
+([`query.md`](query.md#transactions)) is where that becomes a fair thing to say out loud: it is the first API in the
+library with no HTTP counterpart. So the line has to be a criterion rather than a feeling, and the criterion is not how
+many functions the instance has. **It is who owns the query language.**
+
+The database does. `generateTypes()` reads `pg_catalog`, in one direction: there is no schema to declare, which is the
+first thing an ORM owns and the thing everything else of its follows from. And the query language is PostgREST's, which
+is a closed grammar — so what pg-rest does *not* have is not a backlog:
+
+- no expressions: `set` takes JSON values, so `balance = balance - amount` is unsayable
+- no joins of your choosing: an embed follows a declared foreign key, or it is `PGRST200`
+- no escape hatch: there is no `sql` tag, anywhere
+- no identity map, no dirty tracking, no lazy loading, no entities — the rows are serialised by Postgres (`json_agg`,
+  inside the one statement) and never become objects that are mapped back
+
+Which gives the test an addition has to pass: **can anything new be said to the database?** A scope passes it, and that
+is checkable rather than arguable — `tx.query` is `runQuery` unchanged, and the only statements `transaction()` adds are
+`BEGIN`/`COMMIT`, `SAVEPOINT`/`ROLLBACK TO` and `SET TRANSACTION`. Transaction control, not grammar. A scope is a
+**boundary around** requests, which is why `tx.query` is `query` minus its context and nothing else.
+
+What the invariant was: every input to pg-rest is a PostgREST request. What it is now: every *query* is a PostgREST
+request, and anything else can only be a boundary. That is weaker, and it is written down here because it is the
+sentence that will be quoted to justify the next addition.
+
+**Where the pressure actually comes from**, and it is this library's own doing:
+[`examples/with-transactions`](../examples/with-transactions) reads a balance and writes it back *only* because
+`balance - amount` cannot be said — and that read-modify-write is what drags in `repeatable read` and a retry. Anyone
+who lives with that will ask for three things, in order: `FOR UPDATE`, an expression in `set`, and a `sql` tag inside
+the scope. All three add to the grammar, so all three are refused ([`design.md`](design.md#what-it-will-never-do) is
+where they belong, next to the rest):
+
+| the ask | why not | instead |
+| --- | --- | --- |
+| `FOR UPDATE` / `SKIP LOCKED` | a lock is a clause of the statement, and PostgREST has no way to spell one | a function (`rpc`), which is SQL you own and version |
+| an expression in `set` (`{ balance: raw("balance - 1") }`) | this is a query builder with one feature, and it never stays at one | a function, or the borrowed transaction below |
+| a `sql` escape hatch | the line itself. An ORM is a library that eventually lets you write anything | your own driver — which is exactly [1](#1-joining-a-transaction-the-application-opened) |
+
+That is what reconsiders the proposal below. Letting pg-rest write inside a transaction **you** opened is not a
+convenience: it is what makes refusing the three rows above sustainable, because the escape hatch then lives where it
+belongs — in your driver, your SQL, your Drizzle — and not in this library's input type.
 
 ## 1. Joining a transaction the application opened
 
