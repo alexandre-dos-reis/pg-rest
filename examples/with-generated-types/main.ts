@@ -3,15 +3,18 @@
 //   node main.ts
 import { close, pgRest } from "./client.ts";
 
-const { data: todos, count } = await pgRest.query({
+const { data: todos, count, error } = await pgRest.query({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
-  select: ["id", "title", "priority", { tags: {} }], //  this table's columns, and `tags` because a foreign key leads there
+  select: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there
   where: { done: false }, //                     this table's columns too, each with its own value type
   order: [{ column: "priority", desc: true }], //  a column again, so a typo is an error and not a silently unordered answer
   limit: 10, //                                  plain numbers: limit, offset
-  count: "exact",
+  count: "exact", //                             "exact" | "planned" | "estimated", and the mode decides count's type
 });
+// query() never rejects: the failure is in the result, and checking it narrows the other three
+if (error) throw error;
 // todos: Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Array<{ label: string }> }>
+// count: number, because this query asked for one -- it would be `undefined` without the line above
 console.log(`open todos (${count} in total):`, todos);
 for (const todo of todos) console.log(`  ${todo.title} (${todo.priority}) ${todo.tags.map((t) => t.label).join(", ")}`);
 
@@ -47,13 +50,14 @@ const { data: open } = await pgRest.query({
 // open: Array<{ title: string }>
 console.log("rpc open_todos:", open);
 
-const { data: one } = await pgRest.query({
+const one = await pgRest.query({
   table: "todos",
   select: ["title", { tags: { as: "some", select: ["label"] } }],
   where: { id: 1 },
   single: true, //                               one object instead of an array (406 PGRST116 if there is not exactly one)
 });
-// one: { title: string }
-console.log("single:", one.title);
+if (one.error) throw one.error;
+// one.data: { title: string }
+console.log("single:", one.data.title);
 
 await close();

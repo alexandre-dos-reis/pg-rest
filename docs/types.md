@@ -100,6 +100,10 @@ relationships, the payload of a write is the relation's insert or update shape, 
 | `returning: "minimal"` | `null` |
 | a function | its signature's result, an array when it returns a set |
 
+`count` follows the same rule, on the result rather than on `data`: `"exact"` and `"estimated"` give a `number`,
+`"planned"` a `number | undefined` because an `EXPLAIN` can give nothing usable, and no `count` at all gives
+`undefined` — see [`query.md`](query.md#what-comes-back).
+
 The type argument goes on `createPgRest`, not on the call. TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<Database>({ … })` would check the input and then hand back `unknown` —
 measured both ways before settling on this shape.

@@ -50,7 +50,7 @@ app.get("/dashboard", async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const ctx = session ? { role: "authenticated", claims: { sub: session.user.id } } : undefined;
 
-  const { data: todos } = await pgRest.query(
+  const { data: todos, error } = await pgRest.query(
     {
       table: "todos",
       select: ["id", "title", "done", { tags: ["label"] }],
@@ -60,14 +60,15 @@ app.get("/dashboard", async (c) => {
     },
     ctx,
   );
+  if (error) return c.json(error.body, error.status);
 
   return c.json(todos);
 });
 ```
 
 Same role, same claims, same RLS policies as the REST route: `anon` without a session (the two seeded todos), the user's own
-rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and the errors throw, with
-the PostgREST `code` on them. See [`docs/query.md`](../../docs/query.md).
+rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and a failure comes
+back as `error`, with the PostgREST `code` and body on it, ready to answer with. See [`docs/query.md`](../../docs/query.md).
 
 Generate the types for this schema once (`generateTypes(await pgRest.schemaCache())`, from `@adrdp/pg-rest/types`), pass them
 to `createPgRest<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real

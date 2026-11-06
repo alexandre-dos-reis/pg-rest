@@ -35,15 +35,14 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | | |
 | --- | --- |
 | `handle(request, ctx?)` | the HTTP entry point. An explicit `ctx` overrides `resolveContext` |
-| `query(input, ctx?)` | the same thing from an object, in-process. Throws a `QueryError` → [`query.md`](query.md) |
-| `querySafe(input, ctx?)` | `query` with the failure as a value: `{ data, error }`. Never rejects |
+| `query(input, ctx?)` | the same thing from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
 | `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
 | `schemaCache()` | the introspected catalog |
 | `reloadSchema()` | re-read it after a migration. A failed reload keeps the previous cache |
 | `close()` | stop the handler. Your driver is left open |
 
-With a generated database type — `createPgRest<Database>(options)` — `query` and `querySafe` are typed by it and
-everything else is unchanged.
+With a generated database type — `createPgRest<Database>(options)` — `query` is typed by it and everything else is
+unchanged.
 
 `handle` is a plain `fetch`, which is all a PostgREST client library needs: hand it one and the exchange never touches a
 socket.
@@ -63,7 +62,7 @@ Everything the library throws carries a PostgREST body (`code`, `message`, `deta
 | `PgRestError` | thrown by the pure layers (parsers, SQL builders) with a status and a `PGRSTxxx` code |
 | `DbQueryError` | a database failure, normalised from any driver by its SQLSTATE |
 | `ApiError` | either of the above mapped to a status and a body. `handle()` turns it into a response |
-| `QueryError` | an `ApiError` from `query()`, plus the input that produced it |
+| `QueryError` | an `ApiError` in a `query()` result, plus the input that produced it |
 
-`handle()` never rejects: a failure becomes a PostgREST-shaped JSON response. `querySafe()` never rejects either: it
+`handle()` never rejects: a failure becomes a PostgREST-shaped JSON response. `query()` never rejects either: it
 returns the error. See [`query.md`](query.md#errors) for the codes you are likely to meet.

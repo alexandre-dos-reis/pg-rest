@@ -54,13 +54,14 @@ export const pgRest = await createPgRest<DatabasePgRest>(options);
 ```ts
 const pgRest = await createPgRest<DatabasePgRest>(options);
 
-const { data: todos } = await pgRest.query({
+const { data: todos, error } = await pgRest.query({
   table: "todos", //                                  only a relation of the exposed schema
   select: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
   where: { done: false }, //                          its own columns, with the right value type
   order: [{ column: "priority", desc: true }],
   limit: 10,
 });
+if (error) throw error; //                            a failure is part of the result, never a rejection
 ```
 
 `todos` is inferred, nesting included:

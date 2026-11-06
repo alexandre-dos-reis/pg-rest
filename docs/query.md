@@ -23,6 +23,7 @@ drifts fails the build. The ones that are meant to be refused carry `@ts-expect-
 - [Errors](#errors)
 - [What the typed path does not describe](#what-the-typed-path-does-not-describe)
 - [Every field](#every-field)
+  - [What comes back](#what-comes-back)
 
 ## The schema these examples use
 
@@ -331,7 +332,16 @@ const one = await pgRest.query({ table: "clients", select: ["name"], where: { id
 
 // `count` fills `count` with the number of matching rows, ignoring limit/offset
 const counted = await pgRest.query({ table: "orders", select: ["id"], limit: 1, count: "exact" });
-// counted.count: number | undefined, counted.status: 206 when the answer is partial
+// counted.count: number -- on a typed instance the mode decides the type, so there is nothing to test for
+// counted.status: 206 when the answer is partial
+
+// "planned" asks the planner, which can have no usable number: that one stays optional
+const guessed = await pgRest.query({ table: "orders", select: ["id"], count: "planned" });
+// guessed.count: number | undefined
+
+// and no `count` asked for is no count at all
+const plain = await pgRest.query({ table: "orders", select: ["id"] });
+// plain.count: undefined
 
 // `stripNulls` leaves the null fields out
 const lean = await pgRest.query({ table: "clients", select: ["name", "meta"], stripNulls: true });
@@ -508,35 +518,31 @@ type can express — so privileges stay where they are enforced.
 
 ## Errors
 
-`query()` throws a `QueryError`: an `Error` carrying the PostgREST status and body, plus the input that produced it.
+`query()` never rejects: a failure is part of the result, as an `error` carrying the PostgREST status and body plus the
+input that produced it. Exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and `count`.
 
 ```ts
-try {
-  await pgRest.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "ada@example.com" } }, ctx);
-} catch (e) {
-  if (e instanceof QueryError) {
-    e.status; //       409
-    e.body.code; //    "23505" -- the SQLSTATE, or a PGRSTxxx code
-    e.body.message; // "duplicate key value violates unique constraint …"
-    e.body.details;
-    e.body.hint;
-    e.input; //        the object you passed
-    e.message; //      "23505: duplicate key value … " -- for your logs
-  }
-}
-```
-
-`querySafe()` is the same query with the failure as a value. It never rejects: every failure comes back as `error`,
-including one the library did not foresee (a 500 carrying the original under `cause`).
-
-```ts
-const { data, error } = await pgRest.querySafe({ table: "clients", select: ["name"] });
+const { data, count, error } = await pgRest.query(
+  { table: "clients", action: "insert", rows: { name: "Dup", email: "ada@example.com" } },
+  ctx,
+);
 if (error) {
-  error.body; // the PostgREST body, ready to hand to an HTTP client
+  error.status; //       409
+  error.body.code; //    "23505" -- the SQLSTATE, or a PGRSTxxx code
+  error.body.message; // "duplicate key value violates unique constraint …"
+  error.body.details;
+  error.body.hint;
+  error.input; //        the object you passed
+  error.message; //      "23505: duplicate key value … " -- for your logs
 } else {
-  data; // non-null here: exactly one of the two is set
+  data; //  non-null here, and `count` is the type the query asked for
+  void count;
 }
 ```
+
+`error` is a `QueryError`, an `ApiError`, an `Error`: throw it, log it, or hand `error.body` straight to an HTTP client.
+Even a failure the library did not foresee arrives this way -- a 500 carrying the original under `cause` -- so no
+`try`/`catch` is needed anywhere.
 
 What you are likely to see:
 
@@ -606,7 +612,7 @@ const csv = await pgRest.handle(
 | `order` | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }` |
 | `limit`, `offset` | paging |
 | `single` | one object instead of an array (406 otherwise) |
-| `count` | `"exact"`, `"planned"`, `"estimated"` → `count` |
+| `count` | `"exact"`, `"planned"`, `"estimated"` → `count`. The mode decides its type: see [below](#what-comes-back) |
 | `stripNulls` | leave null fields out of the result |
 | `maxAffected` | refuse and roll back beyond this many affected rows |
 | `timezone` | the time zone the statement runs in |
@@ -618,5 +624,20 @@ const csv = await pgRest.handle(
 | `returning` | `"representation"` (the default here) or `"minimal"` |
 | `args` | a function's arguments, by name |
 
-And what comes back: `{ data, count, status }` — the rows, one object with `single`, or `null` for a minimal write; the
-total when a `count` was asked for; and the status the same call would have answered over HTTP.
+### What comes back
+
+`{ data, count, status }` — the rows, one object with `single`, or `null` for a minimal write; the total when a `count`
+was asked for; and the status the same call would have answered over HTTP.
+
+On a [typed instance](types.md) `count` is typed from the mode the query asked for, which is exactly what the runtime
+answers:
+
+| `count` in the query | `count` in the result | |
+| --- | --- | --- |
+| absent | `undefined` | nothing was counted, so there is nothing to narrow |
+| `"exact"` | `number` | always counted; with no paging to look past, that number is the page's own length |
+| `"estimated"` | `number` | the planner's number above `maxRows`, the exact one below it |
+| `"planned"` | `number \| undefined` | `Plan Rows` out of an `EXPLAIN`, which can come back with nothing usable |
+
+An instance created without a type argument keeps `number | undefined` throughout: the input is not a literal, so there
+is no mode to read it from.

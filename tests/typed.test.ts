@@ -11,6 +11,16 @@ import type { DatabasePgRest } from "./support/fixture.types";
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const assertType = <_T extends true>(): void => {};
 
+/**
+ * `query` hands a failure back as `error`, so reading `data` means narrowing first. The tests below
+ * are about the *shape* of a result that worked: this raises whatever went wrong and narrows, which
+ * is the one place in the suite where a failure is not the thing under test.
+ */
+const ok = <R extends { readonly error: unknown }>(r: R): Extract<R, { readonly error: null }> => {
+  if (r.error) throw r.error;
+  return r as Extract<R, { readonly error: null }>;
+};
+
 describe.skipIf(!hasDb)("a typed instance", () => {
   let db: TestDb;
   let pgRest: TypedPgRestInstance<DatabasePgRest>;
@@ -26,33 +36,39 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   const authed = { role: "authenticated", claims: { sub: "u1" } };
 
   test("the select decides the shape of data", async () => {
-    const { data } = await pgRest.query({
-      table: "orders",
-      select: ["id", "total", { clients: ["name"] }],
-      where: { status: "paid" },
-      order: [{ column: "total", desc: true }],
-      limit: 1,
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "orders",
+        select: ["id", "total", { clients: ["name"] }],
+        where: { status: "paid" },
+        order: [{ column: "total", desc: true }],
+        limit: 1,
+      }),
+    );
     assertType<Equal<typeof data, Array<{ id: number; total: number; clients: { name: string } | null }>>>();
     expect(data).toEqual([{ id: 1, total: 250, clients: { name: "Ada" } }]);
   });
 
   test("aliases rename the key, and a to-many embed is an array", async () => {
-    const { data } = await pgRest.query({
-      table: "clients",
-      select: ["name", "who:email", { orders: { select: ["total"], order: ["total.desc"], limit: 1 } }],
-      where: { id: 1 },
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "clients",
+        select: ["name", "who:email", { orders: { select: ["total"], order: ["total.desc"], limit: 1 } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<Equal<typeof data, Array<{ name: string; who: string | null; orders: Array<{ total: number }> }>>>();
     expect(data).toEqual([{ name: "Ada", who: "ada@example.com", orders: [{ total: 250 }] }]);
   });
 
   test("nested embeds, many-to-many, and an inner join that cannot be null", async () => {
-    const { data } = await pgRest.query({
-      table: "clients",
-      select: ["name", { orders: { select: ["id", { order_items: ["qty"] }, { products: ["name"] }] } }],
-      where: { id: 1 },
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "clients",
+        select: ["name", { orders: { select: ["id", { order_items: ["qty"] }, { products: ["name"] }] } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<
       Equal<
         typeof data,
@@ -65,22 +81,26 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data[0]!.orders[0]!.products).toEqual([{ name: "Keyboard" }, { name: "Mouse" }]);
 
     // `!inner` drops the parent rows without a match, so the embed is no longer nullable
-    const inner = await pgRest.query({
-      table: "orders",
-      select: ["id", { clients: { select: ["name"], inner: true } }],
-      where: { id: 1 },
-    });
+    const inner = ok(
+      await pgRest.query({
+        table: "orders",
+        select: ["id", { clients: { select: ["name"], inner: true } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<Equal<typeof inner.data, Array<{ id: number; clients: { name: string } }>>>();
     expect(inner.data).toEqual([{ id: 1, clients: { name: "Ada" } }]);
   });
 
   test("an embedded resource can also be filtered by its dotted path", async () => {
-    const { data } = await pgRest.query({
-      table: "clients",
-      select: ["name", { orders: ["total"] }],
-      where: { "orders.status": "paid" },
-      order: ["id"],
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "clients",
+        select: ["name", { orders: ["total"] }],
+        where: { "orders.status": "paid" },
+        order: ["id"],
+      }),
+    );
     assertType<Equal<typeof data, Array<{ name: string; orders: Array<{ total: number }> }>>>();
     expect(data).toEqual([
       { name: "Ada", orders: [{ total: 250 }] },
@@ -88,59 +108,69 @@ describe.skipIf(!hasDb)("a typed instance", () => {
       { name: "Grace", orders: [] },
     ]);
     // the operator forms work there too
-    const tuple = await pgRest.query({
-      table: "clients",
-      select: ["name", { orders: ["total"] }],
-      where: { "orders.total": ["gte", 200] },
-      order: ["id"],
-    });
+    const tuple = ok(
+      await pgRest.query({
+        table: "clients",
+        select: ["name", { orders: ["total"] }],
+        where: { "orders.total": ["gte", 200] },
+        order: ["id"],
+      }),
+    );
     expect(tuple.data[0]!.orders).toEqual([{ total: 250 }]);
   });
 
   test("an embed can be renamed, and the type follows the alias", async () => {
-    const { data } = await pgRest.query({
-      table: "orders",
-      select: ["id", { clients: { as: "who", select: ["name"] } }],
-      where: { id: 1 },
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "orders",
+        select: ["id", { clients: { as: "who", select: ["name"] } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<Equal<typeof data, Array<{ id: number; who: { name: string } | null }>>>();
     expect(data).toEqual([{ id: 1, who: { name: "Ada" } }]);
   });
 
   test("a spread embed joins the parent row, and a to-many spread arrives in arrays", async () => {
-    const one = await pgRest.query({
-      table: "orders",
-      select: ["id", { clients: { select: ["name"], spread: true } }],
-      where: { id: 1 },
-    });
+    const one = ok(
+      await pgRest.query({
+        table: "orders",
+        select: ["id", { clients: { select: ["name"], spread: true } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<Equal<typeof one.data, Array<{ id: number; name: string }>>>();
     expect(one.data).toEqual([{ id: 1, name: "Ada" }]);
 
-    const many = await pgRest.query({
-      table: "clients",
-      select: ["name", { orders: { select: ["t:total", "status"], spread: true } }],
-      where: { id: 1 },
-    });
+    const many = ok(
+      await pgRest.query({
+        table: "clients",
+        select: ["name", { orders: { select: ["t:total", "status"], spread: true } }],
+        where: { id: 1 },
+      }),
+    );
     assertType<Equal<typeof many.data, Array<{ name: string; t: number[]; status: string[] }>>>();
     expect(many.data).toEqual([{ name: "Ada", t: [250, 40.5], status: ["paid", "new"] }]);
   });
 
   test("single gives one row, and no select gives the whole row", async () => {
-    const one = await pgRest.query({ table: "clients", select: ["id"], where: { id: 1 }, single: true });
+    const one = ok(await pgRest.query({ table: "clients", select: ["id"], where: { id: 1 }, single: true }));
     assertType<Equal<typeof one.data, { id: number }>>();
     expect(one.data).toEqual({ id: 1 });
 
-    const whole = await pgRest.query({ table: "profiles", where: { client_id: 1 } });
+    const whole = ok(await pgRest.query({ table: "profiles", where: { client_id: 1 } }));
     assertType<Equal<typeof whole.data, Array<{ client_id: number; bio: string | null }>>>();
     expect(whole.data).toEqual([{ client_id: 1, bio: "First programmer" }]);
   });
 
   test("enums are unions, both in the row and in a filter", async () => {
-    const { data } = await pgRest.query({
-      table: "moods",
-      select: ["mood", "seen"],
-      where: { mood: "happy" },
-    });
+    const { data } = ok(
+      await pgRest.query({
+        table: "moods",
+        select: ["mood", "seen"],
+        where: { mood: "happy" },
+      }),
+    );
     assertType<
       Equal<typeof data, Array<{ mood: "sad" | "ok" | "happy"; seen: Array<"sad" | "ok" | "happy"> | null }>>
     >();
@@ -148,79 +178,129 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   });
 
   test("writes take the insert and update shapes", async () => {
-    const inserted = await pgRest.query(
-      { table: "clients", action: "insert", rows: { name: "Typed" }, select: ["id", "name"] },
-      authed,
+    const inserted = ok(
+      await pgRest.query(
+        { table: "clients", action: "insert", rows: { name: "Typed" }, select: ["id", "name"] },
+        authed,
+      ),
     );
     assertType<Equal<typeof inserted.data, Array<{ id: number; name: string }>>>();
     expect(inserted.data[0]!.name).toBe("Typed");
 
-    const quiet = await pgRest.query(
-      {
-        table: "clients",
-        action: "update",
-        set: { name: "Quiet" },
-        where: { id: inserted.data[0]!.id },
-        returning: "minimal",
-      },
-      authed,
+    const quiet = ok(
+      await pgRest.query(
+        {
+          table: "clients",
+          action: "update",
+          set: { name: "Quiet" },
+          where: { id: inserted.data[0]!.id },
+          returning: "minimal",
+        },
+        authed,
+      ),
     );
     assertType<Equal<typeof quiet.data, null>>();
     expect(quiet.data).toBeNull();
 
-    const deleted = await pgRest.query(
-      { table: "clients", action: "delete", where: { id: inserted.data[0]!.id }, select: ["id"] },
-      authed,
+    const deleted = ok(
+      await pgRest.query(
+        { table: "clients", action: "delete", where: { id: inserted.data[0]!.id }, select: ["id"] },
+        authed,
+      ),
     );
     assertType<Equal<typeof deleted.data, Array<{ id: number }>>>();
     expect(deleted.data).toHaveLength(1);
   });
 
   test("rpc: the arguments and the result come from the function", async () => {
-    const sum = await pgRest.query({ rpc: "add", args: { a: 2, b: 3 } });
+    const sum = ok(await pgRest.query({ rpc: "add", args: { a: 2, b: 3 } }));
     assertType<Equal<typeof sum.data, number>>();
     expect(sum.data).toBe(5);
 
-    const greeting = await pgRest.query({ rpc: "greet" });
+    const greeting = ok(await pgRest.query({ rpc: "greet" }));
     assertType<Equal<typeof greeting.data, string>>();
     expect(greeting.data).toBe("hello world");
 
-    const mood = await pgRest.query({ rpc: "cheer_up", args: { m: "sad" } });
+    const mood = ok(await pgRest.query({ rpc: "cheer_up", args: { m: "sad" } }));
     assertType<Equal<typeof mood.data, "sad" | "ok" | "happy">>();
     expect(mood.data).toBe("ok");
   });
 
   test("a set-returning function answers with rows, narrowed by its select", async () => {
-    const { data, count } = await pgRest.query({
-      rpc: "orders_by_status",
-      args: { s: "paid" },
-      select: ["total"],
-      order: ["total.desc"],
-      count: "exact",
-    });
+    const { data, count } = ok(
+      await pgRest.query({
+        rpc: "orders_by_status",
+        args: { s: "paid" },
+        select: ["total"],
+        order: ["total.desc"],
+        count: "exact",
+      }),
+    );
     assertType<Equal<typeof data, Array<{ total: number }>>>();
-    assertType<Equal<typeof count, number | undefined>>();
+    assertType<Equal<typeof count, number>>();
     expect(data).toEqual([{ total: 250 }, { total: 99.99 }]);
 
     // void is null, and a function returning a table row gives that row
-    const nothing = await pgRest.query({ rpc: "nothing" }, authed);
+    const nothing = ok(await pgRest.query({ rpc: "nothing" }, authed));
     assertType<Equal<typeof nothing.data, null>>();
-    const first = await pgRest.query({ rpc: "first_client", select: ["name"] });
+    const first = ok(await pgRest.query({ rpc: "first_client", select: ["name"] }));
     assertType<Equal<typeof first.data, { name: string }>>();
     expect(first.data).toEqual({ name: "Ada" });
   });
 
+  test("the count asked for decides the type of count", async () => {
+    // no count asked for: nothing to read, and the type says so
+    const none = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"] }));
+    assertType<Equal<typeof none.count, undefined>>();
+    expect(none.count).toBeUndefined();
+
+    // "exact" always answers with a number, paged or not
+    const exact = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], limit: 1, count: "exact" }));
+    assertType<Equal<typeof exact.count, number>>();
+    expect(exact.count).toBe(4);
+    const unpaged = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "exact" }));
+    assertType<Equal<typeof unpaged.count, number>>();
+    expect(unpaged.count).toBe(4);
+
+    // "estimated" falls back to the page's own length, so it is a number too
+    const estimated = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "estimated" }));
+    assertType<Equal<typeof estimated.count, number>>();
+    expect(typeof estimated.count).toBe("number");
+
+    // "planned" reads an EXPLAIN, which may give nothing usable
+    const planned = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "planned" }));
+    assertType<Equal<typeof planned.count, number | undefined>>();
+
+    // all four of those are the narrowed half: before `if (error)`, the failed half has no count
+    const either = await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "exact" });
+    assertType<Equal<typeof either.count, number | undefined>>();
+    if (either.error) {
+      assertType<Equal<typeof either.count, undefined>>();
+    } else {
+      assertType<Equal<typeof either.count, number>>();
+      expect(either.count).toBe(4);
+    }
+  });
+
   test("another schema has to name itself", async () => {
-    const { data } = await pgRest.query({ schema: "v2", table: "things", select: ["label"], order: ["id"] });
+    const { data } = ok(await pgRest.query({ schema: "v2", table: "things", select: ["label"], order: ["id"] }));
     assertType<Equal<typeof data, Array<{ label: string }>>>();
     expect(data).toEqual([{ label: "one" }, { label: "two" }]);
   });
 
-  test("querySafe keeps the inference and adds the error", async () => {
-    const { data, error } = await pgRest.querySafe({ table: "clients", select: ["name"], where: { id: 1 } });
+  test("the error is part of the result, and narrowing it keeps the inference", async () => {
+    const { data, error } = await pgRest.query({ table: "clients", select: ["name"], where: { id: 1 } });
+    // before the check, `data` carries the failed half's null
+    assertType<Equal<typeof data, Array<{ name: string }> | null>>();
     if (error) throw error;
     assertType<Equal<typeof data, Array<{ name: string }>>>();
     expect(data).toEqual([{ name: "Ada" }]);
+
+    // 0 rows with `single` is a 406 PGRST116, and the failed half is what comes back
+    const failed = await pgRest.query({ table: "clients", select: ["name"], where: { id: 999 }, single: true });
+    if (!failed.error) throw new Error("expected a failure");
+    assertType<Equal<typeof failed.data, null>>();
+    assertType<Equal<typeof failed.count, undefined>>();
   });
 
   test("handle() is untouched: a request is a string from outside", async () => {
@@ -237,19 +317,19 @@ describe.skipIf(!hasDb)("a typed instance", () => {
    */
   test("the types do not know the role: that stays the database's job", async () => {
     // this compiles: `clients` is a writable table, and nothing in the type mentions `anon`
-    const denied = await pgRest.querySafe({ table: "clients", action: "insert", rows: { name: "x" } });
+    const denied = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } });
     expect(denied.error?.status).toBe(401);
     expect(denied.error?.body.code).toBe("42501"); // insufficient_privilege, straight from Postgres
     // the same call as a role that was granted the write succeeds
-    const allowed = await pgRest.querySafe({ table: "clients", action: "insert", rows: { name: "x" } }, authed);
+    const allowed = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } }, authed);
     expect(allowed.error).toBeNull();
     // and RLS keeps filtering rows the types know nothing about
     const as = (sub: string) => ({ role: "authenticated", claims: { sub } });
-    await pgRest.query({ table: "notes", action: "insert", rows: { body: "alice only" } }, as("alice"));
-    expect((await pgRest.query({ table: "notes", select: ["body"] }, as("alice"))).data).toEqual([
+    ok(await pgRest.query({ table: "notes", action: "insert", rows: { body: "alice only" } }, as("alice")));
+    expect(ok(await pgRest.query({ table: "notes", select: ["body"] }, as("alice"))).data).toEqual([
       { body: "alice only" },
     ]);
-    expect((await pgRest.query({ table: "notes", select: ["body"] }, as("bob"))).data).toEqual([]);
+    expect(ok(await pgRest.query({ table: "notes", select: ["body"] }, as("bob"))).data).toEqual([]);
   });
 
   test("what the types refuse", () => {

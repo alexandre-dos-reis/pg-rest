@@ -142,9 +142,10 @@ describe("what an editor offers in a typed query", () => {
     expect(keys.docOf("single")).toContain("one object instead of an array");
     expect(keys.docOf("rpc")).toContain("Never both");
 
-    // hovering the method gives the orientation
-    expect(ask(`void pgRest.qu#ery({ table: "profiles" });`).hover).toContain("decides what the rest may say");
-    expect(ask(`void pgRest.quer#ySafe({ table: "profiles" });`).hover).toContain("It never rejects");
+    // hovering the method gives the orientation, failures included
+    const method = ask(`void pgRest.qu#ery({ table: "profiles" });`).hover;
+    expect(method).toContain("decides what the rest may say");
+    expect(method).toContain("It never rejects");
 
     /*
      * Hovering a property you have already written shows its *inferred* type and no documentation:

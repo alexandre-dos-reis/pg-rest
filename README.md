@@ -60,7 +60,7 @@ No HTTP, no loopback call: the same parser, the same SQL and the same `set_confi
 Security applies as it would over the wire.
 
 ```ts
-const { data } = await pgRest.query(
+const { data, error } = await pgRest.query(
   {
     table: "todos",
     select: ["id", "title", { tags: ["label"] }],
@@ -70,10 +70,12 @@ const { data } = await pgRest.query(
   },
   { role: "authenticated", claims: { sub: user.id } },
 );
+if (error) throw error; // or hand `error.body` and `error.status` to your framework
+// data is narrowed from here on: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
 ```
 
-Errors throw a `QueryError` carrying the PostgREST status and body; `querySafe()` hands them back as `{ data, error }`
-instead. → [`docs/query.md`](docs/query.md)
+A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, and `query()` never
+rejects. → [`docs/query.md`](docs/query.md)
 
 One command writes the types for your database, and one type argument puts them to work:
 
@@ -84,12 +86,16 @@ writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }
 ```ts
 const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
-const { data } = await pgRest.query({
+const { data, count, error } = await pgRest.query({
   table: "todos", //                             only a relation that exists
   select: ["id", "title", { tags: ["label"] }], //  only real columns and relationships
   where: { done: false }, //                     only its own columns, with the right value type
+  order: [{ column: "priority", desc: true }], //  a column again: a typo is an error, not a silently unordered answer
+  limit: 10, //                                  plain numbers: limit, offset
+  count: "exact", //                             asked for, so `count` is a number -- and `undefined` without this line
 });
-// data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
+if (error) throw error;
+// data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>, count: number
 ```
 
 They come from the catalog the library itself reads, so what they allow is what it accepts — down to your enums, and to
@@ -99,7 +105,7 @@ which embeds a foreign key actually permits. → [`docs/types.md`](docs/types.md
 
 |                                                |                                                                   |
 | ---------------------------------------------- | ----------------------------------------------------------------- |
-| [`docs/query.md`](docs/query.md)               | `query()` and `querySafe()`, with an example for every field      |
+| [`docs/query.md`](docs/query.md)               | `query()`, with an example for every field                        |
 | [`docs/types.md`](docs/types.md)               | generating types, the typed instance, and what it cannot describe |
 | [`docs/options.md`](docs/options.md)           | every `createPgRest` option, and what the instance gives back     |
 | [`docs/adapters.md`](docs/adapters.md)         | `DbAdapter`, the four that ship, and writing your own             |
