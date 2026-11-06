@@ -2,65 +2,14 @@ import { PgRestError } from "../errors";
 import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
 import { type SelectItem, parseSelect } from "./select";
 import { checkFilter, checkLogicTree, checkOrder, checkSelect } from "./grammar";
-import { IS_VALUES_ORDER, scanList } from "./syntax";
+import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER, scanList } from "./syntax";
 
-export type Operator =
-  | "eq"
-  | "neq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "like"
-  | "ilike"
-  | "match"
-  | "imatch"
-  | "in"
-  | "is"
-  | "isdistinct"
-  | "fts"
-  | "plfts"
-  | "phfts"
-  | "wfts"
-  | "cs"
-  | "cd"
-  | "ov"
-  | "sl"
-  | "sr"
-  | "nxl"
-  | "nxr"
-  | "adj";
+export type Operator = (typeof OPERATORS_ORDER)[number];
 
-const OPERATORS: ReadonlySet<string> = new Set([
-  "eq",
-  "neq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "like",
-  "ilike",
-  "match",
-  "imatch",
-  "in",
-  "is",
-  "isdistinct",
-  "fts",
-  "plfts",
-  "phfts",
-  "wfts",
-  "cs",
-  "cd",
-  "ov",
-  "sl",
-  "sr",
-  "nxl",
-  "nxr",
-  "adj",
-]);
-const QUANTIFIABLE: ReadonlySet<string> = new Set(["eq", "gt", "gte", "lt", "lte", "like", "ilike", "match", "imatch"]);
-const FTS: ReadonlySet<string> = new Set(["fts", "plfts", "phfts", "wfts"]);
-const IS_VALUES: ReadonlySet<string> = new Set(["null", "not_null", "true", "false", "unknown"]);
+const OPERATORS: ReadonlySet<string> = new Set(OPERATORS_ORDER);
+const QUANTIFIABLE: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
+const FTS: ReadonlySet<string> = new Set(FTS_ORDER);
+const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);
 
 export interface Filter {
   readonly kind: "filter";

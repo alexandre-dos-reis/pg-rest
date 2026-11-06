@@ -11,6 +11,8 @@ import {
   useSchema,
 } from "./core";
 import { ApiError, PgRestError } from "./errors";
+import type { Operator } from "./parse/filter";
+import { OPERATORS_ORDER } from "./parse/syntax";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
 import { toApiError } from "./service";
 import type { JsonObject } from "./sql/write";
@@ -28,8 +30,8 @@ export type Scalar = string | number | boolean | null;
  * the column's own type, so the fields may come in any order and a missing one is NULL.
  *
  * An object is read as a composite value only when it has no `op` key -- that is what tells it from
- * a {@link FilterSpec}. A composite type with a field actually named `op` has to be compared
- * through its Postgres literal instead: `{ item: '("sock",17)' }`.
+ * a {@link FilterSpec}. A composite type with a field actually named `op` therefore cannot use this
+ * form; pass the JSON yourself, as a string: `{ item: '{"op":"and","name":"sock"}' }`.
  */
 export interface CompositeValue {
   readonly [field: string]: Scalar | CompositeValue | ReadonlyArray<Scalar | CompositeValue> | undefined;
@@ -38,33 +40,11 @@ export interface CompositeValue {
 /** What an operator compares a column against. */
 export type FilterValue = Scalar | CompositeValue;
 
-/** The PostgREST filter operators (https://docs.postgrest.org/en/v16/references/api/tables_views.html#operators). */
-export type FilterOp =
-  | "eq"
-  | "neq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "like"
-  | "ilike"
-  | "match"
-  | "imatch"
-  | "in"
-  | "is"
-  | "isdistinct"
-  | "fts"
-  | "plfts"
-  | "phfts"
-  | "wfts"
-  | "cs"
-  | "cd"
-  | "ov"
-  | "sl"
-  | "sr"
-  | "nxl"
-  | "nxr"
-  | "adj";
+/**
+ * The PostgREST filter operators (https://docs.postgrest.org/en/v16/references/api/tables_views.html#operators).
+ * The same type the parser works with, from the one list in `parse/syntax.ts`.
+ */
+export type FilterOp = Operator;
 
 /** An operator with its modifiers: `not.`, a quantifier (`eq(any)`) or a text-search config (`fts(english)`). */
 export interface FilterSpec {
@@ -253,33 +233,7 @@ export class QueryError extends ApiError {
 // input -> query parameters
 // ---------------------------------------------------------------------------
 
-const OPS: ReadonlySet<string> = new Set<FilterOp>([
-  "eq",
-  "neq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "like",
-  "ilike",
-  "match",
-  "imatch",
-  "in",
-  "is",
-  "isdistinct",
-  "fts",
-  "plfts",
-  "phfts",
-  "wfts",
-  "cs",
-  "cd",
-  "ov",
-  "sl",
-  "sr",
-  "nxl",
-  "nxr",
-  "adj",
-]);
+const OPS: ReadonlySet<string> = new Set<FilterOp>(OPERATORS_ORDER);
 
 /** Inside a list or a logic tree these read as something other than text, so such a string is quoted. */
 const KEYWORDS: ReadonlySet<string> = new Set(["null", "true", "false", "unknown"]);
