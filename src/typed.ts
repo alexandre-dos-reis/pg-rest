@@ -1,5 +1,5 @@
 import type { RequestContext } from "./core";
-import type { ContextSource, CountFrom, FilterOp, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
+import type { ContextSource, CountFrom, FtsValue, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -244,31 +244,124 @@ type Shaped<Rel, Spec, R> = Rel extends { to: "many" } ? R[] : Spec extends { in
 type Comparable<V> =
   V extends ReadonlyArray<unknown> ? V : V extends object ? { readonly [K in keyof V]?: Comparable<V[K]> } : V;
 
-/** A condition on a column: the value itself (`eq`), a `[operator, value]` tuple, or the full form. */
-type Filter<V, C = Comparable<V>> =
-  | C
-  | null
-  | readonly [FilterOp, C | ReadonlyArray<C> | null]
-  | {
-      readonly op: FilterOp;
-      readonly value?: C | ReadonlyArray<C> | null;
-      readonly not?: boolean;
-      readonly quantifier?: "any" | "all";
-      readonly config?: string;
-    };
+type IsValue = null | boolean | "null" | "not_null" | "true" | "false" | "unknown";
+
+/** What a column is compared against: its own type, nullable. */
+type Cmp<V> = Comparable<NonNullable<V>>;
+
+/** The element of an array column, or the column itself. */
+type Elem<V> = NonNullable<V> extends ReadonlyArray<infer E> ? E : NonNullable<V>;
+
+/** Operators every column has. */
+interface EqualityOps<V> {
+  readonly $eq?: Cmp<V> | ReadonlyArray<Elem<V>> | null;
+  readonly $neq?: Cmp<V> | ReadonlyArray<Elem<V>> | null;
+  readonly $in?: ReadonlyArray<Cmp<V>>;
+  readonly $is?: IsValue;
+  readonly $isdistinct?: Cmp<V> | ReadonlyArray<Elem<V>> | null;
+}
+
+/** Numbers, text, dates and arrays have an order. */
+interface OrderOps<V> {
+  readonly $gt?: Cmp<V>;
+  readonly $gte?: Cmp<V>;
+  readonly $lt?: Cmp<V>;
+  readonly $lte?: Cmp<V>;
+}
+
+/** `*` is the wildcard of `$like` and `$ilike`; `$match` and `$imatch` take a POSIX regular expression. */
+interface PatternOps {
+  readonly $like?: string;
+  readonly $ilike?: string;
+  readonly $match?: string;
+  readonly $imatch?: string;
+}
+
+/** Full-text search: a query, or a query with its configuration. */
+interface SearchOps {
+  readonly $fts?: string | FtsValue;
+  readonly $plfts?: string | FtsValue;
+  readonly $phfts?: string | FtsValue;
+  readonly $wfts?: string | FtsValue;
+}
+
+/** Containment and overlap, for arrays (and ranges and `jsonb`, which the generated types leave `unknown`). */
+interface ContainOps<V> {
+  readonly $cs?: ReadonlyArray<Elem<V>> | string;
+  readonly $cd?: ReadonlyArray<Elem<V>> | string;
+  readonly $ov?: ReadonlyArray<Elem<V>> | string;
+}
+
+/** Range positions: strictly left, strictly right, does not extend right/left, adjacent. */
+interface RangeOps {
+  readonly $sl?: string;
+  readonly $sr?: string;
+  readonly $nxl?: string;
+  readonly $nxr?: string;
+  readonly $adj?: string;
+}
+
+/** Which operators a column takes, by the kind of its TypeScript type. */
+type CoreOps<V> = [unknown] extends [V]
+  ? EqualityOps<V> & OrderOps<V> & PatternOps & SearchOps & ContainOps<V> & RangeOps
+  : NonNullable<V> extends ReadonlyArray<unknown>
+    ? EqualityOps<V> & OrderOps<V> & ContainOps<V>
+    : NonNullable<V> extends number
+      ? EqualityOps<V> & OrderOps<V>
+      : NonNullable<V> extends string
+        ? EqualityOps<V> & OrderOps<V> & PatternOps & SearchOps
+        : EqualityOps<V>;
+
+/** `$any` / `$all`: the operator applied to a list of values, the column against each. */
+interface QuantifiedOps<V> {
+  readonly $eq?: ReadonlyArray<Elem<V>>;
+  readonly $gt?: ReadonlyArray<Elem<V>>;
+  readonly $gte?: ReadonlyArray<Elem<V>>;
+  readonly $lt?: ReadonlyArray<Elem<V>>;
+  readonly $lte?: ReadonlyArray<Elem<V>>;
+  readonly $like?: ReadonlyArray<string>;
+  readonly $ilike?: ReadonlyArray<string>;
+  readonly $match?: ReadonlyArray<string>;
+  readonly $imatch?: ReadonlyArray<string>;
+}
+
+/** The column against each value of a list, so on a column that holds one value: an array column has no `$any`. */
+interface Quantifiers<V> {
+  readonly $any?: NonNullable<V> extends ReadonlyArray<unknown> ? never : QuantifiedOps<V>;
+  readonly $all?: NonNullable<V> extends ReadonlyArray<unknown> ? never : QuantifiedOps<V>;
+}
+
+/**
+ * The operators of a column, each starting with `$`: `{ $gte: 100, $lt: 500 }` is `>= 100 AND < 500`.
+ * `$not` inverts one of them (`{ $not: { $in: [1, 2] } }`, or `{ $not: null }` for a plain value), and `$any` / `$all` compare the column
+ * with each value of a list (`{ $any: { $like: ["a*", "b*"] } }`).
+ */
+type Operators<V> = CoreOps<V> &
+  Quantifiers<V> & { readonly $not?: PlainValue<V> | null | (CoreOps<V> & Quantifiers<V>) };
+
+/**
+ * A condition on a column: the value itself (`eq`), `null` (`is.null`), or its operators. An array
+ * is not a condition on its own -- `{ $eq: [...] }` says it is compared with one.
+ */
+type Filter<V> = PlainValue<V> | null | Operators<V>;
+
+/** A value that is a condition by itself: not an array, which has to say how it is compared. */
+type PlainValue<V> = Exclude<Cmp<V>, ReadonlyArray<unknown>>;
 
 type WhereOf<R, EmbedKeys extends string> = {
   readonly [K in keyof R & string]?: Filter<R[K]>;
 } & {
-  readonly and?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
-  readonly or?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
+  readonly $and?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
+  readonly $or?: ReadonlyArray<WhereOf<R, EmbedKeys>>;
+  /** The conditions inside are ANDed, then inverted. */
+  readonly $not?: WhereOf<R, EmbedKeys>;
 } & {
   /**
    * A filter on an embedded resource, by its dotted path, the way the query string writes it. The
    * column belongs to the other resource, so only the shape of the condition is checked here --
    * prefer the embed's own `where`, which knows its columns.
    */
-  readonly [K in `${EmbedKeys}.${string}`]?: Filter<Scalar>;
+  readonly [K in `${EmbedKeys}.${string}`]?: Scalar | Operators<unknown>;
 };
 
 type OrderOf<R> =
@@ -354,9 +447,10 @@ type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
      */
     readonly select?: SelectList<Db, S, T>;
     /**
-     * Which rows, by column. A plain value means `eq` (and `null` means `is.null`),
-     * `["gte", 3]` names an operator, and `{ op, value, not, quantifier, config }` is the long form.
-     * `and` and `or` take a list of nested groups; a dotted key filters an embedded resource.
+     * Which rows, by column. A plain value means `eq` (and `null` means `is.null`), and
+     * `{ $gte: 3, $lt: 9 }` names the operators; `$not`, `$any` and `$all` modify one.
+     * `$and` and `$or` take a list of nested groups, `$not` one group to invert; a dotted key
+     * filters an embedded resource.
      */
     readonly where?: Where<Db, S, T>;
     /** How to sort: `"created"`, `"created.desc"`, or `{ column, desc, nulls }`. */
@@ -456,8 +550,9 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
 /** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
 type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
   | Column<Db, S, T>
-  | "and"
-  | "or"
+  | "$and"
+  | "$or"
+  | "$not"
   | `${keyof Embeds<Db, S, T> & string}.${string}`;
 
 /**

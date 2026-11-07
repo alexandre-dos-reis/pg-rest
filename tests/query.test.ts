@@ -11,14 +11,14 @@ const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as
 describe("input -> query string", () => {
   test("select, filters, order and paging", () => {
     expect(qs({ table: "clients", select: ["id", "name"], limit: 10 })).toBe("select=id%2Cname&limit=10");
-    expect(qs({ table: "orders", where: { status: "paid", total: ["gte", 100] } })).toBe(
+    expect(qs({ table: "orders", where: { status: "paid", total: { $gte: 100 } } })).toBe(
       "status=eq.paid&total=gte.100",
     );
-    expect(qs({ table: "clients", where: { meta: null, email: { op: "is", value: null, not: true } } })).toBe(
+    expect(qs({ table: "clients", where: { meta: null, email: { $not: { $is: null } } } })).toBe(
       "meta=is.null&email=not.is.null",
     );
-    expect(qs({ table: "orders", where: { id: ["in", [1, 2, 3]] } })).toBe("id=in.%281%2C2%2C3%29");
-    expect(qs({ table: "clients", where: { tags: ["cs", ["vip", "early"]] } })).toBe("tags=cs.%7Bvip%2Cearly%7D");
+    expect(qs({ table: "orders", where: { id: { $in: [1, 2, 3] } } })).toBe("id=in.%281%2C2%2C3%29");
+    expect(qs({ table: "clients", where: { tags: { $cs: ["vip", "early"] } } })).toBe("tags=cs.%7Bvip%2Cearly%7D");
     expect(qs({ table: "orders", order: [{ column: "total", desc: true, nulls: "last" }, "id"] })).toBe(
       "order=total.desc.nullslast%2Cid",
     );
@@ -30,23 +30,70 @@ describe("input -> query string", () => {
     expect(qs({ table: "clients", where: { name: "a,b" } })).toBe("name=eq.a%2Cb");
     expect(qs({ table: "clients", where: { email: "a.b@c.d" } })).toBe("email=eq.a.b%40c.d");
     // in a list or a logic tree, the separators have to be escaped
-    expect(qs({ table: "clients", where: { name: ["in", ["a,b", "null", ""]] } })).toBe(
+    expect(qs({ table: "clients", where: { name: { $in: ["a,b", "null", ""] } } })).toBe(
       "name=in.%28%22a%2Cb%22%2C%22null%22%2C%22%22%29",
     );
-    expect(qs({ table: "clients", where: { or: [{ email: "a.b@c.d" }] } })).toBe("or=%28email.eq.%22a.b%40c.d%22%29");
-    expect(qs({ table: "clients", where: { or: [{ name: 'q"z' }] } })).toBe("or=%28name.eq.%22q%5C%22z%22%29");
+    expect(qs({ table: "clients", where: { $or: [{ email: "a.b@c.d" }] } })).toBe("or=%28email.eq.%22a.b%40c.d%22%29");
+    expect(qs({ table: "clients", where: { $or: [{ name: 'q"z' }] } })).toBe("or=%28name.eq.%22q%5C%22z%22%29");
     // comparing with null is a NULL test, whichever form it is written in
-    expect(qs({ table: "clients", where: { meta: null, email: { op: "eq", value: null, not: true } } })).toBe(
+    expect(qs({ table: "clients", where: { meta: null, email: { $not: { $eq: null } } } })).toBe(
       "meta=is.null&email=not.is.null",
     );
-    expect(qs({ table: "clients", where: { meta: ["neq", null] } })).toBe("meta=not.is.null");
+    expect(qs({ table: "clients", where: { meta: { $neq: null } } })).toBe("meta=not.is.null");
+  });
+
+  test("several operators on one column are ANDed, and the modifiers wrap one operator", () => {
+    expect(qs({ table: "orders", where: { total: { $gte: 100, $lt: 500 } } })).toBe("total=gte.100&total=lt.500");
+    expect(qs({ table: "orders", where: { status: { $not: { $in: ["paid", "shipped"] } } } })).toBe(
+      "status=not.in.%28paid%2Cshipped%29",
+    );
+    expect(qs({ table: "clients", where: { name: { $any: { $eq: ["Ada", "Bob"] } } } })).toBe(
+      "name=eq%28any%29.%7BAda%2CBob%7D",
+    );
+    expect(qs({ table: "clients", where: { name: { $not: { $all: { $like: ["a*"] } } } } })).toBe(
+      "name=not.like%28all%29.%7Ba*%7D",
+    );
+    expect(qs({ table: "clients", where: { name: { $fts: { query: "ada", config: "english" } } } })).toBe(
+      "name=fts%28english%29.ada",
+    );
+    expect(qs({ table: "clients", where: { name: { $ilike: "*@EXAMPLE.com" } } })).toBe("name=ilike.*%40EXAMPLE.com");
+    // the same operator twice on one column needs $and: an object cannot repeat a key
+    expect(qs({ table: "clients", where: { $and: [{ name: { $like: "A*" } }, { name: { $like: "*z" } }] } })).toBe(
+      "and=%28name.like.A*%2Cname.like.*z%29",
+    );
+    expect(() => qs({ table: "clients", where: { name: { $any: ["Ada"] } } as never })).toThrow("wraps an operator");
+    // a plain value under $not is an eq
+    expect(qs({ table: "clients", where: { email: { $not: null } } })).toBe("email=not.is.null");
+    expect(qs({ table: "orders", where: { status: { $not: "paid" } } })).toBe("status=not.eq.paid");
+    expect(qs({ table: "orders", where: { status: { $not: { $not: "paid" } } } })).toBe("status=eq.paid");
+    // $not on a column with two operators would be ambiguous
+    expect(() => qs({ table: "orders", where: { total: { $not: { $gte: 1, $lt: 5 } } } })).toThrow("exactly one");
+  });
+
+  test("a $not group inverts the AND of its conditions", () => {
+    expect(qs({ table: "orders", where: { $not: { status: "paid", total: { $gte: 100 } } } })).toBe(
+      "not.and=%28status.eq.paid%2Ctotal.gte.100%29",
+    );
+    expect(qs({ table: "orders", where: { $or: [{ $not: { status: "paid" } }, { id: 4 }] } })).toBe(
+      "or=%28not.and%28status.eq.paid%29%2Cid.eq.4%29",
+    );
+  });
+
+  test("the former syntaxes are refused rather than read as something else", () => {
+    const bad = (where: object) => () => qs({ table: "orders", where } as never);
+    expect(bad({ total: ["gte", 100] })).toThrow("compared with an array");
+    expect(bad({ total: { op: "gte", value: 100 } })).toThrow("former { op, value } syntax");
+    expect(bad({ total: { $nope: 1 } })).toThrow("Unknown filter operator '$nope'");
+    expect(bad({ total: { $gte: 1, extra: 2 } })).toThrow("mixes operators and fields");
+    expect(bad({ $nope: [] })).toThrow("Unknown key '$nope'");
+    expect(bad({ total: {} })).not.toThrow();
   });
 
   test("and/or groups nest, and several conditions in one group are ANDed", () => {
-    expect(qs({ table: "orders", where: { or: [{ status: "paid" }, { total: ["gte", 400] }] } })).toBe(
+    expect(qs({ table: "orders", where: { $or: [{ status: "paid" }, { total: { $gte: 400 } }] } })).toBe(
       "or=%28status.eq.paid%2Ctotal.gte.400%29",
     );
-    expect(qs({ table: "orders", where: { or: [{ status: "new", total: ["lt", 50] }, { id: 4 }] } })).toBe(
+    expect(qs({ table: "orders", where: { $or: [{ status: "new", total: { $lt: 50 } }, { id: 4 }] } })).toBe(
       "or=%28and%28status.eq.new%2Ctotal.lt.50%29%2Cid.eq.4%29",
     );
   });
@@ -72,7 +119,7 @@ describe("input -> query string", () => {
   });
 
   test("a bad operator is refused before touching the database", () => {
-    expect(() => qs({ table: "orders", where: { total: ["nope" as never, 1] } })).toThrow(/Unknown filter operator/);
+    expect(() => qs({ table: "orders", where: { total: { $nope: 1 } as never } })).toThrow(/Unknown filter operator/);
   });
 });
 
@@ -152,7 +199,7 @@ describe.skipIf(!hasDb)("query()", () => {
       const r = await t.api.query<Array<{ id: number }>>({
         table: "orders",
         select: ["id"],
-        where: { or: [{ status: "new" }, { total: ["gte", 400] }] },
+        where: { $or: [{ status: "new" }, { total: { $gte: 400 } }] },
         order: ["id"],
       });
       expect(r.data).toEqual([{ id: 2 }, { id: 4 }]);
@@ -303,8 +350,8 @@ describe.skipIf(!hasDb)("query()", () => {
       const kindOf = async (input: QueryInput, ctx?: RequestContext) => (await t.api.query(input, ctx)).error?.kind;
 
       // the query object itself
-      expect(await kindOf({ table: "orders", where: { total: ["nope" as never, 1] } })).toBe("invalid_query");
-      expect(await kindOf({ table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } })).toBe(
+      expect(await kindOf({ table: "orders", where: { total: { $nope: 1 } as never } })).toBe("invalid_query");
+      expect(await kindOf({ table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } })).toBe(
         "invalid_query",
       );
       // the schema cache
@@ -358,7 +405,7 @@ describe.skipIf(!hasDb)("query()", () => {
       expect(none.status).toBe(406);
       expect(none.error?.body.code).toBe("PGRST116");
 
-      const embed = await t.api.query({ table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } });
+      const embed = await t.api.query({ table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } });
       expect(embed.error?.body.code).toBe("PGRST108");
     });
 
@@ -401,7 +448,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
     test("every kind of failure comes back as error, never as a rejection", async () => {
       // refused by the builder, before any SQL
-      const operator = await t.api.query({ table: "orders", where: { total: ["nope" as never, 1] } });
+      const operator = await t.api.query({ table: "orders", where: { total: { $nope: 1 } as never } });
       expect(operator.error?.body.code).toBe("PGRST100");
       // refused by the schema cache
       expect((await t.api.query({ table: "clients", select: ["nope"] })).error?.status).toBe(400);
@@ -526,22 +573,27 @@ describe.skipIf(!hasDb)("query()", () => {
       ],
       [
         "filters",
-        { table: "orders", select: ["id"], where: { status: "paid", total: ["gte", 100] } },
+        { table: "orders", select: ["id"], where: { status: "paid", total: { $gte: 100 } } },
         "/orders?select=id&status=eq.paid&total=gte.100",
       ],
       [
         "in and is",
-        { table: "clients", select: ["id"], where: { id: ["in", [1, 3]], meta: null } },
+        { table: "clients", select: ["id"], where: { id: { $in: [1, 3] }, meta: null } },
         "/clients?select=id&id=in.(1,3)&meta=is.null",
       ],
       [
         "array containment",
-        { table: "clients", select: ["name"], where: { tags: ["cs", ["vip"]] }, order: ["id"] },
+        { table: "clients", select: ["name"], where: { tags: { $cs: ["vip"] } }, order: ["id"] },
         "/clients?select=name&tags=cs.{vip}&order=id",
       ],
       [
         "or group",
-        { table: "orders", select: ["id"], where: { or: [{ status: "new" }, { total: ["gte", 400] }] }, order: ["id"] },
+        {
+          table: "orders",
+          select: ["id"],
+          where: { $or: [{ status: "new" }, { total: { $gte: 400 } }] },
+          order: ["id"],
+        },
         "/orders?select=id&or=(status.eq.new,total.gte.400)&order=id",
       ],
       [
@@ -572,7 +624,7 @@ describe.skipIf(!hasDb)("query()", () => {
       ["unknown column", { table: "clients", select: ["nope"] }, "/clients?select=nope"],
       [
         "undeclared embed filter",
-        { table: "clients", select: ["name"], where: { "orders.total": ["gte", 1] } },
+        { table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } },
         "/clients?select=name&orders.total=gte.1",
       ],
     ];

@@ -147,11 +147,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
   test("query(): hostile values stay values, hostile column names are refused", async () => {
     for (const p of PAYLOADS) {
       expect((await t.api.query({ table: "clients", select: ["id"], where: { name: p } })).data).toEqual([]);
-      expect((await t.api.query({ table: "clients", select: ["id"], where: { name: ["in", [p, "x"]] } })).data).toEqual(
-        [],
-      );
       expect(
-        (await t.api.query({ table: "clients", select: ["id"], where: { or: [{ name: p }, { email: p }] } })).data,
+        (await t.api.query({ table: "clients", select: ["id"], where: { name: { $in: [p, "x"] } } })).data,
+      ).toEqual([]);
+      expect(
+        (await t.api.query({ table: "clients", select: ["id"], where: { $or: [{ name: p }, { email: p }] } })).data,
       ).toEqual([]);
       // a column name is an identifier: it is checked against the schema, never interpolated
       const key = await t.api.query({ table: "clients", where: { [p]: 1 } });
