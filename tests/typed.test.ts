@@ -112,7 +112,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
       await pgRest.query({
         table: "clients",
         select: ["name", { orders: ["total"] }],
-        where: { "orders.total": ["gte", 200] },
+        where: { "orders.total": { $gte: 200 } },
         order: ["id"],
       }),
     );

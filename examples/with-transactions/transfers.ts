@@ -28,7 +28,7 @@ const move = async (tx: Tx, t: Transfer): Promise<number> => {
   const { data: accounts } = await tx.query({
     table: "accounts",
     select: ["id", "balance"],
-    where: { id: ["in", [t.payer, t.payee]] },
+    where: { id: { $in: [t.payer, t.payee] } },
   });
   const payer = accounts.find((a) => a.id === t.payer);
   const payee = accounts.find((a) => a.id === t.payee);

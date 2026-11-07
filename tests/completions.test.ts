@@ -100,12 +100,13 @@ describe("what an editor offers in a typed query", () => {
     expect(completionsAt(`void pgRest.query({ table: "profiles", select: ["#"] });`)).not.toContain("placed_at");
   });
 
-  test("... and the keys of where, with and/or alongside them", () => {
+  test("... and the keys of where, with $and/$or/$not alongside them", () => {
     expect(completionsAt(`void pgRest.query({ table: "profiles", where: { # } });`)).toEqual([
-      "and",
+      "$and",
+      "$not",
+      "$or",
       "bio",
       "client_id",
-      "or",
     ]);
   });
 
@@ -174,10 +175,11 @@ describe("what an editor offers in a typed query", () => {
       "client_id",
     ]);
     expect(completionsAt(`${bound}\nvoid db({ table: "profiles", where: { # } });`)).toEqual([
-      "and",
+      "$and",
+      "$not",
+      "$or",
       "bio",
       "client_id",
-      "or",
     ]);
     expect(completionsAt(`${bound}\nvoid db({ table: "#" });`)).toContain("clients");
 

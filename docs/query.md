@@ -255,13 +255,13 @@ which knows its columns:
 const dotted = await pgRest.query({
   table: "clients",
   select: ["name", { orders: ["total"] }],
-  where: { "orders.status": "paid", "orders.total": ["gte", 100] },
+  where: { "orders.status": "paid", "orders.total": { $gte: 100 } },
 });
 ```
 
 ### Filters
 
-A plain value means `eq`, `null` means `is.null`, a tuple names an operator, and the object form adds the modifiers:
+A plain value means `eq`, `null` means `is.null`, and an object names the operators, each one starting with `$`. Several operators on one column are ANDed:
 
 ```ts
 const filters = await pgRest.query({
@@ -269,9 +269,9 @@ const filters = await pgRest.query({
   select: ["id"],
   where: {
     status: "paid", //                   eq
-    total: ["gte", 100], //              [operator, value]
-    placed_at: ["lt", "2026-03-01"],
-    id: ["in", [1, 2, 3]], //            a list
+    total: { $gte: 100, $lt: 500 }, //   several operators, ANDed
+    placed_at: { $lt: "2026-03-01" },
+    id: { $in: [1, 2, 3] }, //           a list
   },
 });
 
@@ -281,7 +281,7 @@ const nulls = await pgRest.query({
   select: ["id"],
   where: {
     meta: null, //                       is.null
-    email: { op: "eq", value: null, not: true }, //  not.is.null
+    email: { $not: null }, //           not.is.null (same as { $not: { $eq: null } })
   },
 });
 ```
@@ -293,11 +293,11 @@ const operators = await pgRest.query({
   table: "clients",
   select: ["id"],
   where: {
-    name: ["neq", "Ada"], //              <>
-    id: ["gt", 1], //                     >
-    email: ["like", "*@example.com"], //  LIKE, with * as the wildcard
-    created_at: ["gte", "2020-01-01"],
-    tags: ["cs", ["vip"]], //             @> contains
+    name: { $neq: "Ada" }, //              <>
+    id: { $gt: 1 }, //                     >
+    email: { $like: "*@example.com" }, //  LIKE, with * as the wildcard
+    created_at: { $gte: "2020-01-01" },
+    tags: { $cs: ["vip"] }, //             @> contains
   },
 });
 
@@ -305,21 +305,21 @@ const operators = await pgRest.query({
 const search = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { name: { op: "fts", value: "ada", config: "english" } },
+  where: { name: { $fts: { query: "ada", config: "english" } } },
 });
 
 const patterns = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { email: ["ilike", "*@EXAMPLE.com"], name: ["match", "^A"] }, //  ILIKE and ~
+  where: { email: { $ilike: "*@EXAMPLE.com" }, name: { $match: "^A" } }, //  ILIKE and ~
 });
 
 const more = await pgRest.query({
   table: "orders",
   select: ["id"],
   where: {
-    status: { op: "in", value: ["paid", "shipped"], not: true }, //  not.in
-    total: { op: "isdistinct", value: 0 }, //                       IS DISTINCT FROM
+    status: { $not: { $in: ["paid", "shipped"] } }, //  not.in
+    total: { $isdistinct: 0 }, //                       IS DISTINCT FROM
   },
 });
 ```
@@ -337,30 +337,37 @@ const more = await pgRest.query({
 | `ov`                             | `&&` (overlap)                                                   |
 | `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
 
-A quantifier applies the operator to every element of an array column, and `and`/`or` take nested groups:
+`$any` and `$all` wrap an operator and compare a column with each value of a list (`LIKE ANY (…)`); for `eq`, `$in` says it
+already. They are not for array columns, where `$cs` and `$ov` do the job. `$not` wraps one operator (or a plain value,
+which means `eq`), and `$and`, `$or` and `$not` take nested groups:
 
 ```ts
 const quantified = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { tags: { op: "eq", value: ["vip", "early"], quantifier: "any" } },
+  where: { name: { $any: { $like: ["A*", "B*"] } } }, //  LIKE ANY, for a column that holds one value
 });
 
 const logic = await pgRest.query({
   table: "orders",
   select: ["id"],
   where: {
-    or: [
+    $or: [
       { status: "new" }, //                    status = 'new'
-      { total: ["gte", 400] }, //              OR total >= 400
-      { status: "paid", total: ["lt", 50] }, // OR (status = 'paid' AND total < 50)
+      { total: { $gte: 400 } }, //             OR total >= 400
+      { status: "paid", total: { $lt: 50 } }, // OR (status = 'paid' AND total < 50)
     ],
   },
 });
 ```
 
 Several conditions in one group are ANDed, so the third member above is a nested `and(…)`. Conditions at the top level
-are ANDed too.
+are ANDed too. `$not: { … }` inverts the AND of the conditions inside it (`not.and(…)`).
+
+The operators a column accepts follow its type: `$gt`/`$lt` need something ordered, `$like`/`$ilike`/`$match`/`$imatch` and
+the full-text ones need text, `$cs`/`$cd`/`$ov` need an array, and a column whose generated type is `unknown` (a range,
+`jsonb`) takes them all. A `$` key is always an operator or `$and`/`$or`/`$not`, so a column may be called `and` or `or`.
+An array is not a condition by itself: write `{ $eq: [...] }` to compare a column with one.
 
 ### Order, paging, and one row
 
@@ -459,10 +466,9 @@ Two things to know:
   the value as JSON and turns it into a row of the column's own type, so the comparison works — over `handle()` too,
   since both entry points share one pipeline. A bare Postgres row literal (`owner=eq.(Ada,,)`) still answers `0A000`,
   like PostgREST.
-- **An object that names an operator is the long form.** `{ owner: { op: "eq", value: … } }` is a filter spec, not a
-  composite value: an object is read as a value only when it has no `op` key. A composite type with a field actually
-  named `op` therefore cannot be compared through the object form — pass the JSON yourself, as a string:
-  `{ owner: '{"op":"and","name":"Ada"}' }`.
+- **An object whose keys all start with `$` names operators.** `{ owner: { $eq: … } }` is a filter, not a composite
+  value: any other object is read as a value. A composite type with a field whose name starts with `$` therefore cannot
+  be compared through the object form — pass the JSON yourself, as a string: `{ owner: '{"$id":1,"name":"Ada"}' }`.
 
 ## Writing
 
@@ -584,7 +590,7 @@ const paid = await pgRest.query({
   rpc: "orders_by_status",
   args: { s: "paid" },
   select: ["id", "total"],
-  where: { total: ["gte", 100] },
+  where: { total: { $gte: 100 } },
   order: ["total.desc"],
   limit: 5,
 });
@@ -1069,7 +1075,7 @@ const csv = await pgRest.handle(
 | `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
 | `action`          | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"`                                  |
 | `select`          | columns, `"alias:column"`, `"*"`, and embedded resources                                                  |
-| `where`           | conditions by column, plus `and` / `or` groups                                                            |
+| `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
 | `single`          | one object instead of an array (406 otherwise)                                                            |

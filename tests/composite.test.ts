@@ -18,29 +18,33 @@ describe("composite values -> query string", () => {
   });
 
   test("the operator forms carry one the same way", () => {
-    expect(qs({ table: "venues", where: { owner: ["neq", { name: "Ada" }] } })).toBe(
+    expect(qs({ table: "venues", where: { owner: { $neq: { name: "Ada" } } } })).toBe(
       param("owner", 'neq.{"name":"Ada"}'),
     );
-    expect(qs({ table: "venues", where: { owner: { op: "eq", value: { name: "Ada" }, not: true } } })).toBe(
+    expect(qs({ table: "venues", where: { owner: { $not: { $eq: { name: "Ada" } } } } })).toBe(
       param("owner", 'not.eq.{"name":"Ada"}'),
     );
   });
 
   test("inside a list or a logic tree it is quoted, like any value with commas", () => {
     // `in.("{""name"":""Ada""}")`: the braces and commas of the JSON would otherwise end the item
-    expect(qs({ table: "venues", where: { owner: ["in", [{ name: "Ada" }]] } })).toBe(
+    expect(qs({ table: "venues", where: { owner: { $in: [{ name: "Ada" }] } } })).toBe(
       param("owner", 'in.("{\\"name\\":\\"Ada\\"}")'),
     );
-    expect(qs({ table: "venues", where: { or: [{ owner: { name: "Ada" } }, { label: "Back room" }] } })).toBe(
+    expect(qs({ table: "venues", where: { $or: [{ owner: { name: "Ada" } }, { label: "Back room" }] } })).toBe(
       param("or", '(owner.eq."{\\"name\\":\\"Ada\\"}",label.eq.Back room)'),
     );
   });
 
-  test("an object that names an operator is still the long form", () => {
-    expect(qs({ table: "venues", where: { label: { op: "like", value: "Con*" } } })).toBe("label=like.Con*");
+  test("an object whose keys all start with $ names operators", () => {
+    expect(qs({ table: "venues", where: { label: { $like: "Con*" } } })).toBe("label=like.Con*");
     // ... and an unknown one is still reported rather than read as a composite value
-    expect(() => qs({ table: "venues", where: { owner: { op: "nope" } } as never })).toThrow(
-      "Unknown filter operator 'nope' on 'owner'",
+    expect(() => qs({ table: "venues", where: { owner: { $nope: 1 } } as never })).toThrow(
+      "Unknown filter operator '$nope' on 'owner'",
+    );
+    // a composite type with a field called `op` is a value again: only `$` marks an operator
+    expect(qs({ table: "venues", where: { owner: { op: "and", name: "x" } } })).toBe(
+      param("owner", `eq.${JSON.stringify({ op: "and", name: "x" })}`),
     );
   });
 });
@@ -118,14 +122,14 @@ describe.skipIf(!hasDb)("composite types", () => {
     });
 
     test("neq, in and isdistinct take one too", async () => {
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: ["neq", ADA] } })).data).toEqual([
+      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $neq: ADA } } })).data).toEqual([
         { id: 2 },
       ]);
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: ["in", [ADA]] } })).data).toEqual([
+      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $in: [ADA] } } })).data).toEqual([
         { id: 1 },
       ]);
       expect(
-        (await t.api.query({ table: "venues", select: ["id"], where: { owner: ["isdistinct", ADA] } })).data,
+        (await t.api.query({ table: "venues", select: ["id"], where: { owner: { $isdistinct: ADA } } })).data,
       ).toEqual([{ id: 2 }]);
     });
 
@@ -143,7 +147,7 @@ describe.skipIf(!hasDb)("composite types", () => {
     });
 
     test("is.null still tests the column, not its fields", async () => {
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: ["is", "null"] } })).data).toEqual(
+      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $is: "null" } } })).data).toEqual(
         [],
       );
     });
