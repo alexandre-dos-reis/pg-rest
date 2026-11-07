@@ -47,7 +47,7 @@ What each side hands the core, and what it takes back:
 | | `@tsql/rest` | `@tsql/query` |
 | --- | --- | --- |
 | **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
-| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` and `rest`'s own readers | an object, rendered into the same `[key, value][]` by `query.ts` |
+| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` and `rest`'s own readers | an object, built straight into a `ParsedQuery` by `query.ts` (`toParsed`); a shape it does not cover (a JSON path, a cast, an aggregate…) is rendered into the same `[key, value][]` and parsed, so the grammar stays the one definition |
 | **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
 | **Caller** | `{ path, request, http: { headers, cookies } }`: the `request.*` settings are set when `http` is given (`requestSettings`) | `{ path }` only: there is no request, so no `request.*` setting |
 | **Planning and execution** | `planTable` / `planRpc`, then `execute` | the same calls, on the same code |
