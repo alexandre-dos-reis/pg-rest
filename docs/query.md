@@ -1407,8 +1407,9 @@ error. `describeErrorKind(kind)` gives a kind's wording, for a log line.
 
 ## What the typed path does not describe
 
-Three string forms of a `select` change or invent a column, and reading them back out of a string literal would cost more than it
-gives:
+Three string forms of a `select` change or invent a column, and reading them back out of a string literal would cost
+more than it gives. A JSON path in a `where` is the exception, because a filter does not change the result: it is
+accepted on its column, with a value checked no further than its shape.
 
 ```ts
 // @ts-expect-error a cast
@@ -1417,8 +1418,11 @@ void pgRest.query({ table: "orders", select: ["total::text"] });
 // @ts-expect-error a JSON path, in a select
 void pgRest.query({ table: "clients", select: ["tier:meta->>tier"] });
 
-// @ts-expect-error ... or in a filter
-void pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": "gold" } });
+// a JSON path in a filter is fine: it names a column, and the column is checked
+void pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } });
+
+// @ts-expect-error ... but not on a column that does not exist
+void pgRest.query({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } });
 
 // @ts-expect-error an aggregate
 void pgRest.query({ table: "orders", select: ["status", "total.sum()"] });

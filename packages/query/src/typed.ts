@@ -367,6 +367,13 @@ type WhereOf<R, EmbedKeys extends string> = {
   readonly $not?: WhereOf<R, EmbedKeys>;
 } & {
   /**
+   * A filter on a path into a column: `"meta->>tier"`, `"owner->home->>city"`. The path does not
+   * change the shape of the result, so it is accepted here -- unlike in a `select` -- and the value
+   * is checked no further than its shape, since the type of a JSON field is not known.
+   */
+  readonly [K in `${keyof R & string}->${string}`]?: Scalar | Operators<unknown>;
+} & {
+  /**
    * A filter on an embedded resource, by its dotted path, the way the query string writes it. The
    * column belongs to the other resource, so only the shape of the condition is checked here --
    * prefer the embed's own `where`, which knows its columns.
@@ -649,6 +656,7 @@ type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db,
   | "$and"
   | "$or"
   | "$not"
+  | `${Column<Db, S, T>}->${string}`
   | `${keyof Embeds<Db, S, T> & string}.${string}`;
 
 /**
