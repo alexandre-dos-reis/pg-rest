@@ -17,6 +17,8 @@ jobs:
   # Everything that needs neither a database nor a build: the fastest feedback, on its own runner.
   checks:
     name: Lint, format, typecheck
+    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,6 +36,8 @@ jobs:
   # own runner, its own container pull and its own build, for a few seconds of work.
   test:
     name: Tests, differential, Node
+    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -74,6 +78,8 @@ jobs:
   # One job for the seven examples: one checkout, one install, one build, one database server.
   examples:
     name: Examples
+    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

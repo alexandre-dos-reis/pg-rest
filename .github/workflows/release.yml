@@ -25,7 +25,9 @@ jobs:
     # Give ci.yml a paths filter later and that commit can be skipped instead of passing, which would
     # silently merge a version bump and never release it -- then this needs to accept `skipped` for
     # that commit too.
-    if: github.event.workflow_run.conclusion == 'success'
+    # Paused on purpose, like every job: nothing is published while the packages are split. To turn it back on,
+    # restore: if: github.event.workflow_run.conclusion == 'success'
+    if: false
 
     steps:
       - uses: actions/checkout@v4
