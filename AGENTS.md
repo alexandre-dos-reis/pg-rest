@@ -54,7 +54,8 @@ reference lives in `docs/`.
 | `packages/core/src/parse/*` | URL/query parsing: `select`, filters, request headers, fields |
 | `packages/core/src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`, `expression`) |
 | `packages/core/src/schema.ts` | schema introspection and cache |
-| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
+| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
+| `tests/support/tsapi.ts` | the virtual TypeScript project `completions.test.ts` and `docs.test.ts` compile in: TypeScript 7 ships no in-process compiler, so both drive the native one over `typescript/async` |
 | `docs/*.md` | the reference: `query`, `types`, `options`, `adapters`, `design`, `architecture`, `security`, `performance`, `development`. **Every `ts` block is compiled** by `tests/docs.test.ts` -- the README's against `examples/query/with-generated-types/db.generated.ts`, everything in `docs/` against `tests/support/fixture.types.ts` -- so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`, and a block that cannot compile is fenced ```` ```ts ignore ````. The same test asserts every relative link resolves, and that each page is linked from the README |
 | `packages/core/src/service.ts` | schema store (serialized reload), error mapping |
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
@@ -129,7 +130,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
   member per table -- each action's payload is required, and refused on the others, by `WriteRules` rather than by the
   shape -- and *every* member declares `table`, function calls included (`table?: never`). Split them again, or add a
   member without `table`, and the editor silently starts offering every table's columns while the compiler stays right.
-  `tests/completions.test.ts` asks the language service and pins it.
+  `tests/completions.test.ts` asks the compiler and pins it.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
   check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type

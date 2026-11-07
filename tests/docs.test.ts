@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { createRequire } from "node:module";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import type * as TS from "typescript";
+import { messageOf, virtualProject } from "./support/tsapi";
 
 /**
  * Compiles every TypeScript block of the README and `docs/*.md` against the fixture's generated
@@ -12,8 +11,6 @@ import type * as TS from "typescript";
  *
  * Then: every relative link in those files has to point at something that exists.
  */
-const ts = createRequire(import.meta.url)("typescript") as typeof TS;
-
 const root = new URL("..", import.meta.url).pathname;
 
 /**
@@ -75,44 +72,42 @@ const blocksOf = (markdown: string): string[] => {
 };
 
 /**
- * Every page in one program, rather than one program per page: each becomes its own virtual file,
- * compiled together, and the diagnostics are handed back per page. Ten programs meant reading
- * lib.d.ts ten times.
+ * Every page in one project, rather than one project per page: each becomes its own virtual file,
+ * compiled together, and the diagnostics are handed back per page. Ten projects meant reading
+ * lib.d.ts ten times -- and ten tsgo processes.
  */
-const diagnoseAll = (sources: Map<string, string>): Map<string, string[]> => {
-  const options: TS.CompilerOptions = {
-    target: ts.ScriptTarget.ESNext,
-    module: ts.ModuleKind.Preserve,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    allowImportingTsExtensions: true,
-    strict: true,
-    noEmit: true,
-    skipLibCheck: true,
-    // a documentation example is allowed to name something and not use it
-    noUnusedLocals: false,
-  };
+const diagnoseAll = async (sources: Map<string, string>): Promise<Map<string, string[]>> => {
   /** One file per page, named after it so a diagnostic says which page it came from. */
   const fileOf = (page: string) => `${root}tests/_docs_${page.replace(/[^a-z]/gi, "_")}.ts`;
   const contents = new Map([...sources].map(([page, text]) => [fileOf(page), text]));
 
-  const host = ts.createCompilerHost(options, true);
-  const original = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, ...rest) => {
-    const text = contents.get(name);
-    return text === undefined ? original(name, ...rest) : ts.createSourceFile(name, text, ts.ScriptTarget.ESNext, true);
-  };
-  host.fileExists = (f) => contents.has(f) || existsSync(f);
-  host.readFile = (f) => contents.get(f) ?? (existsSync(f) ? readFileSync(f, "utf8") : undefined);
-  const program = ts.createProgram([...contents.keys()], options, host);
+  const project = virtualProject({
+    root,
+    configFileName: `${root}tests/_docs.tsconfig.json`,
+    sources: contents,
+    // a documentation example is allowed to name something and not use it
+    compilerOptions: { noUnusedLocals: false },
+  });
 
   const out = new Map([...sources.keys()].map((page) => [page, [] as string[]]));
-  for (const d of ts.getPreEmitDiagnostics(program)) {
-    const name = d.file?.fileName;
-    if (name === undefined || !contents.has(name)) continue;
-    const page = [...sources.keys()].find((p) => fileOf(p) === name)!;
-    const line = d.start !== undefined ? d.file!.getLineAndCharacterOfPosition(d.start).line + 1 : 0;
-    const source = contents.get(name)!.split("\n")[line - 1]?.trim() ?? "";
-    out.get(page)!.push(`line ${line}: ${ts.flattenDiagnosticMessageText(d.messageText, " ")}\n    ${source}`);
+  try {
+    const compiled = await project.load();
+    const diagnostics = [
+      ...(await compiled.program.getProgramDiagnostics()),
+      ...(await compiled.program.getSyntacticDiagnostics()),
+      ...(await compiled.program.getSemanticDiagnostics()),
+    ];
+    for (const d of diagnostics) {
+      const name = d.fileName;
+      if (name === undefined || !contents.has(name)) continue;
+      const page = [...sources.keys()].find((p) => fileOf(p) === name)!;
+      const text = contents.get(name)!;
+      const line = text.slice(0, d.pos).split("\n").length;
+      const source = text.split("\n")[line - 1]?.trim() ?? "";
+      out.get(page)!.push(`line ${line}: ${messageOf(d)}\n    ${source}`);
+    }
+  } finally {
+    project.dispose();
   }
   return out;
 };
@@ -135,8 +130,8 @@ describe("the documentation", () => {
   });
 
   /** Compiled once for every page, on first use. */
-  let compiled: Map<string, string[]> | undefined;
-  const errorsOf = (page: string) => {
+  let compiled: Promise<Map<string, string[]>> | undefined;
+  const errorsOf = async (page: string) => {
     compiled ??= diagnoseAll(
       new Map(
         pages.map((p) => {
@@ -151,12 +146,12 @@ describe("the documentation", () => {
         }),
       ),
     );
-    return compiled.get(page) ?? [];
+    return (await compiled).get(page) ?? [];
   };
 
   for (const page of pages) {
-    test(`${page} compiles`, () => {
-      const errors = errorsOf(page);
+    test(`${page} compiles`, async () => {
+      const errors = await errorsOf(page);
       if (errors.length) console.error(`\n${page}\n${errors.join("\n")}\n`);
       expect(errors).toEqual([]);
     });
@@ -166,7 +161,9 @@ describe("the documentation", () => {
     const broken: string[] = [];
     for (const page of [
       ...pages,
-      ...readdirSync(`${root}examples`).flatMap((g) => readdirSync(`${root}examples/${g}`).map((d) => `examples/${g}/${d}/README.md`)),
+      ...readdirSync(`${root}examples`).flatMap((g) =>
+        readdirSync(`${root}examples/${g}`).map((d) => `examples/${g}/${d}/README.md`),
+      ),
       "PARITY.md",
       "AGENTS.md",
     ]) {

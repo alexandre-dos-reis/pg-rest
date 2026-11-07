@@ -32,7 +32,8 @@ care about.
 | `tests/read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `schema` | the behaviour of `handle()`, feature by feature |
 | `tests/query.test.ts` | the object API, and that it answers exactly what `handle()` does |
 | `tests/typed.test.ts` | the typed input: exact result types, and `@ts-expect-error` on every mistake it must refuse |
-| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
+| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
+| `tests/support/tsapi.ts` | the virtual TypeScript project `completions.test.ts` and `docs.test.ts` compile in: TypeScript 7 ships no in-process compiler, so both drive the native one over `typescript/async` |
 | `tests/types.test.ts` | the generator, and the committed `fixture.types.ts` byte for byte |
 | `tests/docs.test.ts` | every TypeScript block in the README and `docs/`, compiled |
 | `tests/clients.test.ts` | `@supabase/postgrest-js` and `@neondatabase/postgrest-js` driving `handle()` through their own query builders, with the handler passed as their `fetch` |

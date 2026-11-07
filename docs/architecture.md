@@ -171,8 +171,8 @@ They are the kind that break quietly, so each has a test that fails loudly:
 - **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.
   `tests/security.test.ts` is the guard. → [`security.md`](security.md)
 - **One union member per table** in `packages/query/src/typed.ts`, and every member declares `table`. Otherwise the editor silently
-  starts offering every table's columns while the compiler stays right; `tests/completions.test.ts` asks the language
-  service and pins it. → [`types.md`](types.md#in-your-editor)
+  starts offering every table's columns while the compiler stays right; `tests/completions.test.ts` asks the
+  compiler and pins it. → [`types.md`](types.md#in-your-editor)
 - **The generated types compile, and are what the generator produces.** `tests/support/fixture.types.ts` is committed;
   one test pins it byte for byte and `bun run typecheck` compiles it.
 - **The documentation compiles.** Every TypeScript block in `docs/` and in the README is type-checked by

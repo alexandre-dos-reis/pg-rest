@@ -8,10 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git"
   },
-  "type": "module",
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
     "build": "bun --filter '@tsql/rest' --filter '@tsql/query' build",
     "dev": "bun --filter '@tsql/rest' --filter '@tsql/query' dev",
@@ -42,8 +42,8 @@
     "oxlint": "^1.91.0",
     "pg": "^8.23.1",
     "postgres": "^4.0.0",
-    "tsdown": "^0.17.0",
-    "typescript": "^5.9.3"
+    "tsdown": "^0.23.7",
+    "typescript": "7.1.0-beta"
   },
   "devEngines": {
     "runtime": {

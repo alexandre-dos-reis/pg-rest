@@ -158,7 +158,7 @@ you are offered that table's columns and nothing from `todos`. Each property car
 That is not free, and it is easy to undo by accident: TypeScript narrows the contextual type of a nested property only
 when the discriminant picks **exactly one** member of the union, so the query type keeps one member per table — reads
 and writes merged, each action's payload required by `WriteRules` — and every member declares `table`, function calls
-included (`table?: never`). `tests/completions.test.ts` asks the language service and pins the answer.
+included (`table?: never`). `tests/completions.test.ts` asks the compiler and pins the answer.
 
 Hovering a property you have already written shows its *inferred* type and no documentation: the parameter is the
 inferred query, so there is no declared property for the editor to point at. That is the price of inferring `data` from
