@@ -337,13 +337,13 @@ const more = await pgRest.query({
 | `ov`                             | `&&` (overlap)                                                   |
 | `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
 
-`$any` and `$all` compare the column with each value of a list (`eq(any)`), `$not` wraps one operator (or a plain value, which means `eq`), and `$and`, `$or` and `$not` take nested groups:
+`$any` and `$all` compare the column with each value of a list (`eq(any)`, or another operator when you wrap the list), `$not` wraps one operator (or a plain value, which means `eq`), and `$and`, `$or` and `$not` take nested groups:
 
 ```ts
 const quantified = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { tags: { $any: { $eq: ["vip", "early"] } } },
+  where: { tags: { $any: ["vip", "early"] } }, //  eq(any); { $any: { $like: ["a*"] } } for another operator
 });
 
 const logic = await pgRest.query({

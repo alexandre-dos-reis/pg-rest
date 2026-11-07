@@ -326,14 +326,14 @@ interface QuantifiedOps<V> {
 }
 
 interface Quantifiers<V> {
-  readonly $any?: QuantifiedOps<V>;
-  readonly $all?: QuantifiedOps<V>;
+  readonly $any?: ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
+  readonly $all?: ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
 }
 
 /**
  * The operators of a column, each starting with `$`: `{ $gte: 100, $lt: 500 }` is `>= 100 AND < 500`.
  * `$not` inverts one of them (`{ $not: { $in: [1, 2] } }`, or `{ $not: null }` for a plain value), and `$any` / `$all` compare the column
- * with each value of a list (`{ $any: { $eq: ["a", "b"] } }`).
+ * with each value of a list (`{ $any: ["a", "b"] }`, or `{ $any: { $like: ["a*"] } }` for another operator).
  */
 type Operators<V> = CoreOps<V> &
   Quantifiers<V> & { readonly $not?: PlainValue<V> | null | (CoreOps<V> & Quantifiers<V>) };
