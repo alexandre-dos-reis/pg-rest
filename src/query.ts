@@ -62,8 +62,8 @@ export type OperatorValue = FilterValue | ReadonlyArray<FilterValue>;
 
 /** The modifiers, each wrapping exactly one operator: `{ $not: { $eq: 1 } }`, `{ $any: { $eq: 1 } }`. */
 export interface OperatorModifiers {
-  /** Invert the operator (`not.eq.1`). */
-  readonly $not?: OperatorSpec | undefined;
+  /** Invert the operator (`not.eq.1`), or a plain value, which means `eq`: `{ $not: null }` is `not.is.null`. */
+  readonly $not?: OperatorSpec | Scalar | CompositeValue | undefined;
   /** Apply the operator to some element of an array column (`eq(any)`). */
   readonly $any?: OperatorSpec | undefined;
   /** Apply the operator to every element of an array column (`eq(all)`). */
@@ -369,7 +369,9 @@ const leavesOf = (column: string, spec: OperatorSpec): Leaf[] => {
   if (entries.length === 0) throw bad(`'${column}' has no operator`);
   return entries.map(([key, value]): Leaf => {
     if (key === "$not") {
-      const inner = single(column, key, value as OperatorSpec);
+      // a plain value is an `eq`, the way it is outside of `$not`
+      const plain = value === null || typeof value !== "object" || !isOperatorSpec(column, value);
+      const inner = plain ? toLeaves(column, value as Filter)[0]! : single(column, key, value as OperatorSpec);
       return { ...inner, not: !inner.not };
     }
     if (key === "$any" || key === "$all") {

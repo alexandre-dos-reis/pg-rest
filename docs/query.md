@@ -281,7 +281,7 @@ const nulls = await pgRest.query({
   select: ["id"],
   where: {
     meta: null, //                       is.null
-    email: { $not: { $eq: null } }, //  not.is.null
+    email: { $not: null }, //           not.is.null (same as { $not: { $eq: null } })
   },
 });
 ```
@@ -337,7 +337,7 @@ const more = await pgRest.query({
 | `ov`                             | `&&` (overlap)                                                   |
 | `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
 
-`$any` and `$all` compare the column with each value of a list (`eq(any)`), `$not` wraps one operator, and `$and`, `$or` and `$not` take nested groups:
+`$any` and `$all` compare the column with each value of a list (`eq(any)`), `$not` wraps one operator (or a plain value, which means `eq`), and `$and`, `$or` and `$not` take nested groups:
 
 ```ts
 const quantified = await pgRest.query({

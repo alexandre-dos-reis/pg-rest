@@ -332,16 +332,20 @@ interface Quantifiers<V> {
 
 /**
  * The operators of a column, each starting with `$`: `{ $gte: 100, $lt: 500 }` is `>= 100 AND < 500`.
- * `$not` inverts one of them (`{ $not: { $in: [1, 2] } }`), and `$any` / `$all` compare the column
+ * `$not` inverts one of them (`{ $not: { $in: [1, 2] } }`, or `{ $not: null }` for a plain value), and `$any` / `$all` compare the column
  * with each value of a list (`{ $any: { $eq: ["a", "b"] } }`).
  */
-type Operators<V> = CoreOps<V> & Quantifiers<V> & { readonly $not?: CoreOps<V> & Quantifiers<V> };
+type Operators<V> = CoreOps<V> &
+  Quantifiers<V> & { readonly $not?: PlainValue<V> | null | (CoreOps<V> & Quantifiers<V>) };
 
 /**
  * A condition on a column: the value itself (`eq`), `null` (`is.null`), or its operators. An array
  * is not a condition on its own -- `{ $eq: [...] }` says it is compared with one.
  */
-type Filter<V> = Exclude<Cmp<V>, ReadonlyArray<unknown>> | null | Operators<V>;
+type Filter<V> = PlainValue<V> | null | Operators<V>;
+
+/** A value that is a condition by itself: not an array, which has to say how it is compared. */
+type PlainValue<V> = Exclude<Cmp<V>, ReadonlyArray<unknown>>;
 
 type WhereOf<R, EmbedKeys extends string> = {
   readonly [K in keyof R & string]?: Filter<R[K]>;

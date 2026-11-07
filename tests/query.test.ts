@@ -57,6 +57,10 @@ describe("input -> query string", () => {
       "name=fts%28english%29.ada",
     );
     expect(qs({ table: "clients", where: { name: { $ilike: "*@EXAMPLE.com" } } })).toBe("name=ilike.*%40EXAMPLE.com");
+    // a plain value under $not is an eq
+    expect(qs({ table: "clients", where: { email: { $not: null } } })).toBe("email=not.is.null");
+    expect(qs({ table: "orders", where: { status: { $not: "paid" } } })).toBe("status=not.eq.paid");
+    expect(qs({ table: "orders", where: { status: { $not: { $not: "paid" } } } })).toBe("status=eq.paid");
     // $not on a column with two operators would be ambiguous
     expect(() => qs({ table: "orders", where: { total: { $not: { $gte: 1, $lt: 5 } } } })).toThrow("exactly one");
   });
