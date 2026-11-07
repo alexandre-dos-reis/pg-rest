@@ -1073,7 +1073,7 @@ const csv = await pgRest.handle(
 | `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
 | `action`          | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"`                                  |
 | `select`          | columns, `"alias:column"`, `"*"`, and embedded resources                                                  |
-| `where`           | conditions by column, plus `and` / `or` groups                                                            |
+| `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
 | `single`          | one object instead of an array (406 otherwise)                                                            |
