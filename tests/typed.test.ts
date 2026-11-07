@@ -410,6 +410,51 @@ describe.skipIf(!hasDb)("a typed instance", () => {
         action: "update",
         set: { total: { $add: [{ $col: "total" }, 1] }, status: { $default: true } },
       }));
+    // ... and the expression has to give the column's type
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        set: {
+          total: { $round: [{ $mul: [{ $col: "total" }, 1.1] }, 2] },
+          status: { $lower: { $concat: [{ $col: "status" }, "!"] } },
+          placed_at: { $now: true },
+        },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "clients",
+        action: "update",
+        set: { tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "vip"] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error a text operator does not give a number
+        set: { total: { $lower: { $col: "status" } } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error `$col` of a number column cannot be a text one
+        set: { total: { $add: [{ $col: "status" }, 1] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error a number is not text
+        set: { status: { $add: [1, 2] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "clients",
+        action: "update",
+        // @ts-expect-error an array takes `$arrayAppend`, not `$upper`
+        set: { tags: { $upper: { $col: "name" } } },
+      }));
     void (() =>
       pgRest.query({
         table: "orders",

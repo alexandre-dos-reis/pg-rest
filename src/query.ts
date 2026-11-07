@@ -116,6 +116,7 @@ type NaryKey =
   | "$coalesce"
   | "$greatest"
   | "$least";
+type UnaryFunctionKey = "$lower" | "$upper" | "$trim" | "$length" | "$abs";
 type BinaryKey = "$eq" | "$neq" | "$gt" | "$gte" | "$lt" | "$lte" | "$cs" | "$cd" | "$ov";
 
 /**
@@ -126,6 +127,8 @@ type BinaryKey = "$eq" | "$neq" | "$gt" | "$gte" | "$lt" | "$lte" | "$cs" | "$cd
  * - `{ $add: [a, b] }` and the other operators are PostgreSQL's (`+ - * / % ^ || = <> > >= < <= @> <@ &&`,
  *   `AND`, `OR`, `NOT`), on the types they work on: `$concat` appends to an array, merges `jsonb` and joins text.
  * - `{ $cast: [expression, "numeric"] }`, `{ $coalesce: [a, b] }`, `$greatest`, `$least`.
+ * - A fixed list of functions: `{ $now: true }`, `$lower`, `$upper`, `$trim`, `$length`, `$abs`, `$round`,
+ *   `$arrayAppend` and `$arrayRemove`. There is no way to call another one.
  */
 export type Expression =
   | Scalar
@@ -134,6 +137,12 @@ export type Expression =
   | { readonly $cast: readonly [Expression, string] }
   | { readonly $not: Expression }
   | { readonly $neg: Expression }
+  | { readonly $now: true }
+  | { readonly [K in UnaryFunctionKey]: { readonly [P in K]: Expression } }[UnaryFunctionKey]
+  | { readonly $round: readonly [Expression] | readonly [Expression, number] }
+  | { readonly [K in "$arrayAppend" | "$arrayRemove"]: { readonly [P in K]: readonly [Expression, Expression] } }[
+      | "$arrayAppend"
+      | "$arrayRemove"]
   | { readonly [K in NaryKey]: { readonly [P in K]: ReadonlyArray<Expression> } }[NaryKey]
   | { readonly [K in BinaryKey]: { readonly [P in K]: readonly [Expression, Expression] } }[BinaryKey];
 

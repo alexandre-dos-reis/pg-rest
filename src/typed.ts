@@ -540,8 +540,86 @@ export type NoExtraKeys<Q, Allowed> = {
  * database computes (`{ $add: [{ $col: "total" }, 10] }`, `{ $default: true }`).
  */
 type SetOf<U> = {
-  readonly [K in keyof U]?: U[K] | Expression | DefaultValue;
+  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | DefaultValue;
 };
+
+/** The columns of `U` that hold a `T`, for `$col`. */
+type ColumnsOf<U, T> = {
+  readonly [K in keyof U & string]-?: [NonNullable<U[K]>] extends [T] ? K : never;
+}[keyof U & string];
+
+/**
+ * An expression for a column of type `V`: its operators are the ones that give such a value, and its
+ * `$col` names a column of the same kind. A column PostgreSQL types more finely than TypeScript does
+ * (`jsonb`, ranges) is `unknown` and takes any expression, as does `$cast`, which says its own type.
+ */
+type ExpressionFor<U, V> = unknown extends V
+  ? Expression
+  : [NonNullable<V>] extends [never]
+    ? Expression
+    : [NonNullable<V>] extends [number | bigint]
+      ? NumberExpression<U>
+      : [NonNullable<V>] extends [string]
+        ? StringExpression<U>
+        : [NonNullable<V>] extends [boolean]
+          ? BooleanExpression<U>
+          : [NonNullable<V>] extends [ReadonlyArray<infer E>]
+            ? ArrayExpression<U, E>
+            : Expression;
+
+type Cast = { readonly $cast: readonly [Expression, string] };
+type Value = { readonly $val: unknown };
+
+// Each `{ [K in Keys]: { [P in K]: … } }[Keys]` is one node per key: `{ $add: X[] } | { $sub: X[] } | …`.
+// It is written out where it is used, because TypeScript only allows a recursive type through the
+// properties of an object type, not through the argument of another alias.
+
+type NumberExpression<U> =
+  | number
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, number | bigint> }
+  | { readonly [K in "$neg" | "$abs"]: { readonly [P in K]: NumberExpression<U> } }["$neg" | "$abs"]
+  | { readonly $round: readonly [NumberExpression<U>] | readonly [NumberExpression<U>, number] }
+  | { readonly $length: StringExpression<U> }
+  | {
+      readonly [K in NumberList]: { readonly [P in K]: ReadonlyArray<NumberExpression<U>> };
+    }[NumberList];
+
+type NumberList = "$add" | "$sub" | "$mul" | "$div" | "$mod" | "$pow" | "$coalesce" | "$greatest" | "$least";
+// dates and timestamps are strings too: `placed_at + '1 day'`
+type StringList = "$concat" | "$add" | "$sub" | "$coalesce" | "$greatest" | "$least";
+type StringFn = "$lower" | "$upper" | "$trim";
+type Comparison = "$eq" | "$neq" | "$gt" | "$gte" | "$lt" | "$lte" | "$cs" | "$cd" | "$ov";
+
+type StringExpression<U> =
+  | string
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, string> }
+  | { readonly $now: true }
+  | { readonly [K in StringFn]: { readonly [P in K]: StringExpression<U> } }[StringFn]
+  | { readonly [K in StringList]: { readonly [P in K]: ReadonlyArray<StringExpression<U>> } }[StringList];
+
+type BooleanExpression<U> =
+  | boolean
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, boolean> }
+  | { readonly $not: BooleanExpression<U> }
+  | { readonly $and: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly $or: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly $coalesce: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly [K in Comparison]: { readonly [P in K]: readonly [Expression, Expression] } }[Comparison];
+
+type ArrayExpression<U, E> =
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, ReadonlyArray<E>> }
+  | { readonly $concat: ReadonlyArray<ArrayExpression<U, E>> }
+  | { readonly $coalesce: ReadonlyArray<ArrayExpression<U, E>> }
+  | { readonly $arrayAppend: readonly [ArrayExpression<U, E>, E | Value] }
+  | { readonly $arrayRemove: readonly [ArrayExpression<U, E>, E | Value] };
 
 /** The insert or update shape of the relation a query writes to. */
 type WriteShape<Db extends AnyDatabase, Q, Field extends "insert" | "update"> = Q extends { table: infer T }

@@ -836,7 +836,50 @@ const removed = await pgRest.query({
 ```
 
 **Functions**: `$coalesce`, `$greatest` and `$least` take a list; `$cast` takes an expression and a type, from the same
-allowlist as a `select` cast.
+allowlist as a `select` cast. The other functions are a fixed list too, and a name is never taken from the input:
+
+| function                                  | SQL                                    | on          |
+| ----------------------------------------- | -------------------------------------- | ----------- |
+| `{ $now: true }`                          | `now()`                                | dates       |
+| `$lower` `$upper` `$trim`                 | `lower` `upper` `btrim`, one operand   | text        |
+| `$length`                                 | `length`, one operand                  | text        |
+| `$abs`                                    | `abs`, one operand                     | numbers     |
+| `{ $round: [x] }` `{ $round: [x, 2] }`    | `round(x)`, `round(x, 2)`              | numbers     |
+| `{ $arrayAppend: [array, element] }`      | `array_append(array, element)`         | arrays      |
+| `{ $arrayRemove: [array, element] }`      | `array_remove(array, element)`         | arrays      |
+
+```ts
+const stamped = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: {
+    name: { $upper: { $trim: { $col: "name" } } }, //                           upper(btrim(name))
+    created_at: { $now: true }, //                                               now()
+  },
+  where: { id: 1 },
+});
+
+const rounded = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: { total: { $round: [{ $mul: [{ $col: "total" }, 1.2] }, 2] } }, //        round(total * 1.2, 2)
+  where: { id: 1 },
+});
+
+const tagged = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: { tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "vip"] } }, //   array_append(…, 'vip')
+  where: { id: 1 },
+});
+
+const untagged = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: { tags: { $arrayRemove: [{ $col: "tags" }, "vip"] } }, //                  array_remove(tags, 'vip')
+  where: { id: 1 },
+});
+```
 
 ```ts
 const functions = await pgRest.query({
@@ -902,6 +945,8 @@ const reset = await pgRest.query({
 | `$eq` `$neq` `$gt` `$gte` `$lt` `$lte` `$cs` `$cd` `$ov` | `=` `<>` `>` `>=` `<` `<=` `@>` `<@` `&&`, two operands |
 | `$and` `$or` `$not`                                    | `AND` `OR` `NOT`                                       |
 | `$coalesce` `$greatest` `$least`                       | the functions of the same name                         |
+| `$lower` `$upper` `$trim` `$length` `$abs` `$round`    | the functions, see above                               |
+| `$now` `$arrayAppend` `$arrayRemove`                   | `now()`, `array_append`, `array_remove`                |
 | `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a `select` cast        |
 | `{ $default: true }`                                   | `DEFAULT`, as a whole assignment                       |
 
@@ -909,9 +954,19 @@ Nothing is raw SQL: a column is checked against the schema, a type against an al
 unknown `$` key is refused, in an expression and as a key of `set`. An object with `$` keys that is meant as a `jsonb`
 value is written `{ $val: … }`.
 
+On a typed instance the expression has to give the column's type, and `$col` names a column of the same kind: a text
+operator is refused on a number column, `$add` on text, `$arrayAppend` on anything but an array. A column TypeScript
+cannot tell more about (`jsonb`, ranges) takes any expression, and so does `$cast`.
+
 ```ts
 // @ts-expect-error `nope` is not a column of orders
 void pgRest.query({ table: "orders", action: "update", set: { nope: { $add: [1, 2] } } });
+
+// @ts-expect-error `total` is a number, `$lower` gives text
+void pgRest.query({ table: "orders", action: "update", set: { total: { $lower: { $col: "status" } } } });
+
+// @ts-expect-error `$col: "status"` is text, `$add` takes numbers here
+void pgRest.query({ table: "orders", action: "update", set: { total: { $add: [{ $col: "status" }, 1] } } });
 ```
 
 ## Calling a function

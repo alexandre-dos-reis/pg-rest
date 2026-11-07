@@ -12,6 +12,6 @@ set: {
 }
 ```
 
-Operators are `$`-prefixed (`$add`, `$sub`, `$mul`, `$div`, `$mod`, `$pow`, `$concat`, comparisons, `$and`/`$or`/`$not`, `$cast`, `$coalesce`, …) and work on the types they work on in PostgreSQL. Nothing is raw SQL: columns are checked against the schema, types against an allowlist, values are escaped.
+Operators are `$`-prefixed (`$add`, `$sub`, `$mul`, `$div`, `$mod`, `$pow`, `$concat`, comparisons, `$and`/`$or`/`$not`, `$cast`, `$coalesce`, …) and work on the types they work on in PostgreSQL. A fixed list of functions is there too (`$now`, `$lower`, `$upper`, `$trim`, `$length`, `$abs`, `$round`, `$arrayAppend`, `$arrayRemove`), and on a typed instance an expression has to give the column's type. Nothing is raw SQL: columns are checked against the schema, types against an allowlist, values are escaped.
 
 This is a superset of PostgREST's `PATCH`, available in `query()` only: a plain `set` and the HTTP `PATCH` are unchanged. An object whose keys all start with `$` is read as an expression, so a `jsonb` value like that is written `{ $val: … }`.

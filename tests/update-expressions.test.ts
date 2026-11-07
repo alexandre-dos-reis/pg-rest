@@ -63,6 +63,36 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
     ]);
   });
 
+  test("the functions of the fixed list", async () => {
+    expect(await update("clients", { name: { $upper: { $col: "name" } } }, 1, ["name"])).toEqual([{ name: "ADA!" }]);
+    expect(
+      await update("clients", { name: { $lower: { $trim: { $concat: ["  ", { $col: "name" }, " "] } } } }, 1, ["name"]),
+    ).toEqual([{ name: "ada!" }]);
+    expect(await update("orders", { total: { $abs: { $neg: { $col: "total" } } } }, 2, ["total"])).toEqual([
+      { total: 75 },
+    ]);
+    expect(await update("orders", { total: { $round: [{ $div: [{ $col: "total" }, 7] }, 1] } }, 2, ["total"])).toEqual([
+      { total: 10.7 },
+    ]);
+    expect(await update("orders", { total: { $round: [{ $col: "total" }] } }, 2, ["total"])).toEqual([{ total: 11 }]);
+    expect(await update("orders", { client_id: { $length: { $col: "status" } } }, 2, ["client_id"])).toEqual([
+      { client_id: 3 },
+    ]);
+    const before = Date.now();
+    const [row] = (await update("clients", { created_at: { $now: true } }, 1, ["created_at"])) as {
+      created_at: string;
+    }[];
+    expect(Math.abs(new Date(row!.created_at).getTime() - before)).toBeLessThan(60_000);
+  });
+
+  test("array functions", async () => {
+    const tags = async (set: object) => ((await update("clients", set, 2, ["tags"])) as { tags: string[] }[])[0]!.tags;
+    expect(await tags({ tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "solo"] } })).toContain(
+      "solo",
+    );
+    expect(await tags({ tags: { $arrayRemove: [{ $col: "tags" }, "solo"] } })).not.toContain("solo");
+  });
+
   test("DEFAULT", async () => {
     expect(await update("orders", { status: { $default: true } }, 2, ["status"])).toEqual([{ status: "new" }]);
     // several columns are several keys: (a, b) = ROW(x, DEFAULT) is a = x, b = DEFAULT
@@ -75,6 +105,18 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
     expect(
       await update("orders", { status: "new", total: { $add: [{ $col: "total" }, 1] } }, 3, ["status", "total"]),
     ).toEqual([{ status: "new", total: 100.99 }]);
+  });
+
+  test("a function outside the list, or misused, is refused", async () => {
+    for (const set of [
+      { total: { $pg_sleep: [1] } },
+      { total: { $now: 1 } },
+      { total: { $round: [1, 2, 3] } },
+      { total: { $arrayAppend: [1] } },
+    ]) {
+      const body = (await failure(set)) as { code: string } | undefined;
+      expect(body?.code).toBe("PGRST100");
+    }
   });
 
   test("mistakes are reported, not sent to the database", async () => {

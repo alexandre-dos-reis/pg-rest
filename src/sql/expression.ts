@@ -61,7 +61,26 @@ const BINARY: Readonly<Record<string, string>> = {
 
 const UNARY: Readonly<Record<string, string>> = { $not: "NOT", $neg: "-" };
 
+/** Functions of a list of operands, of any length. */
 const FUNCTIONS: Readonly<Record<string, string>> = { $coalesce: "COALESCE", $greatest: "GREATEST", $least: "LEAST" };
+
+/** Functions of one operand: `{ $lower: { $col: "name" } }`. */
+const UNARY_FUNCTIONS: Readonly<Record<string, string>> = {
+  $lower: "LOWER",
+  $upper: "UPPER",
+  $trim: "BTRIM",
+  $length: "LENGTH",
+  $abs: "ABS",
+};
+
+/** Functions of exactly two operands: `{ $arrayAppend: [{ $col: "tags" }, "vip"] }`. */
+const BINARY_FUNCTIONS: Readonly<Record<string, string>> = {
+  $arrayAppend: "ARRAY_APPEND",
+  $arrayRemove: "ARRAY_REMOVE",
+};
+
+/** Every function the expressions know, and nothing else: a name is never taken from the input. */
+const OTHER_KEYS = ["$now", "$round"] as const;
 
 /** Every key an expression may carry, for the error that lists them. */
 export const EXPRESSION_KEYS: ReadonlyArray<string> = [
@@ -73,6 +92,9 @@ export const EXPRESSION_KEYS: ReadonlyArray<string> = [
   ...Object.keys(BINARY),
   ...Object.keys(UNARY),
   ...Object.keys(FUNCTIONS),
+  ...Object.keys(UNARY_FUNCTIONS),
+  ...Object.keys(BINARY_FUNCTIONS),
+  ...OTHER_KEYS,
 ];
 
 // ---------------------------------------------------------------------------
@@ -165,6 +187,21 @@ export const compileExpression = (node: unknown, scope: Scope): string => {
   }
   if (key in UNARY) return `(${UNARY[key]} ${expr(arg)})`;
   if (key in FUNCTIONS) return `${FUNCTIONS[key]}(${list(arg, key).map(expr).join(", ")})`;
+  if (key in UNARY_FUNCTIONS) return `${UNARY_FUNCTIONS[key]}(${expr(arg)})`;
+  if (key in BINARY_FUNCTIONS) {
+    const operands = list(arg, key);
+    if (operands.length !== 2) throw bad(`'${key}' takes exactly two operands`);
+    return `${BINARY_FUNCTIONS[key]}(${expr(operands[0])}, ${expr(operands[1])})`;
+  }
+  if (key === "$now") {
+    if (arg !== true) throw bad("Write { $now: true } for now()");
+    return "now()";
+  }
+  if (key === "$round") {
+    const operands = list(arg, key);
+    if (operands.length > 2) throw bad("'$round' takes [expression] or [expression, digits]");
+    return `ROUND(${operands.map(expr).join(", ")})`;
+  }
   throw bad(`Unknown operator '${key}' in an expression`, `The operators are: ${EXPRESSION_KEYS.join(", ")}`);
 };
 
