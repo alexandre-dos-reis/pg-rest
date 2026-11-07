@@ -393,6 +393,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "clients", select: [{ products: ["name"] }] }));
     // @ts-expect-error the embedded column does not exist
     void (() => pgRest.query({ table: "clients", select: [{ orders: ["nope"] }] }));
+    // a JSON path in a filter is accepted on a real column ...
+    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } }));
+    // @ts-expect-error ... and only on a real column
+    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } }));
     // @ts-expect-error a filter value has to match the column
     void (() => pgRest.query({ table: "clients", where: { id: "one" } }));
     // @ts-expect-error an enum only takes its labels
@@ -401,8 +405,8 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "clients", select: ["id"], where: { titel: "Ada" } }));
     // @ts-expect-error `as` and `spread` cannot both be written: `...alias:table(*)` does not parse
     void (() => pgRest.query({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
-    // @ts-expect-error a JSON path is not a column the types know
-    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": "gold" } }));
+    // @ts-expect-error a JSON path is still refused in a select
+    void (() => pgRest.query({ table: "clients", select: ["tier:meta->>tier"] }));
     // @ts-expect-error order only takes real columns
     void (() => pgRest.query({ table: "clients", order: ["nope.desc"] }));
     // @ts-expect-error an aggregate view cannot be written to (insert: never)

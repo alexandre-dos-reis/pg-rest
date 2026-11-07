@@ -178,9 +178,10 @@ Three more gaps, each for a reason:
 - **`RETURNS TABLE(…)` functions** give `Record<string, unknown>`: the catalog does not carry their output columns, and
   neither does the request path (it builds a relation with no columns). The types are as precise as the runtime, not
   more.
-- **Casts, JSON paths and aggregates** in a `select` or a `where` — `total::text`, `meta->>tier`, `total.sum()` — change
-  or invent a column, and reading that back out of a string literal would cost more than it gives. They are compile
-  errors on a typed instance and work as always on an untyped one.
+- **Casts, JSON paths and aggregates** in a `select` — `total::text`, `meta->>tier`, `total.sum()` — change or invent a
+  column, and reading that back out of a string literal would cost more than it gives. They are compile errors on a
+  typed instance and work as always on an untyped one. A JSON path in a `where` (`"meta->>tier"`) is accepted on a real
+  column, since a filter does not change the result; its value is only checked for shape.
 
 ## What it will not describe: the caller
 
