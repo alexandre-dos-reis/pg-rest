@@ -1,5 +1,5 @@
 -- Two tables, one enum, one function. No auth and no Row Level Security: this example is about the
--- types (see examples/with-pglite or with-better-auth for the rest).
+-- types (see examples/rest/with-pglite or with-better-auth for the rest).
 DO $$ BEGIN  -- roles are cluster-wide: create it only once
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
 END $$;

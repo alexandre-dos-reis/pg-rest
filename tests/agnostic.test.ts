@@ -27,7 +27,7 @@ describe("runtime-agnostic library", () => {
   const SAME_SCHEMA_EXCEPT = ["with-better-auth", "with-generated-types", "with-transactions"];
   test("the examples ship the same schema.sql (they are independent copies)", async () => {
     const files: string[] = [];
-    for await (const f of new Glob("examples/*/schema.sql").scan(".")) {
+    for await (const f of new Glob("examples/*/*/schema.sql").scan(".")) {
       if (!SAME_SCHEMA_EXCEPT.some((e) => f.includes(e))) files.push(f);
     }
     expect(files.length).toBeGreaterThanOrEqual(4);
@@ -36,7 +36,7 @@ describe("runtime-agnostic library", () => {
   });
 
   test("with-better-auth creates Better Auth's tables before the api schema", async () => {
-    const dir = "examples/with-better-auth";
+    const dir = "examples/rest/with-better-auth";
     expect(await Bun.file(`${dir}/schema.sql`).exists()).toBe(false);
     const auth = await Bun.file(`${dir}/1-better-auth.sql`).text();
     const api = await Bun.file(`${dir}/2-api.sql`).text();

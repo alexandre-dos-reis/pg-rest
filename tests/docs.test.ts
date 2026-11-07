@@ -19,7 +19,7 @@ const root = new URL("..", import.meta.url).pathname;
 /**
  * The preamble the blocks are written against: a typed instance over the schema the page documents,
  * and the names its examples mention. The README's examples are the todo schema of
- * `examples/with-generated-types`, which ships its generated types; everything in `docs/` is
+ * `examples/query/with-generated-types`, which ships its generated types; everything in `docs/` is
  * written against the test fixture.
  */
 const preamble = (dbTypes: string) => `
@@ -56,7 +56,7 @@ void [mySessionLookup, pg, writeFileSync, generateTypes, generateModule, introsp
 `;
 
 const DB_TYPES_OF = (page: string) =>
-  page === "README.md" ? "../examples/with-generated-types/db.generated" : "./support/fixture.types";
+  page === "README.md" ? "../examples/query/with-generated-types/db.generated" : "./support/fixture.types";
 
 /** ```ts fenced blocks, minus their import lines (the preamble has those). */
 const blocksOf = (markdown: string): string[] => {
@@ -166,7 +166,7 @@ describe("the documentation", () => {
     const broken: string[] = [];
     for (const page of [
       ...pages,
-      ...readdirSync(`${root}examples`).map((d) => `examples/${d}/README.md`),
+      ...readdirSync(`${root}examples`).flatMap((g) => readdirSync(`${root}examples/${g}`).map((d) => `examples/${g}/${d}/README.md`)),
       "PARITY.md",
       "AGENTS.md",
     ]) {

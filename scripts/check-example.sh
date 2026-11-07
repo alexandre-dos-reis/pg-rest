@@ -4,13 +4,17 @@
 #   scripts/check-example.sh with-node-postgres postgres://user:pw@host:5432/dbname
 #   scripts/check-example.sh with-generated-types
 set -euo pipefail
-name="$1"; export DATABASE_URL="${2:-}"; port="${PORT:-3101}"; export PORT="$port"
+arg="$1"; export DATABASE_URL="${2:-}"; port="${PORT:-3101}"; export PORT="$port"
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# examples/rest/* and examples/query/*: named by the directory alone or with its group
+dir=""; for d in "$root/examples/$arg" "$root"/examples/*/"$arg"; do [ -f "$d/package.json" ] && { dir="$d"; break; }; done
+[ -n "$dir" ] || { echo "no such example: $arg" >&2; exit 1; }
+name="$(basename "$dir")"
 # pg-rest is a version dependency, and the version in package.json is usually not on the registry
 # yet, so the example runs against the local build. SKIP_LINK=1 when the caller already linked them
 # all (CI does, once, so the loop does not rebuild per example).
 if [ "${SKIP_LINK:-0}" != 1 ]; then "$root/scripts/link-examples.sh" "$name" >/dev/null; fi
-cd "$root/examples/$name"
+cd "$dir"
 
 check() { # description, expected, actual
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected [$2] got [$3]"; fail=1; fi
@@ -24,7 +28,7 @@ if [ ! -f server.ts ]; then
     bun run gen:types >/dev/null
     # the generated file is committed, so the generator's output for this schema is pinned here
     # (only that file: the rest of the example may legitimately differ in a working tree)
-    check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "examples/$name/db.generated.ts")"
+    check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "${dir#$root/}/db.generated.ts")"
   fi
   # every @ts-expect-error has to still be an error, and the rest has to compile
   tsc_out="$(bun run typecheck 2>&1)" || { echo "FAIL typecheck:"; echo "$tsc_out"; exit 1; }

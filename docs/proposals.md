@@ -42,7 +42,7 @@ request, and anything else can only be a boundary. That is weaker, and it is wri
 sentence that will be quoted to justify the next addition.
 
 **Where the pressure actually comes from**, and it is this library's own doing:
-[`examples/with-transactions`](../examples/with-transactions) reads a balance and writes it back *only* because
+[`examples/query/with-transactions`](../examples/query/with-transactions) reads a balance and writes it back *only* because
 `balance - amount` cannot be said — and that read-modify-write is what drags in `repeatable read` and a retry. Anyone
 who lives with that will ask for three things, in order: `FOR UPDATE`, an expression in `set`, and a `sql` tag inside
 the scope. All three add to the grammar, so all three are refused ([`design.md`](design.md#what-it-will-never-do) is

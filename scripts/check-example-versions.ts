@@ -1,4 +1,4 @@
-// Every examples/*/package.json must depend on the packages it uses at the version in packages/*/package.json,
+// Every examples/*/*/package.json must depend on the packages it uses at the version in packages/*/package.json,
 // the way a real project would -- never on a local path (file:/link:/workspace:), which must not be committed.
 // The names and versions are read from packages/*/package.json, so renaming a package needs no edit here.
 //   bun run scripts/check-example-versions.ts        (or: node scripts/check-example-versions.ts)
@@ -27,7 +27,16 @@ const fix = process.argv.includes("--fix");
 const examples = new URL("examples/", root);
 let failed = 0;
 
-for (const name of readdirSync(examples, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)) {
+// examples/rest/* and examples/query/*
+const names = readdirSync(examples, { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .flatMap((group) =>
+    readdirSync(new URL(`${group.name}/`, examples), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => `${group.name}/${e.name}`),
+  );
+
+for (const name of names) {
   const file = new URL(`${name}/package.json`, examples);
   const deps = read(file).dependencies ?? {};
   const used = Object.keys(deps).filter((d) => versions.has(d));

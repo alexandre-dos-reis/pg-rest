@@ -55,7 +55,7 @@ reference lives in `docs/`.
 | `packages/core/src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`, `expression`) |
 | `packages/core/src/schema.ts` | schema introspection and cache |
 | `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript language service |
-| `docs/*.md` | the reference: `query`, `types`, `options`, `adapters`, `design`, `architecture`, `security`, `performance`, `development`. **Every `ts` block is compiled** by `tests/docs.test.ts` -- the README's against `examples/with-generated-types/db.generated.ts`, everything in `docs/` against `tests/support/fixture.types.ts` -- so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`, and a block that cannot compile is fenced ```` ```ts ignore ````. The same test asserts every relative link resolves, and that each page is linked from the README |
+| `docs/*.md` | the reference: `query`, `types`, `options`, `adapters`, `design`, `architecture`, `security`, `performance`, `development`. **Every `ts` block is compiled** by `tests/docs.test.ts` -- the README's against `examples/query/with-generated-types/db.generated.ts`, everything in `docs/` against `tests/support/fixture.types.ts` -- so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`, and a block that cannot compile is fenced ```` ```ts ignore ````. The same test asserts every relative link resolves, and that each page is linked from the README |
 | `packages/core/src/service.ts` | schema store (serialized reload), error mapping |
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
@@ -63,7 +63,7 @@ reference lives in `docs/`.
 | `tests/` | `bun test` suites, importing the packages' sources; `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery` |
 | `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
-| `examples/with-*` | independent runnable examples, each with its own `package.json` |
+| `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
 | `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
 | `mise.toml` | the pinned PostgREST binary, and the tasks that run a Postgres 16 + PostGIS cluster |
@@ -145,7 +145,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
   are mapped by SQLSTATE in `normalizeDbError`. If a new driver reports errors differently, fix it in the adapter or in
   `normalizeDbError`, not in the core.
 - **Adding an adapter** = implement `DbAdapter` (`query`, `transaction`, optional `close`) in `packages/core/src/adapters/`, add a subpath entry in both
-  `packages/rest` and `packages/query` (`tsdown.config.ts` and `package.json` `exports`), an optional peer dependency, a test in `tests/agnostic.test.ts`, an `examples/with-*`, and a CI matrix entry.
+  `packages/rest` and `packages/query` (`tsdown.config.ts` and `package.json` `exports`), an optional peer dependency, a test in `tests/agnostic.test.ts`, an `examples/rest/with-*` or `examples/query/with-*`, and a CI matrix entry.
 - **Built entry points.** Each published package's `package.json` points at its `dist/*.js` and `dist/*.d.ts` (tsdown emits `.js`, not `.mjs`). Keep them in sync if the
   build config changes.
 - Strict TypeScript; follow the existing style (small modules, explicit types on exports, doc comments on public API).

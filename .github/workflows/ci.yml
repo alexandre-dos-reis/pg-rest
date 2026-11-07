@@ -116,7 +116,7 @@ jobs:
           for example in with-bun with-node-postgres with-postgres-js with-better-auth; do
             db="ex_$(echo "$example" | tr -- - _)"
             psql -h localhost -U postgres -q -c "CREATE DATABASE $db"
-            dir="examples/$example"
+            dir="$(ls -d examples/*/"$example")"
             # with-better-auth ships two files, run in order: Better Auth's tables, then the api schema
             for f in "$dir/schema.sql" "$dir/1-better-auth.sql" "$dir/2-api.sql"; do
               if [ -f "$f" ]; then
