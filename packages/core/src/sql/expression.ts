@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import { literal, quoteIdent, safeType } from "../quote";
 import type { Relation } from "../schema";
 
@@ -12,8 +12,8 @@ import type { Relation } from "../schema";
  * output is only meant for `query()`: HTTP carries a PATCH body, which stays PostgREST's own.
  */
 
-const bad = (message: string, hint?: string): PgRestError =>
-  new PgRestError(400, "PGRST100", message, null, hint ?? null);
+const bad = (message: string, hint?: string): EngineError =>
+  new EngineError("invalid_input", message, null, hint ?? null);
 
 interface Scope {
   readonly rel: Relation;
@@ -129,9 +129,8 @@ const valueSql = (v: unknown): string => {
 
 const columnOf = (rel: Relation, name: unknown): string => {
   if (typeof name !== "string" || !rel.columns.some((c) => c.name === name)) {
-    throw new PgRestError(
-      400,
-      "PGRST204",
+    throw new EngineError(
+      "unknown_column",
       `Could not find the '${String(name)}' column of '${rel.name}' in the schema cache`,
       null,
       null,

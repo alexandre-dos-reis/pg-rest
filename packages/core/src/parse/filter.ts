@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
 import { type SelectItem, parseSelect } from "./select";
 import { checkFilter, checkLogicTree, checkOrder, checkSelect } from "./grammar";
@@ -245,7 +245,7 @@ export const parseQuery = (
     if (k === "select") {
       // PostgREST's parser stops at the first thing it cannot continue with and ignores the rest.
       const end = checkSelect(v);
-      if (end instanceof PgRestError) throw end;
+      if (end instanceof EngineError) throw end;
       const used = v.slice(0, end).trim();
       select = used === "" ? [{ kind: "star" }] : parseSelect(used);
     } else if (k === "on_conflict") onConflict = splitTopLevel(v, ",").map(unquote).filter(Boolean);
@@ -262,9 +262,8 @@ export const parseQuery = (
     const joined = path.join(".");
     const canonical = known.get(joined);
     if (!canonical) {
-      throw new PgRestError(
-        400,
-        "PGRST108",
+      throw new EngineError(
+        "not_embedded",
         `'${joined}' is not an embedded resource in this request`,
         null,
         `Verify that '${joined}' is included in the 'select' query parameter.`,
@@ -292,7 +291,7 @@ export const parseQuery = (
         const negate = path[path.length - 1] === "not";
         if (negate) path = path.slice(0, -1);
         const used = checkLogicTree(negate ? `not.${last}` : last, value);
-        if (used instanceof PgRestError) throw used;
+        if (used instanceof EngineError) throw used;
         paramsFor(path, key).filters.push(parseLogic(last, negate, value.slice(0, used)));
       } else if (last === "order") {
         paramsFor(path, key).order.push(...parseOrder(value));
@@ -311,9 +310,8 @@ export const parseQuery = (
     if (known.has(embedPath)) {
       const m = /^(not\.)?is\.null$/.exec(value);
       if (!m) {
-        throw new PgRestError(
-          400,
-          "PGRST120",
+        throw new EngineError(
+          "invalid_embed_filter",
           "Embedded resource filter only accepts is.null or not.is.null",
           null,
           null,

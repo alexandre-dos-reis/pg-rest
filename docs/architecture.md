@@ -67,11 +67,12 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the headers and cookies SQL will read, and the `Response` made out of an outcome; the HTTP-only settings |
 | `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept` (the negotiated format), the body (JSON, form, CSV) |
 | `packages/rest/src/render.ts` | the SQL of the formats beyond JSON — CSV, GeoJSON, custom media type handlers — and how a negotiated format becomes what the engine is told |
+| `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → status and `PGRSTxxx` table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `query`, `setContextQuery`, `transaction`, `close` |
 | `packages/query/src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
-| `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries |
+| `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries, and how an engine or database error becomes one |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
 | `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tsql/query/types` |
 | `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
@@ -80,8 +81,8 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | `packages/core/src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `packages/core/src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement`, and `expression` (the computed `set`) |
 | `packages/core/src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
-| `packages/core/src/service.ts` | the schema store (serialised reloads) and error mapping |
-| `packages/core/src/errors.ts` | `PgRestError`, `ApiError`, `DbQueryError`, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
+| `packages/core/src/service.ts` | the schema store (serialised reloads) |
+| `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code, no status), `DbQueryError`, `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier and literal quoting — every identifier goes through it |
 | `packages/core/src/adapter.ts`, `adapters/*` | the driver interface and the four adapters (each package re-exports them) |
 
@@ -107,15 +108,16 @@ handler without one.
 
 ## Errors
 
-The pure layers throw `PgRestError` (status, `PGRSTxxx` code, details, hint). Adapters' failures become `DbQueryError`,
-normalised by SQLSTATE from whatever the driver throws. At the boundary, `toApiError` maps either — plus connection
-failures and unexpected errors — to an `ApiError`: a status and a body shaped exactly like PostgREST's
-`{ code, message, details, hint }`.
+The core has no wire format. Its pure layers (parsers, planners, SQL builders) throw `EngineError`, which carries a
+`reason` — `table_not_found`, `not_single_row`, `invalid_input`… — with a message, details and a hint, and nothing
+else. Adapters' failures become `DbQueryError`, normalised by SQLSTATE from whatever the driver throws.
 
-Then it is only a matter of how it reaches you: `handle()` serialises it into a response. `query()` never sees an
-`ApiError`: `describeFailure` in `core/kinds.ts` classifies the same failure as a `kind` and hands over its `message`,
-`details`, `hint` and SQLSTATE, and `QueryError` puts them, with the input attached, in the `error` of its result.
-Neither is a rejection.
+Each package then consumes them on its own. `@tsql/rest`'s `toApiError` maps a reason to the PostgREST status and
+`PGRSTxxx` code it answers with, a SQLSTATE to a status, and connection failures and unexpected errors to an
+`ApiError`: a status and a body shaped exactly like PostgREST's `{ code, message, details, hint }`, which `handle()`
+serialises into a response. `@tsql/query`'s `describeFailure` maps the same failures to a `kind` and hands over the
+`message`, `details`, `hint` and SQLSTATE; `QueryError` puts them, with the input attached, in the `error` of its
+result. Neither is a rejection, and neither package knows the other's mapping.
 
 ## Invariants worth knowing
 

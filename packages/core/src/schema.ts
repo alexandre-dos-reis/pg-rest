@@ -1,5 +1,5 @@
 import type { DbSession } from "./adapter";
-import { PgRestError } from "./errors";
+import { EngineError } from "./errors";
 import { literal } from "./quote";
 
 /** A composite type (https://www.postgresql.org/docs/current/rowtypes.html), by schema and name. */
@@ -859,8 +859,8 @@ export const findRelationships = (
 };
 
 /**
- * Resolve exactly one relationship or throw PostgREST-style PGRST200/PGRST201.
- * `target` may also be a table that is not related at all (→ PGRST200).
+ * Resolve exactly one relationship or throw `no_relationship` / `ambiguous_relationship`.
+ * `target` may also be a table that is not related at all (→ `no_relationship`).
  */
 export const resolveRelationship = (
   cache: SchemaCache,
@@ -871,9 +871,8 @@ export const resolveRelationship = (
   const found = findRelationships(cache, from, target, hint);
   if (found.length === 1) return found[0]!;
   if (found.length === 0) {
-    throw new PgRestError(
-      400,
-      "PGRST200",
+    throw new EngineError(
+      "no_relationship",
       `Could not find a relationship between '${from.name}' and '${target}' in the schema cache`,
       hint
         ? `Searched for a foreign key relationship between '${from.name}' and '${target}' using the hint '${hint}' in the schema '${from.schema}', but no matches were found.`
@@ -881,9 +880,8 @@ export const resolveRelationship = (
       null,
     );
   }
-  throw new PgRestError(
-    300,
-    "PGRST201",
+  throw new EngineError(
+    "ambiguous_relationship",
     `Could not embed because more than one relationship was found for '${from.name}' and '${target}'`,
     JSON.stringify(found.map((r) => describe(r))),
     `Try changing '${target}' to one of the following: ${found
@@ -892,13 +890,12 @@ export const resolveRelationship = (
   );
 };
 
-/** Look up a relation by (optional) schema and name, or throw PGRST205. */
+/** Look up a relation by (optional) schema and name, or throw `table_not_found`. */
 export const getRelation = (cache: SchemaCache, schema: string, name: string): Relation => {
   const rel = cache.relations.get(relKey(schema, name));
   if (!rel) {
-    throw new PgRestError(
-      404,
-      "PGRST205",
+    throw new EngineError(
+      "table_not_found",
       `Could not find the table '${schema}.${name}' in the schema cache`,
       null,
       suggest(cache, schema, name),

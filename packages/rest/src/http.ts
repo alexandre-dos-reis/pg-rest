@@ -12,7 +12,7 @@ import {
   planTable,
   useSchema,
 } from "@tsql/core/core";
-import { PgRestError } from "@tsql/core/errors";
+import { PgRestError } from "./errors";
 import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";

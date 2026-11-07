@@ -1,8 +1,8 @@
 import type { DbAdapter } from "@tsql/core/adapter";
 import type { RequestContext } from "@tsql/core/core";
-import { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
+import { DbQueryError, EngineError } from "@tsql/core/errors";
+import { type ApiError, PgRestError, toApiError } from "./errors";
 import type { SchemaCache } from "@tsql/core/schema";
-import { toApiError } from "@tsql/core/service";
 import { type HttpConfig, handleRequest } from "./http";
 
 export const errorResponse = (err: ApiError): Response =>
@@ -26,7 +26,12 @@ export const handleSafely = async (
     return await handleRequest(env, request, ctx);
   } catch (e) {
     const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
-    if (api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof DbQueryError)) {
+    if (
+      api.status >= 500 &&
+      !(e instanceof PgRestError) &&
+      !(e instanceof EngineError) &&
+      !(e instanceof DbQueryError)
+    ) {
       console.error("pg-rest: unexpected error while handling a request", e);
     }
     return errorResponse(api);

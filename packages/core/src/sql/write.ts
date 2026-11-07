@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import type { FilterNode } from "../parse/filter";
 import { quoteIdent, quoteQualified } from "../quote";
 import type { Relation } from "../schema";
@@ -18,9 +18,8 @@ const returningSql = (rel: Relation, returning: Returning): string => {
 };
 
 const columnNotFound = (rel: Relation, column: string) =>
-  new PgRestError(
-    400,
-    "PGRST204",
+  new EngineError(
+    "unknown_column",
     `Could not find the '${column}' column of '${rel.name}' in the schema cache`,
     null,
     null,
@@ -61,21 +60,21 @@ export const buildInsert = (o: InsertOptions): string => {
   const returning = returningSql(rel, o.returning);
   const cols = o.columns ? [...o.columns] : unionKeys(o.rows);
   if (!o.columns && o.rows.some((r) => Object.keys(r).length !== cols.length)) {
-    throw new PgRestError(400, "PGRST102", "All object keys must match");
+    throw new EngineError("invalid_body", "All object keys must match");
   }
   checkColumns(rel, cols);
 
   if (o.rows.length === 0) {
     // An empty array inserts nothing.
     const first = rel.columns[0];
-    if (!first) throw new PgRestError(400, "PGRST102", "Cannot insert into a relation without columns");
+    if (!first) throw new EngineError("invalid_body", "Cannot insert into a relation without columns");
     return `INSERT INTO ${target} (${quoteIdent(first.name)}) SELECT NULL WHERE FALSE RETURNING ${returning}`;
   }
 
   if (cols.length === 0) {
     // Only empty objects: insert default rows.
     const first = rel.columns[0];
-    if (!first) throw new PgRestError(400, "PGRST102", "Cannot insert into a relation without columns");
+    if (!first) throw new EngineError("invalid_body", "Cannot insert into a relation without columns");
     const values = o.rows.map(() => "(DEFAULT)").join(", ");
     return `INSERT INTO ${target} (${quoteIdent(first.name)}) VALUES ${values || "(DEFAULT)"} RETURNING ${returning}`;
   }
@@ -108,9 +107,8 @@ export const buildInsert = (o: InsertOptions): string => {
       conflict = ` ON CONFLICT${targetCols} DO NOTHING`;
     } else {
       if (keys.length === 0) {
-        throw new PgRestError(
-          400,
-          "PGRST100",
+        throw new EngineError(
+          "invalid_input",
           "Upsert needs a conflict target",
           `"${rel.name}" has no primary key; pass on_conflict=<columns>`,
         );

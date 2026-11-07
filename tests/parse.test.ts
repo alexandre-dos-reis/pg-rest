@@ -3,14 +3,14 @@ import { parseSelect } from "../packages/core/src/parse/select";
 import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../packages/core/src/parse/filter";
 import { parseField } from "../packages/core/src/parse/field";
 import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../packages/rest/src/request";
-import { PgRestError } from "../packages/core/src/errors";
+import { toApiError } from "../packages/rest/src/errors";
 
 const q = (qs: string) => parseQuery([...new URLSearchParams(qs)]);
 const code = (fn: () => unknown) => {
   try {
     fn();
   } catch (e) {
-    return (e as PgRestError).code;
+    return toApiError(e, undefined, undefined).body.code;
   }
   return "no error";
 };

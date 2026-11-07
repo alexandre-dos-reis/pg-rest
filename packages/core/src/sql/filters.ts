@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import type { FieldRef } from "../parse/field";
 import type { Filter, FilterNode, Operator, OrderTerm } from "../parse/filter";
 import { literal, quoteIdent, quoteQualified } from "../quote";
@@ -143,9 +143,8 @@ export const orderSql = (terms: ReadonlyArray<OrderTerm>, alias: string, rel?: R
   if (terms.length === 0) return "";
   const parts = terms.map((t) => {
     if (t.relation) {
-      throw new PgRestError(
-        400,
-        "PGRST127",
+      throw new EngineError(
+        "not_implemented",
         "Ordering by a column of a related table is not implemented yet",
         null,
         null,

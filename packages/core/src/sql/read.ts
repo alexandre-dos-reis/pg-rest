@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import type { NodeParams, ParsedQuery } from "../parse/filter";
 import { outputName, type AggregateItem, type EmbedItem, type FieldItem, type SelectItem } from "../parse/select";
 import { quoteIdent, quoteQualified } from "../quote";
@@ -97,9 +97,8 @@ const orderClause = (
     if (!t.relation) return `${fieldSql(alias, t.field, rel)} ${tail}`;
     const embed = items.find((i): i is EmbedItem => i.kind === "embed" && (i.alias ?? i.target) === t.relation);
     if (!embed) {
-      throw new PgRestError(
-        400,
-        "PGRST108",
+      throw new EngineError(
+        "not_embedded",
         `'${t.relation}' is not an embedded resource in this request`,
         null,
         `Verify that '${t.relation}' is included in the 'select' query parameter.`,
@@ -107,9 +106,8 @@ const orderClause = (
     }
     const r = resolveRelationship(ctx.cache, rel, embed.target, embed.hint);
     if (r.kind !== "m2o" && r.kind !== "o2o") {
-      throw new PgRestError(
-        400,
-        "PGRST118",
+      throw new EngineError(
+        "invalid_related_order",
         `A related order on '${t.relation}' is not possible`,
         `'${rel.name}' and '${embed.target}' do not form a many-to-one or one-to-one relationship`,
         null,
@@ -121,9 +119,8 @@ const orderClause = (
       selected.length > 0 &&
       !selected.some((i) => i.kind === "star" || (i.kind === "field" && i.field.name === t.field.name))
     ) {
-      throw new PgRestError(
-        400,
-        "42703",
+      throw new EngineError(
+        "undefined_column",
         `column ${rel.name}_${embed.target}_1.${t.field.name} does not exist`,
         null,
         null,
@@ -185,9 +182,8 @@ const presenceConditions = (params: NodeParams | undefined, joins: ReadonlyArray
   (params?.presence ?? []).map((p) => {
     const j = joins.find((x) => x.name === p.embed);
     if (!j) {
-      throw new PgRestError(
-        400,
-        "PGRST108",
+      throw new EngineError(
+        "not_embedded",
         `'${p.embed}' is not an embedded resource in this request`,
         null,
         `Verify that '${p.embed}' is included in the 'select' query parameter.`,
@@ -267,9 +263,8 @@ const buildEmbed = (
       };
     }
     if (inner.aggregated) {
-      throw new PgRestError(
-        400,
-        "PGRST127",
+      throw new EngineError(
+        "not_implemented",
         "Feature not implemented",
         "Aggregates are not implemented for one-to-many or many-to-many spreads.",
         null,

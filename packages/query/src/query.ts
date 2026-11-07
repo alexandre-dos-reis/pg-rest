@@ -12,8 +12,8 @@ import {
   transactionSetup,
   useSchema,
 } from "@tsql/core/core";
-import { DbQueryError } from "@tsql/core/errors";
-import { type ErrorKind, describeErrorKind, describeFailure } from "@tsql/core/kinds";
+import { DbQueryError, EngineError } from "@tsql/core/errors";
+import { type ErrorKind, describeErrorKind, describeFailure } from "./kinds";
 import type { Operator } from "@tsql/core/parse/filter";
 import { FTS_ORDER, OPERATORS_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
@@ -380,18 +380,9 @@ const OPS: ReadonlySet<string> = new Set<FilterOp>(OPERATORS_ORDER);
 /** Inside a list or a logic tree these read as something other than text, so such a string is quoted. */
 const KEYWORDS: ReadonlySet<string> = new Set(["null", "true", "false", "unknown"]);
 
-/** The query itself is wrong. Thrown while the input is turned into a statement, and mapped to `invalid_query`. */
-class BadQuery extends Error {
-  constructor(
-    message: string,
-    readonly hint: string | null,
-  ) {
-    super(message);
-    this.name = "BadQuery";
-  }
-}
-
-const bad = (message: string, hint?: string): BadQuery => new BadQuery(message, hint ?? null);
+/** The query itself is wrong: `invalid_query`, however deep in the input it was found. */
+const bad = (message: string, hint?: string): EngineError =>
+  new EngineError("invalid_input", message, null, hint ?? null);
 
 /**
  * Render a value the way the query string carries it. A lone value is taken verbatim --
@@ -766,8 +757,6 @@ export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext 
  */
 const failureOf = (env: Env, ctx: RequestContext, input: QueryInput, e: unknown): QueryFailed => {
   if (e instanceof QueryError) return toFailedResult(e.input, e);
-  if (e instanceof BadQuery)
-    return toFailedResult(input, new QueryError(input, { kind: "invalid_query", message: e.message, hint: e.hint }));
   const f = describeFailure(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
   // An unexpected error keeps its stack under `cause`: the message alone would not say where it came from.
   return toFailedResult(input, new QueryError(input, f, f.unexpected ? { cause: e } : undefined));

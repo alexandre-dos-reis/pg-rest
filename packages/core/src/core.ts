@@ -1,5 +1,5 @@
 import type { DbAdapter, DbSession } from "./adapter";
-import { DbQueryError, PgRestError } from "./errors";
+import { DbQueryError, EngineError } from "./errors";
 import { parseQuery, type ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
 import { type Method, type OutputFormat, type Preferences } from "./parse/request";
@@ -109,9 +109,8 @@ export const useSchema = (env: Env, wanted: string | null | undefined): string =
   const name = wanted?.trim();
   if (!name) return env.config.schemas[0]!;
   if (!env.config.schemas.includes(name)) {
-    throw new PgRestError(
-      406,
-      "PGRST106",
+    throw new EngineError(
+      "schema_not_exposed",
       `Invalid schema: ${name}`,
       null,
       `Only the following schemas are exposed: ${env.config.schemas.join(", ")}`,
@@ -123,7 +122,7 @@ export const useSchema = (env: Env, wanted: string | null | undefined): string =
 /** Refuse a call that has no role when anonymous access is disabled. */
 export const assertRole = (env: Env, ctx: RequestContext): void => {
   if (!ctx.role && env.config.anonymousRole === undefined) {
-    throw new PgRestError(401, "PGRST302", "Anonymous access is disabled", null, null);
+    throw new EngineError("anonymous_disabled", "Anonymous access is disabled", null, null);
   }
 };
 
@@ -138,9 +137,8 @@ const settingsEntries = (ctx: RequestContext): Array<[string, string]> => {
   const out: Array<[string, string]> = [];
   for (const [k, v] of Object.entries(ctx.settings ?? {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$/.test(k)) {
-      throw new PgRestError(
-        500,
-        "PGRST100",
+      throw new EngineError(
+        "invalid_setting",
         `Invalid setting name "${k}"`,
         null,
         "Custom settings need a prefix, e.g. app.tenant_id",
@@ -204,9 +202,8 @@ export const transactionSetup = (env: Env, ctx: RequestContext): { sql: string; 
 const parseResponseHeaders = (raw: unknown): Record<string, string> => {
   if (raw == null || raw === "") return {};
   const bad = () =>
-    new PgRestError(
-      500,
-      "PGRST111",
+    new EngineError(
+      "invalid_response_headers",
       "response.headers guc must be a JSON array composed of objects with a single key and a string value",
     );
   let parsed: unknown;
@@ -232,7 +229,7 @@ const parseStatusGuc = (raw: unknown): number | undefined => {
   if (raw == null || raw === "") return undefined;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 100 || n > 599) {
-    throw new PgRestError(500, "PGRST112", "response.status guc must be a valid status code");
+    throw new EngineError("invalid_response_status", "response.status guc must be a valid status code");
   }
   return n;
 };
@@ -283,7 +280,7 @@ export interface Plan {
 const asRows = (body: unknown): JsonObject[] => {
   const isObj = (v: unknown): v is JsonObject => v !== null && typeof v === "object" && !Array.isArray(v);
   if (Array.isArray(body)) {
-    if (!body.every(isObj)) throw new PgRestError(400, "PGRST102", "All object keys must match");
+    if (!body.every(isObj)) throw new EngineError("invalid_body", "All object keys must match");
     return body as JsonObject[];
   }
   // PostgREST inserts nothing for a scalar payload.
@@ -292,9 +289,8 @@ const asRows = (body: unknown): JsonObject[] => {
 
 const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; limit?: number } | undefined) => {
   if (query.root.limit !== undefined && query.root.limit < 0) {
-    throw new PgRestError(
-      416,
-      "PGRST103",
+    throw new EngineError(
+      "range_not_satisfiable",
       "Requested range not satisfiable",
       "Limit should be greater than or equal to zero.",
       null,
@@ -389,7 +385,7 @@ export const planTable = (
   } as const;
 
   if (method === "POST") {
-    if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
+    if (!body) throw new EngineError("invalid_body", "Empty or invalid json");
     const rows = asRows(body.value);
     const insertSql = buildInsert({
       rel,
@@ -420,7 +416,7 @@ export const planTable = (
   }
 
   if (method === "PATCH") {
-    if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
+    if (!body) throw new EngineError("invalid_body", "Empty or invalid json");
     // PostgREST uses the first element of an array and treats other payloads as "no columns".
     const first = Array.isArray(body.value) ? body.value[0] : body.value;
     const obj: JsonObject =
@@ -486,24 +482,26 @@ export const planTable = (
   }
 
   // PUT: single-row upsert addressed by primary key.
-  if (!body) throw new PgRestError(400, "PGRST102", "Empty or invalid json");
+  if (!body) throw new EngineError("invalid_body", "Empty or invalid json");
   const row = body.value;
   if (Array.isArray(row) && !row.every((r) => r !== null && typeof r === "object" && !Array.isArray(r))) {
-    throw new PgRestError(400, "PGRST102", "All object keys must match");
+    throw new EngineError("invalid_body", "All object keys must match");
   }
   if (row === null || typeof row !== "object" || Array.isArray(row)) {
-    throw new PgRestError(
-      400,
-      "PGRST102",
+    throw new EngineError(
+      "invalid_body",
       "Empty or invalid json",
       "The payload of a PUT request must be a JSON object",
     );
   }
   if (query.root.limit !== undefined || query.root.offset !== undefined) {
-    throw new PgRestError(400, "PGRST114", "limit/offset querystring parameters are not allowed for PUT");
+    throw new EngineError("limit_offset_on_put", "limit/offset querystring parameters are not allowed for PUT");
   }
   if (rel.pk.length === 0) {
-    throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
+    throw new EngineError(
+      "put_requires_pk",
+      "Filters must include all and only primary key columns with 'eq' operators",
+    );
   }
   const keyValues = new Map<string, string>();
   for (const f of query.root.filters) {
@@ -518,20 +516,22 @@ export const planTable = (
     ) {
       keyValues.set(f.field.name, f.value);
     } else {
-      throw new PgRestError(
-        405,
-        "PGRST105",
+      throw new EngineError(
+        "put_requires_pk",
         "Filters must include all and only primary key columns with 'eq' operators",
       );
     }
   }
   if (!rel.pk.every((c) => keyValues.has(c))) {
-    throw new PgRestError(405, "PGRST105", "Filters must include all and only primary key columns with 'eq' operators");
+    throw new EngineError(
+      "put_requires_pk",
+      "Filters must include all and only primary key columns with 'eq' operators",
+    );
   }
   const obj = row as JsonObject;
   for (const c of rel.pk) {
     if (c in obj && String(obj[c]) !== keyValues.get(c)) {
-      throw new PgRestError(400, "PGRST115", "Payload values do not match URL in primary key column(s)");
+      throw new EngineError("payload_key_mismatch", "Payload values do not match URL in primary key column(s)");
     }
   }
   const full: JsonObject = { ...Object.fromEntries(rel.pk.map((c) => [c, keyValues.get(c)])), ...obj };
@@ -570,7 +570,7 @@ export const planRpc = (
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
   if (method !== "GET" && method !== "HEAD" && method !== "POST") {
-    throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
+    throw new EngineError("rpc_method_not_allowed", `Cannot use the ${method} method on RPC`);
   }
 
   let argValues: Record<string, unknown> = {};
@@ -590,7 +590,7 @@ export const planRpc = (
           const keysOf = (o: unknown) => (isObj(o) ? Object.keys(o).sort().join("\u0000") : undefined);
           const first = keysOf(v[0]);
           if (first === undefined || v.some((o) => keysOf(o) !== first)) {
-            throw new PgRestError(400, "PGRST102", "All object keys must match", null, null);
+            throw new EngineError("invalid_body", "All object keys must match", null, null);
           }
           argValues = v[0] as Record<string, unknown>;
         }
@@ -772,18 +772,16 @@ export const execute = async (
 
         // Checks that must roll back the transaction when they fail.
         if (format.kind === "object" && plan.shape === "object" && plan.rpc?.shape !== "object" && pageTotal !== 1) {
-          throw new PgRestError(
-            406,
-            "PGRST116",
+          throw new EngineError(
+            "not_single_row",
             "Cannot coerce the result to a single JSON object",
             `The result contains ${pageTotal} rows`,
           );
         }
         if (strict && prefer.maxAffected !== undefined) {
           if (plan.kind === "rpc" && plan.rpc && !plan.rpc.fn.returnsSet) {
-            throw new PgRestError(
-              400,
-              "PGRST128",
+            throw new EngineError(
+              "max_affected_unsupported",
               "max-affected preference is only valid for functions that return a set",
               null,
               null,
@@ -793,9 +791,8 @@ export const execute = async (
             (plan.kind === "update" || plan.kind === "delete" || plan.kind === "rpc") &&
             pageTotal > prefer.maxAffected
           ) {
-            throw new PgRestError(
-              400,
-              "PGRST124",
+            throw new EngineError(
+              "too_many_affected",
               "Query result exceeds max-affected preference constraint",
               `The query affects ${pageTotal} rows`,
             );
@@ -876,16 +873,12 @@ const buildOutcome = (env: Env, prefer: Preferences, plan: Plan, r: RawResult, h
       plan.offset >= total &&
       prefer.count !== "planned"
     ) {
-      throw new PgRestError(
-        416,
-        "PGRST103",
+      throw new EngineError(
+        "range_not_satisfiable",
         "Requested range not satisfiable",
         `An offset of ${plan.offset} was requested, but there are only ${total} rows.`,
         null,
-        {
-          "Content-Range": `*/${total}`,
-          ...(applied ? { "Preference-Applied": applied } : {}),
-        },
+        { total, ...(applied ? { applied } : {}) },
       );
     }
     if (total !== undefined && r.pageTotal > 0 && r.pageTotal < total) status = 206;

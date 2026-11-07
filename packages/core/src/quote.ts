@@ -1,9 +1,9 @@
-import { PgRestError } from "./errors";
+import { EngineError } from "./errors";
 
 /** Quote an SQL identifier: `a"b` → `"a""b"`. */
 export const quoteIdent = (name: string): string => {
   if (name.includes("\0")) {
-    throw new PgRestError(400, "PGRST100", "Invalid identifier", "contains a NUL byte");
+    throw new EngineError("invalid_input", "Invalid identifier", "contains a NUL byte");
   }
   return `"${name.replace(/"/g, '""')}"`;
 };
@@ -20,7 +20,7 @@ export const quoteQualified = (schema: string, name: string): string => `${quote
  */
 export const literal = (value: string): string => {
   if (value.includes("\0")) {
-    throw new PgRestError(400, "PGRST100", "Invalid value", "contains a NUL byte");
+    throw new EngineError("invalid_input", "Invalid value", "contains a NUL byte");
   }
   let out = `'${value.replace(/'/g, "''")}'`;
   if (out.includes("\\")) out = `E${out.replace(/\\/g, "\\\\")}`;
@@ -41,7 +41,7 @@ const TYPE_RE = new RegExp(`^(?:(?:${MULTI_WORD})|${ID}(?:\\.${ID})?)${MOD}${ARR
 export const safeType = (type: string): string => {
   const t = type.trim();
   if (t.length > 100 || !TYPE_RE.test(t)) {
-    throw new PgRestError(400, "PGRST100", "Invalid type in cast", `"${type}" is not an allowed cast target`);
+    throw new EngineError("invalid_input", "Invalid type in cast", `"${type}" is not an allowed cast target`);
   }
   return t;
 };

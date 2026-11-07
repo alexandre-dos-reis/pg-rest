@@ -34,7 +34,7 @@ import {
   tryP,
   zero,
 } from "./parsec";
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import { FTS_ORDER, IS_VALUES_ORDER, QUANTIFIABLE_ORDER, SINGLE_VALUE_ORDER } from "./syntax";
 
 const ws = many(oneOf(" \t"));
@@ -237,28 +237,28 @@ const logicTree: P<unknown> = alt(
 // ---------------------------------------------------------------------------
 
 const fail = (what: string, input: string, f: { column: number; details: string }) =>
-  new PgRestError(400, "PGRST100", `"failed to parse ${what} (${input})" (line 1, column ${f.column})`, f.details);
+  new EngineError("invalid_input", `"failed to parse ${what} (${input})" (line 1, column ${f.column})`, f.details);
 
 /** `select=`: returns where the parse stopped (PostgREST ignores anything after it), or the error. */
-export const checkSelect = (input: string): number | PgRestError => {
+export const checkSelect = (input: string): number | EngineError => {
   const r = run(forest, input);
   return r.ok ? r.end : fail("select parameter", input, r.failure);
 };
 
 /** The right-hand side of a filter (`not.eq.1`); `undefined` when it parses. */
-export const checkFilter = (input: string): PgRestError | undefined => {
+export const checkFilter = (input: string): EngineError | undefined => {
   const r = run(opExpr(singleVal), input);
   return r.ok ? undefined : fail("filter", input, r.failure);
 };
 
 /** An `order=` value; `undefined` when it parses. */
-export const checkOrder = (input: string): PgRestError | undefined => {
+export const checkOrder = (input: string): EngineError | undefined => {
   const r = run(order, input);
   return r.ok ? undefined : fail("order", input, r.failure);
 };
 
 /** `and=`/`or=`: `op` is `and`, `or`, `not.and` or `not.or`; returns how much of `value` the tree uses. */
-export const checkLogicTree = (op: string, value: string): number | PgRestError => {
+export const checkLogicTree = (op: string, value: string): number | EngineError => {
   const r = run(logicTree, op + value);
   // PostgREST ignores what follows a complete tree
   return r.ok ? Math.max(0, r.end - op.length) : fail("logic tree", value, r.failure);

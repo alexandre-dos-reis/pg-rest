@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 
 /** A step in a JSON path: `->'key'` / `->>'key'` / `->0`. */
 export interface JsonStep {
@@ -14,8 +14,8 @@ export interface FieldRef {
   readonly json: ReadonlyArray<JsonStep>;
 }
 
-export const parseError = (message: string, details?: string): PgRestError =>
-  new PgRestError(400, "PGRST100", message, details ?? null);
+export const parseError = (message: string, details?: string): EngineError =>
+  new EngineError("invalid_input", message, details ?? null);
 
 /**
  * Scan `s` while tracking double-quote and parenthesis state, calling `visit`

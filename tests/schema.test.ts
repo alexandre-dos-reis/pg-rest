@@ -7,7 +7,8 @@ import {
   resolveRelationship,
   type SchemaCache,
 } from "../packages/core/src/schema";
-import { PgRestError } from "../packages/core/src/errors";
+import { EngineError } from "../packages/core/src/errors";
+import { toApiError } from "../packages/rest/src/errors";
 
 describe.skipIf(!hasDb)("schema introspection", () => {
   let db: TestDb;
@@ -86,10 +87,13 @@ describe.skipIf(!hasDb)("schema introspection", () => {
       getRelation(cache, "api", "client");
       throw new Error("should have thrown");
     } catch (e) {
-      expect(e).toBeInstanceOf(PgRestError);
-      const err = e as PgRestError;
-      expect(err.status).toBe(404);
-      expect(err.code).toBe("PGRST205");
+      expect(e).toBeInstanceOf(EngineError);
+      const err = e as EngineError;
+      expect(err.reason).toBe("table_not_found");
+      // what it answers with over HTTP is the other package's table
+      const api = toApiError(err, undefined, undefined);
+      expect(api.status).toBe(404);
+      expect(api.body.code).toBe("PGRST205");
       expect(err.hint).toContain("api.clients");
     }
   });

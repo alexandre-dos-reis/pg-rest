@@ -1,16 +1,16 @@
 import type { RequestContext } from "@tsql/core/core";
 import { type EngineOptions, createEngine } from "@tsql/core/engine";
-import { ApiError } from "@tsql/core/errors";
+import { ApiError, toApiError } from "./errors";
 import type { SchemaCache } from "@tsql/core/schema";
-import { toApiError } from "@tsql/core/service";
 import type { HttpConfig } from "./http";
 import { errorResponse, handleSafely } from "./serve";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
 export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
 export type { EngineOptions } from "@tsql/core/engine";
-export { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
-export type { ErrorBody } from "@tsql/core/errors";
+export { DbQueryError } from "@tsql/core/errors";
+export { ApiError, PgRestError } from "./errors";
+export type { ErrorBody } from "./errors";
 export type {
   Column,
   CompositeAttribute,

@@ -1,4 +1,4 @@
-import { PgRestError } from "../errors";
+import { EngineError } from "../errors";
 import { quoteIdent, quoteQualified } from "../quote";
 import { type FunctionDef, type Relation, type SchemaCache, levenshtein, relKey } from "../schema";
 
@@ -29,7 +29,7 @@ const SINGLE_BODY_TYPES = new Set(["json", "jsonb", "text", "bytea"]);
 export const isSingleUnnamedParam = (fn: FunctionDef): boolean =>
   fn.args.length === 1 && fn.args[0]!.name === "" && SINGLE_BODY_TYPES.has(fn.args[0]!.type);
 
-/** PostgREST's spelling used in PGRST203: `schema.fn(a => integer, b => text)`. */
+/** PostgREST's spelling used when more than one function fits: `schema.fn(a => integer, b => text)`. */
 const arrowSignature = (fn: FunctionDef): string =>
   `${fn.schema}.${fn.name}(${fn.args.map((a) => `${a.name} => ${a.type}`).join(", ")})`;
 
@@ -38,7 +38,7 @@ const similarity = (a: string, b: string): number =>
   1 - levenshtein(a.toLowerCase(), b.toLowerCase()) / Math.max(a.length, b.length, 1);
 const SUGGEST_AT = 0.75;
 
-/** The "Perhaps you meant ..." hint of PGRST202. */
+/** The "Perhaps you meant ..." hint of `function_not_found`. */
 const functionHint = (
   cache: SchemaCache,
   schema: string,
@@ -93,9 +93,8 @@ export const resolveFunction = (
   const params =
     names.length === 0 ? "without parameters" : `with parameter${names.length === 1 ? "" : "s"} ${names.join(", ")}`;
   const notFound = () =>
-    new PgRestError(
-      404,
-      "PGRST202",
+    new EngineError(
+      "function_not_found",
       names.length === 0
         ? `Could not find the function ${schema}.${name} without parameters in the schema cache`
         : `Could not find the function ${schema}.${name}(${names.join(", ")}) in the schema cache`,
@@ -121,9 +120,8 @@ export const resolveFunction = (
 
   const exact = matches.filter((fn) => fn.args.length === provided.size);
   if (exact.length === 1) return exact[0]!;
-  throw new PgRestError(
-    300,
-    "PGRST203",
+  throw new EngineError(
+    "ambiguous_function",
     `Could not choose the best candidate function between: ${matches.map(arrowSignature).sort().join(", ")}`,
     null,
     "Try renaming the parameters or the function itself in the database so function overloading can be resolved",

@@ -1,9 +1,7 @@
-// What went wrong, as a closed set of strings: the classification `@tsql/query` reports as `QueryError.kind`.
-// It lives in the core because it reads the engine's own error codes (PostgREST's `PGRSTxxx`) and
-// SQLSTATEs; the package that exposes it never has to know either. `no_context` and `rolled_back` name
-// situations that only exist for `setContextQuery()` and `transaction()`, which create them directly.
-import { ApiError, PgRestError } from "./errors";
-import { toApiError } from "./service";
+// What went wrong, as a closed set of strings: `QueryError.kind`. This is where an engine error and a
+// database error become one. `no_context` and `rolled_back` name situations that only exist for
+// `setContextQuery()` and `transaction()`, which create them directly.
+import { DbQueryError, EngineError, type Reason, isConnectionError } from "@tsql/core/errors";
 
 /**
  * What went wrong, as one of a closed set of strings -- the thing a program switches on.
@@ -46,100 +44,92 @@ export type ErrorKind =
   /** Anything left: a bug, or an error that was not foreseen. The original is under `cause`. */
   | "internal";
 
-/** The codes whose kind is not implied by their status. */
-const CODE_KINDS: Readonly<Record<string, ErrorKind>> = {
-  // PGRST1xx -- the request
-  PGRST100: "invalid_query",
-  PGRST101: "invalid_query",
-  PGRST102: "invalid_payload",
-  PGRST103: "invalid_query",
-  PGRST105: "invalid_query",
-  PGRST106: "invalid_query",
-  PGRST107: "unsupported",
-  PGRST108: "invalid_query",
-  PGRST111: "internal",
-  PGRST112: "internal",
-  PGRST114: "invalid_query",
-  PGRST115: "invalid_payload",
-  PGRST116: "not_single_row",
-  PGRST117: "unsupported",
-  PGRST118: "invalid_query",
-  PGRST120: "invalid_query",
-  PGRST121: "internal",
-  PGRST122: "invalid_query",
-  PGRST124: "too_many_affected",
-  PGRST125: "invalid_query",
-  PGRST126: "unsupported",
-  PGRST127: "unsupported",
-  PGRST128: "invalid_query",
-  // PGRST2xx -- the schema cache
-  PGRST200: "invalid_embed",
-  PGRST201: "invalid_embed",
-  PGRST202: "undefined_object",
-  PGRST203: "invalid_query",
-  PGRST204: "invalid_payload",
-  PGRST205: "undefined_object",
-  // PGRST3xx -- who is asking
-  PGRST302: "unauthenticated",
-  // ours
-  PGRST001: "unavailable",
-  PGRSTX00: "internal",
-  PGRSTX01: "no_context",
-  PGRSTX02: "rolled_back",
-  PGRSTX03: "rolled_back",
-  // SQLSTATEs a caller is likely to act on
+/** What the engine refused, as a kind. */
+const REASON_KINDS: Readonly<Record<Reason, ErrorKind>> = {
+  invalid_input: "invalid_query",
+  invalid_setting: "invalid_query",
+  invalid_body: "invalid_payload",
+  not_embedded: "invalid_query",
+  limit_offset_on_put: "invalid_query",
+  payload_key_mismatch: "invalid_payload",
+  invalid_related_order: "invalid_query",
+  invalid_embed_filter: "invalid_query",
+  too_many_affected: "too_many_affected",
+  not_implemented: "unsupported",
+  max_affected_unsupported: "invalid_query",
+  no_relationship: "invalid_embed",
+  ambiguous_relationship: "invalid_embed",
+  unknown_column: "invalid_payload",
+  undefined_column: "undefined_object",
+  anonymous_disabled: "unauthenticated",
+  function_not_found: "undefined_object",
+  ambiguous_function: "invalid_query",
+  table_not_found: "undefined_object",
+  rpc_method_not_allowed: "invalid_query",
+  put_requires_pk: "invalid_query",
+  schema_not_exposed: "invalid_query",
+  not_single_row: "not_single_row",
+  range_not_satisfiable: "invalid_query",
+  invalid_response_headers: "internal",
+  invalid_response_status: "internal",
+};
+
+/** The SQLSTATEs a caller is likely to act on. */
+const STATE_KINDS: Readonly<Record<string, ErrorKind>> = {
   "23502": "invalid_data",
   "23503": "conflict",
   "23505": "conflict",
   "23514": "invalid_data",
+  "25006": "unsupported",
   "42703": "undefined_object",
   "42883": "undefined_object",
-  P0001: "raised",
   "42P01": "undefined_object",
+  "42P17": "internal",
+  P0001: "raised",
 };
 
-/** SQLSTATE class (the first two characters) → kind, for the codes not named one by one. */
+/** SQLSTATE class (the first two characters) -> kind, for the codes not named one by one. */
 const CLASS_KINDS: Readonly<Record<string, ErrorKind>> = {
   "08": "unavailable",
+  "09": "internal",
   "0A": "unsupported",
   "0L": "forbidden",
   "0P": "forbidden",
   "22": "invalid_data",
   "23": "invalid_data",
+  "25": "internal",
   "28": "unauthenticated",
+  "2D": "internal",
+  "38": "internal",
+  "39": "internal",
+  "3B": "internal",
+  "40": "internal",
   "53": "unavailable",
+  "54": "internal",
+  "55": "internal",
   "57": "unavailable",
   "58": "unavailable",
+  F0: "internal",
+  HV: "internal",
+  P0: "internal",
+  XX: "internal",
 };
 
-/**
- * Classify an error from its HTTP status and code: the code when it says enough, its SQLSTATE class next, and the HTTP
- * status last -- which is what makes an unmapped code land somewhere sensible rather than on
- * `"internal"`.
- */
-export const errorKind = (status: number, code: string): ErrorKind => {
-  const named = CODE_KINDS[code];
+/** The other classes PostgreSQL defines: an error in any class outside these was raised with a code of its own. */
+const STANDARD_CLASSES: ReadonlySet<string> = new Set(
+  "00 01 02 03 0B 0F 0Z 20 21 24 26 27 2B 2F 34 3D 3F 42 44 72".split(" "),
+);
+
+const stateKind = (state: string, role: string | undefined, anonymousRole: string | undefined): ErrorKind => {
+  const named = STATE_KINDS[state];
   if (named) return named;
-  // `RAISE ... USING ERRCODE = 'PT404'` and `RAISE SQLSTATE 'PGRST'` are errors someone wrote
-  if (code === "PGRST" || /^PT\d{3}$/.test(code)) return "raised";
-  const byClass = CLASS_KINDS[code.slice(0, 2)];
-  if (byClass) return byClass === "invalid_data" && status === 409 ? "conflict" : byClass;
-  switch (status) {
-    case 401:
-      return "unauthenticated";
-    case 403:
-      return "forbidden";
-    case 404:
-      return "undefined_object";
-    case 405:
-    case 415:
-      return "unsupported";
-    case 409:
-      return "conflict";
-    case 503:
-      return "unavailable";
-  }
-  return status >= 500 ? "internal" : "invalid_query";
+  // no privilege: for nobody in particular it is a missing login, for a role it is a refusal
+  if (state === "42501") return role === anonymousRole ? "unauthenticated" : "forbidden";
+  const klass = state.slice(0, 2);
+  const byClass = CLASS_KINDS[klass];
+  if (byClass) return byClass;
+  // `RAISE ... USING ERRCODE = '...'` with a code of your own
+  return STANDARD_CLASSES.has(klass) ? "invalid_query" : "raised";
 };
 
 const KIND_SUMMARIES: Readonly<Record<ErrorKind, string>> = {
@@ -164,7 +154,7 @@ const KIND_SUMMARIES: Readonly<Record<ErrorKind, string>> = {
 /** A few words naming an {@link ErrorKind}, for a log line or a message a person reads. */
 export const describeErrorKind = (kind: ErrorKind): string => KIND_SUMMARIES[kind];
 
-/** A failure as `@tsql/query` reports it: what the engine says, with nothing of the wire in it. */
+/** A failure as `@tsql/query` reports it: what the engine says, with nothing of the transport in it. */
 export interface Failure {
   readonly kind: ErrorKind;
   readonly message: string;
@@ -172,22 +162,49 @@ export interface Failure {
   readonly hint: string | null;
   /** The database's SQLSTATE, when the failure came from the database. */
   readonly sqlState: string | undefined;
-  /** True when it was not one of the errors the engine raises on purpose: the original is worth keeping. */
+  /** True when it was not one of the errors raised on purpose: the original is worth keeping. */
   readonly unexpected: boolean;
 }
 
-const SQLSTATE = /^[0-9A-Z]{5}$/;
-
 /** Map anything the engine threw to a {@link Failure}. */
 export const describeFailure = (e: unknown, role: string | undefined, anonymousRole: string | undefined): Failure => {
-  const api = toApiError(e, role, anonymousRole);
-  const { code, message, details, hint } = api.body;
+  if (e instanceof EngineError) {
+    return {
+      kind: REASON_KINDS[e.reason],
+      message: e.message,
+      details: e.details,
+      hint: e.hint,
+      sqlState: undefined,
+      unexpected: false,
+    };
+  }
+  if (e instanceof DbQueryError) {
+    const kind = stateKind(e.sqlState, role, anonymousRole);
+    return {
+      kind,
+      message: e.message,
+      details: e.detail ?? null,
+      hint: e.hint ?? null,
+      sqlState: e.sqlState,
+      unexpected: kind === "internal",
+    };
+  }
+  if (isConnectionError(e)) {
+    return {
+      kind: "unavailable",
+      message: "Database connection failed",
+      details: e instanceof Error ? e.message : null,
+      hint: null,
+      sqlState: undefined,
+      unexpected: true,
+    };
+  }
   return {
-    kind: errorKind(api.status, code),
-    message,
-    details,
-    hint,
-    sqlState: SQLSTATE.test(code) ? code : undefined,
-    unexpected: api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError),
+    kind: "internal",
+    message: "Internal error",
+    details: null,
+    hint: null,
+    sqlState: undefined,
+    unexpected: true,
   };
 };

@@ -1,73 +1,87 @@
 /**
- * Error body, in the exact shape PostgREST returns:
- * `{ code, message, details, hint }`.
+ * Why the engine refused something, as one id per distinct reason. It is what the engine throws and
+ * nothing else: no code, no status. `@tsql/rest` turns a reason into the PostgREST code and HTTP
+ * status it answers with, and `@tsql/query` turns it into a `kind`.
  */
-export interface ErrorBody {
-  readonly code: string;
-  readonly message: string;
-  readonly details: string | null;
-  readonly hint: string | null;
+export type Reason =
+  /** The input does not parse or does not make sense: a bad filter, `select`, `order`, identifier or value. */
+  | "invalid_input"
+  /** A caller-supplied setting has a name that is not allowed. */
+  | "invalid_setting"
+  /** The body cannot be written: empty, malformed, keys that differ between rows, no columns. */
+  | "invalid_body"
+  /** A filter or order names a resource that is not embedded in the `select`. */
+  | "not_embedded"
+  /** `limit` or `offset` on a `PUT`. */
+  | "limit_offset_on_put"
+  /** The payload disagrees with the primary key in the URL. */
+  | "payload_key_mismatch"
+  /** An order by a related table that is not to-one. */
+  | "invalid_related_order"
+  /** An embedded resource filtered by anything but null / not null. */
+  | "invalid_embed_filter"
+  /** A write would have affected more rows than allowed. */
+  | "too_many_affected"
+  /** Something the engine does not implement. */
+  | "not_implemented"
+  /** `maxAffected` on a function that returns no set. */
+  | "max_affected_unsupported"
+  /** No relationship between two resources. */
+  | "no_relationship"
+  /** More than one relationship between two resources. */
+  | "ambiguous_relationship"
+  /** A column of the payload that the table does not have. */
+  | "unknown_column"
+  /** A column an ordering needs that is not in the embedded `select`. */
+  | "undefined_column"
+  /** Anonymous access is disabled and nobody was identified. */
+  | "anonymous_disabled"
+  /** No function by that name and arguments. */
+  | "function_not_found"
+  /** More than one function fits. */
+  | "ambiguous_function"
+  /** No table or view by that name. */
+  | "table_not_found"
+  /** A function cannot be called that way. */
+  | "rpc_method_not_allowed"
+  /** An upsert by `PUT` needs the primary key and nothing else as filters. */
+  | "put_requires_pk"
+  /** A schema that is not one of the exposed ones. */
+  | "schema_not_exposed"
+  /** `single` matched other than exactly one row. */
+  | "not_single_row"
+  /** The offset or limit leaves nothing to answer with. */
+  | "range_not_satisfiable"
+  /** The function's `response.headers` setting is not what it should be. */
+  | "invalid_response_headers"
+  /** The function's `response.status` setting is not a status. */
+  | "invalid_response_status";
+
+/** What a reason may carry besides its text. */
+export interface EngineErrorData {
+  /** The number of rows there were, for `range_not_satisfiable`. */
+  readonly total?: number;
+  /** The preferences that were applied before the failure, as the transport reports them. */
+  readonly applied?: string;
 }
 
-/**
- * Thrown by the pure parts of the library (parsers, SQL builders). It is
- * converted into an {@link ApiError} at the request boundary.
- */
-export class PgRestError extends Error {
+/** Thrown by the engine (parsers, planners, SQL builders). Each consumer maps it to its own error. */
+export class EngineError extends Error {
   constructor(
-    readonly status: number,
-    readonly code: string,
+    readonly reason: Reason,
     message: string,
     readonly details: string | null = null,
     readonly hint: string | null = null,
-    readonly headers: Readonly<Record<string, string>> = {},
+    readonly data: EngineErrorData = {},
   ) {
     super(message);
-    this.name = "PgRestError";
-  }
-
-  get body(): ErrorBody {
-    return {
-      code: this.code,
-      message: this.message,
-      details: this.details,
-      hint: this.hint,
-    };
-  }
-}
-
-/**
- * A one-line summary for stack traces and logs. The wire format is `body`, which this never
- * touches: PostgREST clients read `message` from the JSON, while a program that catches the
- * error reads it from `Error.message` and wants the code and hint with it.
- */
-const describe = (b: ErrorBody): string =>
-  [`${b.code}:`, b.message, b.details ? `(${b.details})` : "", b.hint ? `hint: ${b.hint}` : ""]
-    .filter(Boolean)
-    .join(" ");
-
-/** An error that has already been mapped to an HTTP response. */
-export class ApiError extends Error {
-  readonly _tag = "ApiError";
-  readonly status: number;
-  readonly body: ErrorBody;
-  readonly headers: Readonly<Record<string, string>>;
-  constructor(fields: {
-    readonly status: number;
-    readonly body: ErrorBody;
-    readonly headers: Readonly<Record<string, string>>;
-  }) {
-    super(describe(fields.body));
-    this.name = "ApiError";
-    this.status = fields.status;
-    this.body = fields.body;
-    this.headers = fields.headers;
+    this.name = "EngineError";
   }
 }
 
 /** Failure talking to the database, carrying Postgres error fields. */
 export interface DbErrorInfo {
-  /** SQLSTATE, e.g. "23505", or a custom code such as "PT401" / "PGRST". */
+  /** SQLSTATE, e.g. "23505", or a code of your own raised with `RAISE`. */
   readonly sqlState: string;
   readonly message: string;
   readonly detail?: string | undefined;
@@ -111,111 +125,10 @@ export const normalizeDbError = (e: unknown): unknown => {
   return e;
 };
 
-/**
- * SQLSTATE → HTTP status, following the PostgREST 16 table
- * (https://docs.postgrest.org/en/v16/references/errors.html).
- */
-const statusFromSqlState = (state: string, role: string | undefined, anon: string | undefined): number => {
-  if (/^PT\d{3}$/.test(state)) return Number(state.slice(2));
-  switch (state) {
-    case "23503":
-    case "23505":
-      return 409;
-    case "25006":
-      return 405;
-    case "42883":
-    case "42P01":
-      return 404;
-    case "42P17":
-      return 500;
-    case "42501":
-      return role === anon ? 401 : 403;
-    case "P0001":
-      return 400;
-    case "53400":
-      return 500;
-  }
-  switch (state.slice(0, 2)) {
-    case "08":
-    case "53":
-      return 503;
-    case "0L":
-    case "0P":
-    case "28":
-      return 403;
-    case "09":
-    case "25":
-    case "2D":
-    case "38":
-    case "39":
-    case "3B":
-    case "40":
-    case "54":
-    case "55":
-    case "57":
-    case "58":
-    case "F0":
-    case "HV":
-    case "P0":
-    case "XX":
-      return 500;
-    default:
-      return 400;
-  }
-};
+const CONNECTION_ERROR = /^(ERR_POSTGRES_(CONNECTION|AUTH|TLS|IDLE|LIFETIME)|ECONN|ETIMEDOUT|EPIPE|ENOTFOUND)/;
 
-/**
- * Map a Postgres error to a PostgREST-style API error.
- *
- * Supports PostgREST's custom error conventions:
- * - `RAISE ... USING ERRCODE = 'PTxyz'` → HTTP status xyz
- * - `RAISE SQLSTATE 'PGRST'` with a JSON message/detail
- */
-export const dbErrorToApiError = (
-  err: DbErrorInfo,
-  role: string | undefined,
-  anonymousRole: string | undefined,
-): ApiError => {
-  if (err.sqlState === "PGRST") {
-    try {
-      const msg = JSON.parse(err.message) as Partial<ErrorBody>;
-      const det = err.detail
-        ? (JSON.parse(err.detail) as {
-            status?: number;
-            headers?: Record<string, string>;
-          })
-        : {};
-      return new ApiError({
-        status: det.status ?? 500,
-        headers: det.headers ?? {},
-        body: {
-          code: msg.code ?? "PGRST",
-          message: msg.message ?? "",
-          details: msg.details ?? null,
-          hint: msg.hint ?? null,
-        },
-      });
-    } catch {
-      return new ApiError({
-        status: 500,
-        headers: {},
-        body: {
-          code: "PGRST121",
-          message: "Could not parse JSON in the RAISE error",
-          details: err.message,
-          hint: null,
-        },
-      });
-    }
-  }
-  return new ApiError({
-    status: statusFromSqlState(err.sqlState, role, anonymousRole),
-    headers: {},
-    body: {
-      code: err.sqlState,
-      message: err.message,
-      details: err.detail ?? null,
-      hint: err.hint ?? null,
-    },
-  });
+/** True for what a driver throws when the database cannot be reached. */
+export const isConnectionError = (e: unknown): boolean => {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === "string" && CONNECTION_ERROR.test(code);
 };

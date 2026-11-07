@@ -1,5 +1,4 @@
 import type { DbAdapter } from "./adapter";
-import { ApiError, DbQueryError, PgRestError, dbErrorToApiError } from "./errors";
 import { type SchemaCache, introspect } from "./schema";
 
 /** The schema could not be read from the database catalog. */
@@ -40,31 +39,4 @@ export const createSchemaStore = async (db: DbAdapter, schemas: ReadonlyArray<st
       return run;
     },
   };
-};
-
-const CONNECTION_ERROR = /^(ERR_POSTGRES_(CONNECTION|AUTH|TLS|IDLE|LIFETIME)|ECONN|ETIMEDOUT|EPIPE|ENOTFOUND)/;
-
-/** Map anything thrown while handling a request to an {@link ApiError}. */
-export const toApiError = (e: unknown, role: string | undefined, anonymousRole: string | undefined): ApiError => {
-  if (e instanceof ApiError) return e;
-  if (e instanceof PgRestError) return new ApiError({ status: e.status, body: e.body, headers: e.headers });
-  if (e instanceof DbQueryError) return dbErrorToApiError(e, role, anonymousRole);
-  const code = (e as { code?: unknown } | null)?.code;
-  if (typeof code === "string" && CONNECTION_ERROR.test(code)) {
-    return new ApiError({
-      status: 503,
-      headers: {},
-      body: {
-        code: "PGRST001",
-        message: "Database connection failed",
-        details: e instanceof Error ? e.message : null,
-        hint: null,
-      },
-    });
-  }
-  return new ApiError({
-    status: 500,
-    headers: {},
-    body: { code: "PGRSTX00", message: "Internal error", details: null, hint: null },
-  });
 };

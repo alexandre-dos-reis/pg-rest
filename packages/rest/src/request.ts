@@ -1,4 +1,4 @@
-import { PgRestError } from "@tsql/core/errors";
+import { PgRestError } from "./errors";
 import { parseError } from "@tsql/core/parse/field";
 import type {
   Method,
