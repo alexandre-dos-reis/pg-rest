@@ -12,12 +12,12 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
   /** The rows an update returns. */
   const update = async (table: string, set: object, id: number, select: string[]) => {
     const r = await t.api.query({ table, action: "update", set, where: { id }, select } as never, authed());
-    if (r.error) throw new Error(JSON.stringify(r.error.body));
+    if (r.error) throw new Error(r.error.summary);
     return r.data;
   };
   const failure = async (set: object) => {
     const r = await t.api.query({ table: "orders", action: "update", set, where: { id: 4 } } as never, authed());
-    return r.error?.body;
+    return r.error;
   };
 
   test("a plain value is PostgREST's PATCH, unchanged", async () => {
@@ -114,20 +114,21 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
       { total: { $round: [1, 2, 3] } },
       { total: { $arrayAppend: [1] } },
     ]) {
-      const body = (await failure(set)) as { code: string } | undefined;
-      expect(body?.code).toBe("PGRST100");
+      expect((await failure(set))?.kind).toBe("invalid_query");
     }
   });
 
   test("mistakes are reported, not sent to the database", async () => {
-    expect(await failure({ total: { $evil: 1 } })).toMatchObject({ code: "PGRST100" });
-    expect(await failure({ total: { $add: [{ $col: "nope" }, 1] } })).toMatchObject({ code: "PGRST204" });
-    expect(await failure({ total: { $add: [{ $default: true }, 1] } })).toMatchObject({ code: "PGRST100" });
-    expect(await failure({ total: { $add: [1] } })).toMatchObject({ code: "PGRST100" });
-    expect(await failure({ total: { $cast: [1, "int; drop table api.orders"] } })).toMatchObject({ code: "PGRST100" });
-    expect(await failure({ $nope: 1 })).toMatchObject({ code: "PGRST100" });
+    expect(await failure({ total: { $evil: 1 } })).toMatchObject({ kind: "invalid_query" });
+    expect(await failure({ total: { $add: [{ $col: "nope" }, 1] } })).toMatchObject({ kind: "invalid_payload" });
+    expect(await failure({ total: { $add: [{ $default: true }, 1] } })).toMatchObject({ kind: "invalid_query" });
+    expect(await failure({ total: { $add: [1] } })).toMatchObject({ kind: "invalid_query" });
+    expect(await failure({ total: { $cast: [1, "int; drop table api.orders"] } })).toMatchObject({
+      kind: "invalid_query",
+    });
+    expect(await failure({ $nope: 1 })).toMatchObject({ kind: "invalid_query" });
     // a `$` object under a name that is not a column
-    expect(await failure({ nope: { $add: [1, 2] } })).toMatchObject({ code: "PGRST204" });
+    expect(await failure({ nope: { $add: [1, 2] } })).toMatchObject({ kind: "invalid_payload" });
   });
 
   test("a jsonb value whose keys start with $ is written with $val", async () => {

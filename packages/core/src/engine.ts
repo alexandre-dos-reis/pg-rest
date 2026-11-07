@@ -15,15 +15,15 @@ export interface EngineOptions {
   /** Schemas to expose. The first one is the default. Default `["public"]`. */
   readonly schemas?: ReadonlyArray<string>;
   /**
-   * Role used when the request context has none. Default `"anon"`. `false` refuses anonymous requests
-   * with `401 PGRST302` (like PostgREST without `db-anon-role`).
+   * Role used when the request context has none. Default `"anon"`. `false` refuses anonymous requests:
+   * a request with no role is an error (`unauthenticated` in `@tsql/query`, a `401` in `@tsql/rest`).
    */
   readonly anonymousRole?: string | false;
-  /** Maximum rows returned by a read (PostgREST `db-max-rows`). */
+  /** Maximum rows returned by a read. */
   readonly maxRows?: number;
   /** Appended to `search_path` after the selected schema. Default `["public"]`. */
   readonly extraSearchPath?: ReadonlyArray<string>;
-  /** A SQL function (`"auth.check_request"`) or callback to run before each request (PostgREST `db-pre-request`). */
+  /** A SQL function (`"auth.check_request"`) or callback to run before each request. */
   readonly preRequest?: CoreConfig["preRequest"];
 }
 

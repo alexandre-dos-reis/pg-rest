@@ -7,10 +7,17 @@ import {
   type TypedQueryInstance,
 } from "../../packages/query/src/index";
 import { introspect, toDescriptor } from "../../packages/core/src/schema";
-import { createRest, type RestInstance, type RestOptions } from "../../packages/rest/src/index";
+import {
+  ApiError,
+  DbQueryError,
+  PgRestError,
+  createRest,
+  type RestInstance,
+  type RestOptions,
+} from "../../packages/rest/src/index";
 
 export * from "../../packages/query/src/index";
-export { createRest, type RestInstance, type RestOptions };
+export { ApiError, DbQueryError, PgRestError, createRest, type RestInstance, type RestOptions };
 
 export type PgRestOptions = RestOptions;
 export type PgRestInstance = RestInstance & QueryInstance;

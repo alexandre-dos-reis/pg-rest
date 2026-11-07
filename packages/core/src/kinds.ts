@@ -1,24 +1,23 @@
-// What a `QueryError` says went wrong, as a closed set of strings: `@tsql/query`'s half of an error.
-// The body stays PostgREST's (see `@tsql/core/errors`); this classifies it. Two of the kinds, `no_context` and
-// `rolled_back`, name situations that only exist for `setContextQuery()` and `transaction()`.
+// What went wrong, as a closed set of strings: the classification `@tsql/query` reports as `QueryError.kind`.
+// It lives in the core because it reads the engine's own error codes (PostgREST's `PGRSTxxx`) and
+// SQLSTATEs; the package that exposes it never has to know either. `no_context` and `rolled_back` name
+// situations that only exist for `setContextQuery()` and `transaction()`, which create them directly.
+import { ApiError, PgRestError } from "./errors";
+import { toApiError } from "./service";
 
 /**
  * What went wrong, as one of a closed set of strings -- the thing a program switches on.
  *
- * The wire body stays PostgREST's (`code` is a `PGRSTxxx` code or a SQLSTATE, and there are
- * dozens), which is precise but not something code can branch on without a table of codes.
- * `kind` is that table: every error, from any layer, lands on exactly one of these, chosen so
- * each one calls for a different reaction rather than merely a different wording.
- *
- * The mapping is a widening, never a narrowing: `code` is still there for the exact reason, and a
- * `switch` on `kind` with a `default` keeps compiling if a later version maps a new code.
+ * Every error, from any layer, lands on exactly one of these, chosen so each one calls for a
+ * different reaction rather than merely a different wording. A `switch` on `kind` with a `default`
+ * keeps compiling if a later version maps a new case.
  */
-export type QueryErrorKind =
+export type ErrorKind =
   /** The query itself does not make sense: unknown operator, unparseable `select`, bad `order`, a filter on something that is not embedded. Fix the call. */
   | "invalid_query"
   /** The rows or the `set` do not fit the table: a column that does not exist, keys that differ between rows, an empty payload. */
   | "invalid_payload"
-  /** Nothing in the database answers to that name -- table, view or function. Often a typo (read the `hint`) or a schema reloaded late. */
+  /** Nothing in the database answers to that name -- table, view or function. Often a typo (read the `hint`) or a schema generated late. */
   | "undefined_object"
   /** The embedding could not be resolved: no relationship between the two resources, or more than one, which needs a `hint`. */
   | "invalid_embed"
@@ -34,9 +33,9 @@ export type QueryErrorKind =
   | "conflict"
   /** The database refused the values themselves: a check constraint, a NOT NULL, a failed cast, a bad datetime. */
   | "invalid_data"
-  /** Your own `RAISE` in SQL (`P0001`, `PTxyz`, `PGRST`): a business error, with the message you wrote. */
+  /** Your own `RAISE` in SQL: a business error, with the message you wrote. */
   | "raised"
-  /** The feature is not implemented, or not over this call: related ordering, aggregates in a spread, a media type `query()` cannot do. */
+  /** The feature is not implemented, or not over this call: related ordering, aggregates in a spread. */
   | "unsupported"
   /** The database could not be reached, is out of connections, or timed out. Retrying may work; nothing else here will. */
   | "unavailable"
@@ -44,11 +43,11 @@ export type QueryErrorKind =
   | "no_context"
   /** A transaction scope will not commit: `rollback()` was called, or a query in it already failed. Everything it did is undone. */
   | "rolled_back"
-  /** Anything left: a bug in pg-rest, or an error it did not foresee. The original is under `cause`. */
+  /** Anything left: a bug, or an error that was not foreseen. The original is under `cause`. */
   | "internal";
 
 /** The codes whose kind is not implied by their status. */
-const CODE_KINDS: Readonly<Record<string, QueryErrorKind>> = {
+const CODE_KINDS: Readonly<Record<string, ErrorKind>> = {
   // PGRST1xx -- the request
   PGRST100: "invalid_query",
   PGRST101: "invalid_query",
@@ -100,7 +99,7 @@ const CODE_KINDS: Readonly<Record<string, QueryErrorKind>> = {
 };
 
 /** SQLSTATE class (the first two characters) → kind, for the codes not named one by one. */
-const CLASS_KINDS: Readonly<Record<string, QueryErrorKind>> = {
+const CLASS_KINDS: Readonly<Record<string, ErrorKind>> = {
   "08": "unavailable",
   "0A": "unsupported",
   "0L": "forbidden",
@@ -114,11 +113,11 @@ const CLASS_KINDS: Readonly<Record<string, QueryErrorKind>> = {
 };
 
 /**
- * Classify an error body: the code when it says enough, its SQLSTATE class next, and the HTTP
+ * Classify an error from its HTTP status and code: the code when it says enough, its SQLSTATE class next, and the HTTP
  * status last -- which is what makes an unmapped code land somewhere sensible rather than on
  * `"internal"`.
  */
-export const errorKind = (status: number, code: string): QueryErrorKind => {
+export const errorKind = (status: number, code: string): ErrorKind => {
   const named = CODE_KINDS[code];
   if (named) return named;
   // `RAISE ... USING ERRCODE = 'PT404'` and `RAISE SQLSTATE 'PGRST'` are errors someone wrote
@@ -143,7 +142,7 @@ export const errorKind = (status: number, code: string): QueryErrorKind => {
   return status >= 500 ? "internal" : "invalid_query";
 };
 
-const KIND_SUMMARIES: Readonly<Record<QueryErrorKind, string>> = {
+const KIND_SUMMARIES: Readonly<Record<ErrorKind, string>> = {
   invalid_query: "the query is not valid",
   invalid_payload: "the payload does not fit the table",
   undefined_object: "no such table, view or function",
@@ -162,5 +161,33 @@ const KIND_SUMMARIES: Readonly<Record<QueryErrorKind, string>> = {
   internal: "unexpected internal error",
 };
 
-/** A few words naming a {@link QueryErrorKind}, for a log line or a message a person reads. */
-export const describeErrorKind = (kind: QueryErrorKind): string => KIND_SUMMARIES[kind];
+/** A few words naming an {@link ErrorKind}, for a log line or a message a person reads. */
+export const describeErrorKind = (kind: ErrorKind): string => KIND_SUMMARIES[kind];
+
+/** A failure as `@tsql/query` reports it: what the engine says, with nothing of the wire in it. */
+export interface Failure {
+  readonly kind: ErrorKind;
+  readonly message: string;
+  readonly details: string | null;
+  readonly hint: string | null;
+  /** The database's SQLSTATE, when the failure came from the database. */
+  readonly sqlState: string | undefined;
+  /** True when it was not one of the errors the engine raises on purpose: the original is worth keeping. */
+  readonly unexpected: boolean;
+}
+
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+
+/** Map anything the engine threw to a {@link Failure}. */
+export const describeFailure = (e: unknown, role: string | undefined, anonymousRole: string | undefined): Failure => {
+  const api = toApiError(e, role, anonymousRole);
+  const { code, message, details, hint } = api.body;
+  return {
+    kind: errorKind(api.status, code),
+    message,
+    details,
+    hint,
+    sqlState: SQLSTATE.test(code) ? code : undefined,
+    unexpected: api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError),
+  };
+};

@@ -69,11 +69,11 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | `packages/rest/src/render.ts` | the SQL of the formats beyond JSON — CSV, GeoJSON, custom media type handlers — and how a negotiated format becomes what the engine is told |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
-| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` and the instance: `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `query`, `setContextQuery`, `transaction`, `close` |
 | `packages/query/src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
 | `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
-| `packages/query/src/types.ts` | `generateTypes`, published as `@tsql/query/types`, loaded on demand |
+| `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tsql/query/types` |
 | `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
 | `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
@@ -90,17 +90,19 @@ with no build of its own; `tsdown` bundles it into each published package, which
 
 ## The schema cache
 
-`createRest` and `createQuery` each introspect `pg_catalog` once, so a connection or catalog problem surfaces at startup. The cache holds
+`createRest` introspects `pg_catalog` at startup, so a connection or catalog problem surfaces there. `createQuery` does not:
+it runs on a **schema descriptor**, the same cache as plain data, written at build time by `generateModule()` and read
+back by `fromDescriptor()` without any check — the compiler is what holds a query to it. The cache holds
 relations with their columns (types, nullability, defaults, identity, enum labels, the table column a view column is
 read from), primary keys and unique constraints, what each relation accepts (`pg_relation_is_updatable`), foreign keys —
 **including the ones that travel through views** — functions with their arguments and return shapes, and the custom
 media type handlers.
 
-It is what every later decision reads: whether a table exists (`PGRST205`, with a did-you-mean), whether an embed
+It is what every later decision reads: whether a table exists (with a did-you-mean), whether an embed
 resolves and in which direction, what an insert may contain, which arguments a function overload takes — and it is what
-`generateTypes()` describes, which is why the types cannot disagree with the runtime.
+`generateModule()` describes, which is why the types cannot disagree with the runtime.
 
-`reloadSchema()` re-reads it. Reloads are serialised, and a failed one keeps the previous cache rather than leaving the
+`reloadSchema()` of `createRest` re-reads it; for `createQuery`, regenerate the module. Reloads are serialised, and a failed one keeps the previous cache rather than leaving the
 handler without one.
 
 ## Errors
@@ -110,8 +112,10 @@ normalised by SQLSTATE from whatever the driver throws. At the boundary, `toApiE
 failures and unexpected errors — to an `ApiError`: a status and a body shaped exactly like PostgREST's
 `{ code, message, details, hint }`.
 
-Then it is only a matter of how it reaches you: `handle()` serialises it into a response, `query()` puts a `QueryError`
-with the input attached in the `error` of its result. One mapping, two deliveries — neither of them a rejection.
+Then it is only a matter of how it reaches you: `handle()` serialises it into a response. `query()` never sees an
+`ApiError`: `describeFailure` in `core/kinds.ts` classifies the same failure as a `kind` and hands over its `message`,
+`details`, `hint` and SQLSTATE, and `QueryError` puts them, with the input attached, in the `error` of its result.
+Neither is a rejection.
 
 ## Invariants worth knowing
 

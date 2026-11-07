@@ -35,7 +35,7 @@ export interface PreRequestInfo {
 
 export interface CoreConfig {
   readonly schemas: ReadonlyArray<string>;
-  /** Role for requests without one; `undefined` refuses anonymous access (PGRST302). */
+  /** Role for requests without one; `undefined` refuses anonymous access. */
   readonly anonymousRole: string | undefined;
   readonly maxRows?: number | undefined;
   readonly extraSearchPath: ReadonlyArray<string>;

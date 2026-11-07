@@ -75,7 +75,7 @@ export type Database = {
 | `insert` | what a write accepts: a generated or `GENERATED ALWAYS AS IDENTITY` column is **absent**, one with a default or a nullable one is optional. `never` when the relation cannot be written |
 | `update` | the same, all optional |
 | `pk`, `insertable`, `updatable`, `deletable` | the primary key, and what `pg_relation_is_updatable` says the relation accepts |
-| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the request path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the request will need one (`PGRST201`) |
+| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the query path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the query will need one (an `invalid_embed` error otherwise) |
 | `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, or `null` for `void` |
 | enums | the labels, as a union — `"sad" \| "ok" \| "happy"`, and `("sad" \| "ok")[]` for an array of them |
 | composite types | a named type per [composite type](https://www.postgresql.org/docs/current/rowtypes.html) the schema reaches, nesting included — see [below](#composite-types) |

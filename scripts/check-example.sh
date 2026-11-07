@@ -34,7 +34,7 @@ if [ ! -f server.ts ]; then
   case "$name" in
     with-generated-types)
       check "a typed read" "Try pg-rest (high) demo, types" "$(echo "$out" | grep -o 'Try pg-rest (high) demo, types')"
-      check "a typed insert" 201 "$(echo "$out" | grep -o 'created 201' | grep -o 201)"
+      check "a typed insert" ok "$(echo "$out" | grep -o '^created ok' | grep -o ok)"
       check "a typed rpc" 2 "$(echo "$out" | grep -c "^rpc open_todos:\|^single:")"
       ;;
     with-transactions)
@@ -42,9 +42,9 @@ if [ ! -f server.ts ]; then
       check "an overdraft rolls the scope back" "2 refused 23514 invalid_data -> alice-main 60, bob-main 140" "$(line 2)"
       check "the claims apply to the whole scope" "3 rls 42501 forbidden -> alice-main 60, bob-main 140" "$(line 3)"
       check "a savepoint undoes one transfer, not the batch" "4 batch kept 2 refused b (23514) -> alice-main 75, bob-main 125" "$(line 4)"
-      check "rollback() leaves nothing behind" "5 dry run PGRSTX02 ledger 3 -> 3" "$(line 5)"
+      check "rollback() leaves nothing behind" "5 dry run rolled_back ledger 3 -> 3" "$(line 5)"
       check "a read-only serializable snapshot" "6 report held 200 moved 55" "$(line 6)"
-      check "no ambient context is refused before the BEGIN" "7 no context PGRSTX01 no_context" "$(line 7)"
+      check "no ambient context is refused before the BEGIN" "7 no context no_context" "$(line 7)"
       ;;
     *) echo "FAIL $name: no output checks for this example"; fail=1 ;;
   esac

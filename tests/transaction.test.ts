@@ -47,7 +47,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     expect(r.error).toBeNull();
     expect(r.data).toEqual({ client: expect.any(Number), orders: 1 });
     expect(r.count).toBeUndefined();
-    expect(r.status).toBe(200);
+    expect(r.error).toBeNull();
     expect(await names()).toContain("Ada");
   });
 
@@ -61,7 +61,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     }, authed());
 
     expect(r.data).toBeNull();
-    expect(r.error?.body.code).toBe("23505");
+    expect(r.error?.sqlState).toBe("23505");
     expect(r.error?.kind).toBe("conflict");
     // the error is the query's own, so it names the input that produced it
     expect(r.error?.input).toMatchObject({ table: "clients", action: "insert" });
@@ -82,7 +82,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     }, authed());
 
     expect(seen).toBe("not_single_row");
-    expect(r.error?.body.code).toBe("PGRST116");
+    expect(r.error?.kind).toBe("not_single_row");
   });
 
   test("a throw rolls the whole scope back", async () => {
@@ -94,8 +94,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     }, authed());
 
     expect(r.data).toBeNull();
-    expect(r.error?.status).toBe(500);
-    expect(r.error?.body.code).toBe("PGRSTX00");
+    expect(r.error?.kind).toBe("internal");
     expect((r.error!.cause as Error).message).toBe("no");
     expect(r.error?.summary).toStartWith("transaction failed:");
     expect(await names()).toEqual(before);
@@ -109,7 +108,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
       tx.rollback();
     }, authed());
 
-    expect(r.error?.body.code).toBe("PGRSTX02");
+    expect(r.error?.kind).toBe("rolled_back");
     expect(r.error?.kind).toBe("rolled_back");
     expect(await names()).toEqual(before);
   });
@@ -117,7 +116,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
   test("a failure swallowed by the callback still cannot commit", async () => {
     t = await makeApi();
     const before = await names();
-    // PGRST116 is raised by the library *after* a statement that worked: nothing aborted the
+    // `not_single_row` is raised by the library *after* a statement that worked: nothing aborted the
     // transaction, so the write before it would commit if the scope did not refuse to. Reaching
     // this needs a deliberate catch, which is the only way past `tx.query` leaving.
     const r = await t.api.transaction(async (tx) => {
@@ -131,7 +130,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     }, authed());
 
     expect(r.data).toBeNull();
-    expect(r.error?.body.code).toBe("PGRST116");
+    expect(r.error?.kind).toBe("not_single_row");
     expect(await names()).toEqual(before);
   });
 
@@ -143,19 +142,19 @@ describe.skipIf(!hasDb)("transaction()", () => {
       try {
         await tx.query({ table: "clients", action: "insert", rows: { name: "b", email: "dup@x.com" } });
       } catch (e) {
-        seen.push((e as QueryError).body.code);
+        seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
       try {
         await tx.query({ table: "clients", select: ["id"] });
       } catch (e) {
-        seen.push((e as QueryError).body.code);
+        seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
       return "returned";
     }, authed());
 
-    expect(seen).toEqual(["23505", "PGRSTX03"]);
+    expect(seen).toEqual(["23505", "rolled_back"]);
     expect(r.data).toBeNull();
-    expect(r.error?.body.code).toBe("23505");
+    expect(r.error?.sqlState).toBe("23505");
   });
 
   test("a nested scope is a savepoint: it fails on its own and the scope goes on", async () => {
@@ -169,7 +168,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
       const dup = await tx.transaction((inner) =>
         inner.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "ada@x.com" } }),
       );
-      seen.push(dup.error?.body.code);
+      seen.push(dup.error?.sqlState);
 
       const kept = await tx.transaction(async (inner) => {
         await inner.query({ table: "clients", action: "insert", rows: { name: "Bob", email: "bob@x.com" } });
@@ -199,11 +198,11 @@ describe.skipIf(!hasDb)("transaction()", () => {
         await nested.query({ table: "clients", action: "insert", rows: { name: "Dropped" } });
         nested.rollback();
       });
-      nestedCode = inner.error?.body.code;
+      nestedCode = inner.error?.kind;
       return "done";
     }, authed());
 
-    expect(nestedCode).toBe("PGRSTX02");
+    expect(nestedCode).toBe("rolled_back");
     expect(r.data).toBe("done");
     const after = await names();
     expect(after).toContain("Kept");
@@ -282,9 +281,9 @@ describe.skipIf(!hasDb)("transaction()", () => {
       { ...authed(), readOnly: true },
     );
 
-    // 25006 read_only_sql_transaction, which PostgREST answers 405 to
-    expect(r.error?.body.code).toBe("25006");
-    expect(r.error?.status).toBe(405);
+    // 25006 read_only_sql_transaction
+    expect(r.error?.sqlState).toBe("25006");
+    expect(r.error?.kind).toBe("unsupported");
   });
 
   test("the isolation level is the scope's too", async () => {
@@ -343,7 +342,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     const [a, b] = await Promise.all([scope("one"), scope("two")]);
     const failed = [a, b].filter((r) => r.error);
     expect(failed).toHaveLength(1);
-    expect(failed[0]!.error?.body.code).toBe("40001");
+    expect(failed[0]!.error?.sqlState).toBe("40001");
     expect(await names()).toHaveLength(seeded + 1); // only the scope that was not refused committed
   });
 
@@ -373,19 +372,19 @@ describe.skipIf(!hasDb)("transaction()", () => {
 
     const once = await t.api.transaction(fn, authed());
     expect(runs).toBe(1);
-    expect(once.error?.body.code).toBe("40001");
+    expect(once.error?.sqlState).toBe("40001");
 
     runs = 0;
     const retried = await t.api.transaction(fn, { ...authed(), retry: { attempts: 3, delayMs: 1 } });
     // the 'attempt' rows never commit, so the function keeps raising: three runs, then the failure
     expect(runs).toBe(3);
-    expect(retried.error?.body.code).toBe("40001");
+    expect(retried.error?.sqlState).toBe("40001");
 
     // `on` names what is worth replaying: a deadlock is not a serialization failure
     runs = 0;
     const other = await t.api.transaction(fn, { ...authed(), retry: { attempts: 3, on: ["40P01"] } });
     expect(runs).toBe(1);
-    expect(other.error?.body.code).toBe("40001");
+    expect(other.error?.sqlState).toBe("40001");
   });
 
   test("anonymous access disabled is refused before the BEGIN", async () => {
@@ -395,7 +394,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
       entered = true;
     });
     expect(entered).toBe(false);
-    expect(r.error?.body.code).toBe("PGRST302");
+    expect(r.error?.kind).toBe("unauthenticated");
   });
 
   test("the bound form reads its source once, on entry", async () => {
@@ -410,7 +409,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
 
     // outside the store there is nothing to read, and no transaction is opened
     const outside = await bound.transaction(async () => 1);
-    expect(outside.error?.body.code).toBe("PGRSTX01");
+    expect(outside.error?.kind).toBe("no_context");
     expect(outside.error?.kind).toBe("no_context");
 
     // readOnly alone keeps the ambient context; a role replaces it for the whole scope

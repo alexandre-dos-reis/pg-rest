@@ -45,7 +45,7 @@ reference lives in `docs/`.
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery`, `QueryInstance`, the public types |
 | `packages/query/src/query.ts` | `query(input)`: the object API, in-process, no `Request` (see below) |
-| `packages/query/src/kinds.ts` | `QueryErrorKind` and `errorKind(status, code)`: how a `QueryError` is classified |
+| `packages/core/src/kinds.ts` | `ErrorKind`, `errorKind(status, code)` and `describeFailure`: how an engine error becomes the `kind` of a `QueryError`. The only place `@tsql/query`'s errors meet the engine's codes |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
 | `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns an `Outcome`: status, headers, body), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies are `rest`'s |
@@ -135,9 +135,10 @@ Releases carry provenance, so they are attested to the workflow that built them.
   inference. Identifiers go through `packages/core/src/quote.ts`. Never interpolate request data into SQL. `tests/security.test.ts` covers this; extend it.
 - **Errors.** Throw `ApiError` (status, PostgREST-shaped body, headers). `body` is the wire format and must stay exactly
   PostgREST's; `Error.message` is a human summary (code, details, hint) and is free to change. `query()` returns a
-  `QueryError` carrying the same body plus the input, a `summary` naming the call it came from, and a `kind`
-  (`QueryErrorKind` in `packages/query/src/kinds.ts`: the switchable string union every code maps onto, via `errorKind(status, code)`),
-  as the `error` of its result -- it never throws. A new `PGRSTxxx` code needs an entry in `CODE_KINDS`, or it falls back
+  `QueryError` of its own -- `kind`, `message`, `details`, `hint`, the `sqlState` of a database error, the input and a `summary` --
+  as the `error` of its result; it never throws. `packages/query/src` must not mention PostgREST, `PGRSTxxx` codes, `ApiError`
+  or HTTP statuses: the mapping lives in `packages/core/src/kinds.ts` (`ErrorKind`, the switchable string union every code maps onto,
+  via `errorKind(status, code)`). A new `PGRSTxxx` code needs an entry in `CODE_KINDS` of `kinds.ts`, or it falls back
   to its SQLSTATE class and then its status; adding a *kind* is a breaking-ish widening, so prefer an existing one. Database errors become `DbQueryError` in the adapter and are mapped by
   SQLSTATE in `normalizeDbError`. If a new driver reports errors differently, fix it in the adapter or in `normalizeDbError`, not in the core.
 - **Adding an adapter** = implement `DbAdapter` (`query`, `transaction`, optional `close`) in `packages/core/src/adapters/`, add a subpath entry in both

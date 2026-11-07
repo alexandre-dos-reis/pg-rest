@@ -18,7 +18,7 @@ await asUser("alice", async () => {
 //    the ledger row never happen: the balances are exactly what they were.
 await asUser("alice", async () => {
   const { error } = await transfer({ payer: "alice-main", payee: "bob-main", amount: 1000, memo: "yacht" });
-  console.log(`2 refused ${error?.body.code} ${error?.kind} -> ${await balances()}`);
+  console.log(`2 refused ${error?.sqlState} ${error?.kind} -> ${await balances()}`);
 });
 
 // 3. The claims are set once, at the head of the transaction, and RLS reads them for the whole of
@@ -26,7 +26,7 @@ await asUser("alice", async () => {
 //    the two balance updates are undone with it.
 await asUser("bob", async () => {
   const { error } = await transfer({ payer: "alice-main", payee: "bob-main", amount: 10, memo: "helping myself" });
-  console.log(`3 rls ${error?.body.code} ${error?.kind} -> ${await balances()}`);
+  console.log(`3 rls ${error?.sqlState} ${error?.kind} -> ${await balances()}`);
 });
 
 // 4. A batch in one transaction, each transfer in its own savepoint: the middle one overdraws and
@@ -45,7 +45,7 @@ await asUser("bob", async () => {
 await asUser("alice", async () => {
   const before = await ledgerCount();
   const { error } = await dryRun({ payer: "alice-main", payee: "bob-main", amount: 1, memo: "just looking" });
-  console.log(`5 dry run ${error?.body.code} ledger ${before} -> ${await ledgerCount()}`);
+  console.log(`5 dry run ${error?.kind} ledger ${before} -> ${await ledgerCount()}`);
 });
 
 // 6. A read-only, serializable snapshot: nothing in it can write, by construction.
@@ -59,7 +59,7 @@ await asUser("alice", async () => {
 //    rather than quietly running as the anonymous role, which is how a missing middleware becomes
 //    an incident instead of an error.
 const forgotten = await transfer({ payer: "alice-main", payee: "bob-main", amount: 1 });
-console.log(`7 no context ${forgotten.error?.body.code} ${forgotten.error?.kind}`);
+console.log(`7 no context ${forgotten.error?.kind}`);
 
 await pgRest.close();
 await pglite.close();

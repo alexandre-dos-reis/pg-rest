@@ -196,7 +196,7 @@ const embeds = (cache: SchemaCache, rel: Relation): Array<[string, string]> => {
     const first = usable[0]!;
     const to = first.kind === "o2m" || first.kind === "m2m" ? "many" : "one";
     const hints = usable.map((r) => JSON.stringify(r.fk.name)).join(", ");
-    // more than one relationship means the request has to carry a hint (PGRST201)
+    // more than one relationship means the request has to carry a hint
     const ambiguous = usable.length > 1 ? `; ambiguous: true; hints: [${hints}]` : "";
     out.push([target, `{ rel: ${JSON.stringify(first.to.name)}; to: ${JSON.stringify(to)}${ambiguous} }`]);
   }

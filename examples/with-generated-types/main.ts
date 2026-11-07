@@ -34,14 +34,14 @@ const { data: urgent } = await pgRest.query({
 });
 console.log("high priority:", urgent);
 
-const { data: created, status } = await pgRest.query({
+const { data: created, error: createFailed } = await pgRest.query({
   table: "todos",
   action: "insert", //                           "select" (the default) | "insert" | "upsert" | "update" | "delete"
   rows: { title: "Generated types", priority: "high" }, //  the insert shape: `title` is required, `id` is generated and absent
   select: ["id", "priority"], //                 what a write gives back, when it gives anything
 });
 // created: Array<{ id: number; priority: "low" | "normal" | "high" }>
-console.log(`created ${status}:`, created);
+console.log(`created ${createFailed ? createFailed.kind : "ok"}:`, created);
 
 // A composite column is an object, both ways: its fields are typed, and a value being written or
 // compared may leave some out -- the ones left out are NULL, as they would be in a row literal.
@@ -74,7 +74,7 @@ const one = await pgRest.query({
   table: "todos",
   select: ["title", { tags: { as: "some", select: ["label"] } }],
   where: { id: 1 },
-  single: true, //                               one object instead of an array (406 PGRST116 if there is not exactly one)
+  single: true, //                               one object instead of an array (`not_single_row` if there is not exactly one)
 });
 if (one.error) throw one.error;
 // one.data: { title: string }

@@ -12,15 +12,14 @@ import {
   transactionSetup,
   useSchema,
 } from "@tsql/core/core";
-import { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
-import { type QueryErrorKind, describeErrorKind, errorKind } from "./kinds";
+import { DbQueryError } from "@tsql/core/errors";
+import { type ErrorKind, describeErrorKind, describeFailure } from "@tsql/core/kinds";
 import type { Operator } from "@tsql/core/parse/filter";
 import { FTS_ORDER, OPERATORS_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
 import { compileSet } from "@tsql/core/sql/expression";
 import { ROOT_ALIAS } from "@tsql/core/sql/read";
 import type { Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
-import { toApiError } from "@tsql/core/service";
 import type { JsonObject } from "@tsql/core/sql/write";
 
 // ---------------------------------------------------------------------------
@@ -47,8 +46,7 @@ export interface CompositeValue {
 export type FilterValue = Scalar | CompositeValue;
 
 /**
- * The PostgREST filter operators (https://docs.postgrest.org/en/v16/references/api/tables_views.html#operators).
- * The same type the parser works with, from the one list in `parse/syntax.ts`.
+ * The filter operators: the same type the parser works with, from the one list in `parse/syntax.ts`.
  */
 export type FilterOp = Operator;
 
@@ -154,9 +152,9 @@ export interface DefaultValue {
 
 /**
  * The columns an update changes, and only those: the keys are the columns of the table. A plain value
- * is PostgREST's own `PATCH` body; an {@link Expression} or {@link DefaultValue} computes it in the
+ * is stored as it is; an {@link Expression} or {@link DefaultValue} computes it in the
  * database. An object whose keys all start with `$` is an expression -- to store a `jsonb` value like
- * that, wrap it in `{ $val: … }`. The expressions are only available through `query()`.
+ * that, wrap it in `{ $val: … }`.
  */
 export interface SetInput {
   readonly [column: string]: unknown;
@@ -205,7 +203,7 @@ interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
   readonly select?: Select | undefined;
-  /** Return one object instead of an array. 0 or 2+ rows is a 406 `PGRST116`, like `vnd.pgrst.object+json`. */
+  /** Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
   readonly count?: "exact" | "planned" | "estimated" | undefined;
@@ -283,8 +281,6 @@ export interface QueryOk<T = unknown, C extends number | undefined = number | un
   readonly data: T;
   /** Rows matching the filters, ignoring `limit`/`offset`; `undefined` unless `count` asked for one. */
   readonly count: C;
-  /** The status the same call would answer with over HTTP (201 after an insert, 204 after a minimal write...). */
-  readonly status: number;
   /** Always `null` here: `if (error)` is what separates the two halves. */
   readonly error: null;
 }
@@ -293,7 +289,6 @@ export interface QueryOk<T = unknown, C extends number | undefined = number | un
 export interface QueryFailed {
   readonly data: null;
   readonly count: undefined;
-  readonly status: number;
   readonly error: QueryError;
 }
 
@@ -317,44 +312,61 @@ const operationOf = (input: QueryInput): string => {
  * what to do about it, and the classification last -- so the first line alone is useful in a log
  * that cuts the rest off.
  */
-const explain = (input: QueryInput, api: ApiError, kind: QueryErrorKind): string =>
+const explain = (input: QueryInput, f: Fields, kind: ErrorKind): string =>
   [
-    `${operationOf(input)} failed: ${api.body.message || describeErrorKind(kind)}`,
-    api.body.details ? `  details: ${api.body.details}` : "",
-    api.body.hint ? `  hint: ${api.body.hint}` : "",
-    `  kind: ${kind} -- ${describeErrorKind(kind)} (${api.body.code}, HTTP ${api.status})`,
+    `${operationOf(input)} failed: ${f.message || describeErrorKind(kind)}`,
+    f.details ? `  details: ${f.details}` : "",
+    f.hint ? `  hint: ${f.hint}` : "",
+    `  kind: ${kind} -- ${describeErrorKind(kind)}${f.sqlState ? ` (${f.sqlState})` : ""}`,
   ]
     .filter(Boolean)
     .join("\n");
 
-/** A query that failed, with the PostgREST error body and the input that produced it. */
-export class QueryError extends ApiError {
+/** What a {@link QueryError} is made of, besides the input. */
+interface Fields {
+  readonly kind: ErrorKind;
+  readonly message: string;
+  readonly details?: string | null | undefined;
+  readonly hint?: string | null | undefined;
+  readonly sqlState?: string | undefined;
+}
+
+/** A query that failed, with what went wrong and the input that produced it. */
+export class QueryError extends Error {
   /**
    * What went wrong, as one string out of a closed union: the thing to `switch` on. The exact
-   * reason stays in `body.code`; this is the handful of cases that call for different reactions.
+   * reason is in `message`, `details`, `hint` and, for a database error, `sqlState`.
    */
-  readonly kind: QueryErrorKind;
+  readonly kind: ErrorKind;
+  /** What the database or the parser said was wrong, when it said more than `message`. */
+  readonly details: string | null;
+  /** What to do about it, when the database or the parser knew. */
+  readonly hint: string | null;
+  /** The database's SQLSTATE (`23505`, `42501`...), for a failure that came from the database. */
+  readonly sqlState: string | undefined;
 
   /**
    * The same failure written out for whoever reads the log: the call it came from, then what the
    * database or the parser said, then `details`, `hint` and the kind, each on its own line.
    *
-   * `message` is left as it is -- one line, prefixed with the code, the summary `ApiError` builds
-   * for a response -- because something somewhere reads it, and a multi-line `Error.message` is
-   * not what a log collector expects. This is the readable form, and it is opt-in.
+   * `message` is left as the database or the parser said it -- one line, which is what a log
+   * collector expects of an `Error.message`. This is the readable form, and it is opt-in.
    */
   readonly summary: string;
 
   constructor(
     readonly input: QueryInput,
-    api: ApiError,
+    fields: Fields,
     options?: { readonly cause?: unknown },
   ) {
-    super({ status: api.status, body: api.body, headers: api.headers });
+    super(fields.message);
     this.name = "QueryError";
-    this.kind = errorKind(api.status, api.body.code);
+    this.kind = fields.kind;
+    this.details = fields.details ?? null;
+    this.hint = fields.hint ?? null;
+    this.sqlState = fields.sqlState;
     // a caller of query() holds the input too, which is what lets the explanation name the call
-    this.summary = explain(input, api, this.kind);
+    this.summary = explain(input, fields, this.kind);
     if (options?.cause !== undefined) this.cause = options.cause;
   }
 }
@@ -368,14 +380,24 @@ const OPS: ReadonlySet<string> = new Set<FilterOp>(OPERATORS_ORDER);
 /** Inside a list or a logic tree these read as something other than text, so such a string is quoted. */
 const KEYWORDS: ReadonlySet<string> = new Set(["null", "true", "false", "unknown"]);
 
-const bad = (message: string, hint?: string): PgRestError =>
-  new PgRestError(400, "PGRST100", message, null, hint ?? null);
+/** The query itself is wrong. Thrown while the input is turned into a statement, and mapped to `invalid_query`. */
+class BadQuery extends Error {
+  constructor(
+    message: string,
+    readonly hint: string | null,
+  ) {
+    super(message);
+    this.name = "BadQuery";
+  }
+}
+
+const bad = (message: string, hint?: string): BadQuery => new BadQuery(message, hint ?? null);
 
 /**
  * Render a value the way the query string carries it. A lone value is taken verbatim --
  * `name=eq.a,b` is the text `a,b` and `name=eq.null` is the text `null`, which is why
  * only a *delimited* context (a list or a logic tree, where `,` `)` and `.` separate)
- * needs quoting. `tests/compare` pins both against PostgREST.
+ * needs quoting. `tests/compare` pins both.
  */
 const lit = (v: FilterValue | undefined, delimited: boolean): string => {
   if (v === undefined || v === null) return "null";
@@ -659,7 +681,7 @@ const writes = (input: QueryInput): boolean => {
 
 /**
  * Unlike HTTP, a write defaults to returning its rows: a function that gives nothing back
- * is of little use in a program. `returning: "minimal"` is PostgREST's own default.
+ * is of little use in a program. `returning: "minimal"` gives nothing back.
  */
 const returningOf = (input: QueryInput): "representation" | "minimal" | undefined => {
   if (!writes(input)) return undefined;
@@ -703,7 +725,7 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
   let qp: QueryParams = { params: toParams(input), bare: new Set<string>() };
   let body = bodyOf(input);
   if (!isRpc(input) && "action" in input && input.action === "update") {
-    // the expressions of `set` are an extension of PostgREST's PATCH: compiled here, the plain values stay the JSON body
+    // the expressions of `set` are compiled here, the plain values stay the JSON body
     const set = compileSet(input.set, getRelation(env.cache, schema, input.table), ROOT_ALIAS);
     body = { kind: "json", value: set.plain };
     qp = { ...qp, setClauses: set.clauses };
@@ -713,20 +735,18 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
     ? planRpc(env, method, schema, input.rpc, qp, prefer, format, undefined, body)
     : planTable(env, method, schema, input.table, qp, prefer, format, undefined, body);
 
-  // no HTTP, so none of the request.* settings: they are PostgREST's HTTP contract, and @tsql/rest's
+  // there is no request, so no `request.*` settings
   const caller: Caller = { path: isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}` };
   const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, false, undefined);
 
   return {
     data: outcome.text === "" ? null : (JSON.parse(outcome.text) as unknown),
     count: totalOf(outcome.headers),
-    status: outcome.status,
   };
 };
 
 /**
- * Run a query described by an object, in-process. Same parser, same SQL and same errors as
- * {@link handleRequest}: only the HTTP envelope is gone.
+ * Run a query described by an object, in-process. Nothing here is HTTP: no request, no URL, no status.
  *
  * **This never rejects.** Every failure, including one the library did not foresee, comes back as
  * the `error` of the result, so a caller that checks it needs no `try`/`catch` at all.
@@ -741,37 +761,28 @@ export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext 
 
 /**
  * Map anything thrown into the failed half of a result, the way `query()` does: a `QueryError`
- * keeps the input it already names, a `PgRestError` keeps its status and body, and anything else
- * becomes a 500 with the original under `cause`.
+ * keeps the input it already names, and anything the engine or the parser raised becomes a kind.
+ * What nobody foresaw is `internal`, with the original under `cause`.
  */
 const failureOf = (env: Env, ctx: RequestContext, input: QueryInput, e: unknown): QueryFailed => {
   if (e instanceof QueryError) return toFailedResult(e.input, e);
-  const api = toApiError(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
-  // An unexpected error keeps its stack under `cause`; over HTTP it would only be a 500 body.
-  const unexpected = api.status >= 500 && !(e instanceof PgRestError) && !(e instanceof ApiError);
-  return toFailedResult(input, new QueryError(input, api, unexpected ? { cause: e } : undefined));
+  if (e instanceof BadQuery)
+    return toFailedResult(input, new QueryError(input, { kind: "invalid_query", message: e.message, hint: e.hint }));
+  const f = describeFailure(e, ctx.role ?? env.config.anonymousRole, env.config.anonymousRole);
+  // An unexpected error keeps its stack under `cause`: the message alone would not say where it came from.
+  return toFailedResult(input, new QueryError(input, f, f.unexpected ? { cause: e } : undefined));
 };
 
 /**
  * Turn anything at all into the failed half of a {@link QueryResult}. `runQuery` maps what it can;
- * whatever it could not still arrives, as the body PostgREST answers a 500 with and the original
- * error under `cause`. Nothing is logged and nothing is dropped: `error` is the only channel, so
- * the caller decides what to do with it.
+ * whatever it could not still arrives, as an `internal` error with the original under `cause`.
+ * Nothing is logged and nothing is dropped: `error` is the only channel, so the caller decides what
+ * to do with it.
  */
 export const toFailedResult = (input: QueryInput, e: unknown): QueryFailed => {
   const error =
-    e instanceof QueryError
-      ? e
-      : new QueryError(
-          input,
-          new ApiError({
-            status: 500,
-            headers: {},
-            body: { code: "PGRSTX00", message: "Internal error", details: null, hint: null },
-          }),
-          { cause: e },
-        );
-  return { data: null, count: undefined, status: error.status, error };
+    e instanceof QueryError ? e : new QueryError(input, { kind: "internal", message: "Internal error" }, { cause: e });
+  return { data: null, count: undefined, error };
 };
 
 // ---------------------------------------------------------------------------
@@ -812,19 +823,12 @@ export interface ContextQuery {
 export const noContextResult = (input: QueryInput): QueryFailed =>
   toFailedResult(
     input,
-    new QueryError(
-      input,
-      new ApiError({
-        status: 500,
-        headers: {},
-        body: {
-          code: "PGRSTX01",
-          message: "No request context",
-          details: "The context source of setContextQuery() returned nothing",
-          hint: "Run the query inside the scope that provides it, or pass a context as the second argument",
-        },
-      }),
-    ),
+    new QueryError(input, {
+      kind: "no_context",
+      message: "No request context",
+      details: "The context source of setContextQuery() returned nothing",
+      hint: "Run the query inside the scope that provides it, or pass a context as the second argument",
+    }),
   );
 
 /** Resolve a {@link ContextSource} for one call; `undefined` means it had nothing to give. */
@@ -881,7 +885,7 @@ export interface TransactionOptions extends RequestContext {
  */
 export interface Transaction {
   /**
-   * Run a query in this transaction: same parser, same SQL, same errors as `query()`. What differs
+   * Run a query in this transaction: same SQL and the same errors as `query()`. What differs
    * is the failure, and for one reason -- a query that failed is a transaction that will not
    * commit, so there is nothing for the rest of the callback to do with it.
    *
@@ -932,11 +936,11 @@ class AbortScope extends Error {
   }
 }
 
-const scopeError = (code: string, message: string, details: string | null, hint: string | null): QueryError =>
-  new QueryError(TRANSACTION, new ApiError({ status: 500, headers: {}, body: { code, message, details, hint } }));
+const scopeError = (message: string, details: string | null, hint: string | null): QueryError =>
+  new QueryError(TRANSACTION, { kind: "rolled_back", message, details, hint });
 
-const scopeFailure = (code: string, message: string, details: string | null, hint: string | null): QueryFailed =>
-  toFailedResult(TRANSACTION, scopeError(code, message, details, hint));
+const scopeFailure = (message: string, details: string | null, hint: string | null): QueryFailed =>
+  toFailedResult(TRANSACTION, scopeError(message, details, hint));
 
 /** The first failure in a scope: it cannot commit any more, and says so rather than answering `25P02`. */
 interface ScopeState {
@@ -949,7 +953,6 @@ type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: fals
 const okResult = <A>(value: A): QueryResult<A, undefined> => ({
   data: value,
   count: undefined,
-  status: 200,
   error: null,
 });
 
@@ -971,9 +974,8 @@ const runScope = async <A>(
   // beats passing that on -- and the scope cannot commit either way.
   const refused = (): QueryError =>
     scopeError(
-      "PGRSTX03",
       "Transaction already failed",
-      `An earlier query in this transaction failed (${state.failed!.body.code}), so it will roll back`,
+      `An earlier query in this transaction failed (${state.failed!.sqlState ?? state.failed!.kind}), so it will roll back`,
       "Wrap the queries allowed to fail in tx.transaction(), which runs them in a savepoint of their own",
     );
 
@@ -983,7 +985,7 @@ const runScope = async <A>(
     ): Promise<QueryOk<T, C>> => {
       if (state.failed) throw refused();
       const result = (await runQuery(env, input, ctx)) as QueryResult<T, C>;
-      // A failure the library raised to undo its own write (PGRST116, PGRST124) did not abort
+      // A failure the library raised to undo its own write (`not_single_row`, `too_many_affected`) did not abort
       // anything by itself, so the scope records it before leaving: `error` must not come back
       // from a transaction that kept the row, whatever the callback does next.
       if (result.error) {
@@ -995,7 +997,7 @@ const runScope = async <A>(
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {
       if (state.failed) return toFailedResult(TRANSACTION, refused()) as QueryResult<B, undefined>;
-      const name = `pgrst_sp_${++names.n}`;
+      const name = `tsql_sp_${++names.n}`;
       const broke = (e: unknown): QueryResult<B, undefined> => {
         // The savepoint machinery itself failed: the enclosing scope cannot be trusted either.
         const failed = failureOf(env, ctx, TRANSACTION, e);
@@ -1031,7 +1033,7 @@ const runScope = async <A>(
     if (e instanceof RollbackSignal) {
       return {
         ok: false,
-        failed: scopeFailure("PGRSTX02", "Transaction rolled back", "rollback() was called in the scope", null),
+        failed: scopeFailure("Transaction rolled back", "rollback() was called in the scope", null),
       };
     }
     return { ok: false, failed: failureOf(env, ctx, TRANSACTION, e) };
@@ -1081,7 +1083,7 @@ export const runTransaction = async <A>(
       });
     } catch (e) {
       if (e instanceof AbortScope) {
-        if (again(e.failed.error.body.code)) {
+        if (e.failed.error.sqlState !== undefined && again(e.failed.error.sqlState)) {
           if (retry?.delayMs) await wait(retry.delayMs);
           continue;
         }

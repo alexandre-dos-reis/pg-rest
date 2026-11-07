@@ -79,7 +79,7 @@ export const batch = (list: ReadonlyArray<Transfer>) =>
     const refused: string[] = [];
     for (const t of list) {
       const one = await tx.transaction((nested) => move(nested, t));
-      if (one.error) refused.push(`${t.memo ?? "?"} (${one.error.body.code})`);
+      if (one.error) refused.push(`${t.memo ?? "?"} (${one.error.sqlState ?? one.error.kind})`);
       else kept.push(one.data);
     }
     return { kept, refused };

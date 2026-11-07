@@ -100,11 +100,11 @@ const { data, error } = await pgRest.query(
   },
   { role: "authenticated", claims: { sub: user.id } },
 );
-if (error) throw error; // or hand `error.body` and `error.status` to your framework
+if (error) throw error; // or switch on `error.kind` and answer as your framework does
 // data is narrowed from here on: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
 ```
 
-A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and body, a `summary` written
+A failure is part of the result: `error` is a `QueryError` carrying the `message`, `details`, `hint`, the `sqlState` of a database error, a `summary` written
 out for whoever reads it, and a `kind` — `"conflict"`, `"not_single_row"`, `"forbidden"`… — which is a string union, so
 a `switch` on it is checked by the compiler instead of against a table of error codes. `query()` never rejects.
 

@@ -20,10 +20,8 @@ import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
 export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
-export { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
-export type { ErrorBody } from "@tsql/core/errors";
-export { describeErrorKind, errorKind } from "./kinds";
-export type { QueryErrorKind } from "./kinds";
+export { describeErrorKind } from "@tsql/core/kinds";
+export type { ErrorKind as QueryErrorKind } from "@tsql/core/kinds";
 export { QueryError } from "./query";
 export type {
   AnyDatabase,
@@ -92,18 +90,13 @@ export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
 export interface QueryInstance {
   /**
    * Run a query described by an object, in-process: no `Request`, no URL, no HTTP status.
-   * It goes through the same parser, the same SQL and the same error mapping as `handle()` of
-   * `@tsql/rest`, so the database sees the same thing either way.
-   *
-   * Only the HTTP envelope is gone, which is also what it cannot do: content negotiation
-   * (CSV, GeoJSON, custom media types), `EXPLAIN` plans and OpenAPI stay on `@tsql/rest`.
    *
    * A failure is part of the result, not an exception: `const { data, error } = await
    * pgRest.query({ table: "todos" })`. Exactly one of the two is set, so `if (error)` leaves
-   * `data` non-null, and `error` is a {@link QueryError} carrying the PostgREST status, body
-   * (`code`, `message`, `details`, `hint`) and the input that produced it.
+   * `data` non-null, and `error` is a {@link QueryError}: a `kind` to switch on, the `message`, `details`
+   * and `hint`, the `sqlState` of a database error, and the input that produced it.
    *
-   * It never rejects: an error the library did not foresee comes back as a 500 `error` carrying the
+   * It never rejects: an error the library did not foresee comes back as an `internal` `error` carrying the
    * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
    */
   query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
@@ -124,7 +117,7 @@ export interface QueryInstance {
    *
    * A context passed to the call wins over `source`, which is how an administrative query steps
    * out of the ambient context without leaving its scope. A `source` that returns nothing (the
-   * store was never entered) is a 500 `PGRSTX01` `error`, not a silent fall back to the anonymous
+   * store was never entered) is a `no_context` `error`, not a silent fall back to the anonymous
    * role. Like `query`, it never rejects.
    */
   setContextQuery(source: ContextSource): ContextQuery;
@@ -210,7 +203,7 @@ const create = (options: QueryOptions): QueryInstance => {
 
     // A scope reads the source **once**, on entry: the transaction has one `set_config`, so a
     // source answering differently halfway through could not be honoured anyway. And it is read
-    // before the `BEGIN`, so nothing answering gives back a `PGRSTX01` rather than an open
+    // before the `BEGIN`, so nothing answering gives back a `no_context` error rather than an open
     // transaction with nothing in it.
     const bound = async <A>(
       fn: (tx: Transaction) => Promise<A>,

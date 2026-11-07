@@ -74,7 +74,7 @@ type Flatten<T> = T extends object ? { [K in keyof T]: T[K] } & {} : T;
  * One item of a `select`. Columns, `alias:column`, `*`, and embedded resources as
  * `{ relation: [...] }` or `{ relation: { select, inner, limit, ... } }`.
  *
- * PostgREST's other string forms -- casts, JSON paths, aggregates -- are not described here: they
+ * The other string forms of a `select` -- casts, JSON paths, aggregates -- are not described here: they
  * change the type of the value or invent a column, and parsing them from a string literal would
  * cost more than it gives. Use an untyped instance for those.
  */
@@ -109,8 +109,8 @@ type EmbedOptions<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<
 /**
  * An embedded resource: its columns, or the long form with its own filters and paging.
  *
- * `as` and `spread` are exclusive, because PostgREST's grammar has no way to write both:
- * `...alias:table(*)` does not parse (`PGRST100`), so a type that accepted it would promise
+ * `as` and `spread` are exclusive, because the request has no way to write both:
+ * `...alias:table(*)` does not parse, so a type that accepted it would promise
  * something the request cannot express.
  */
 type Embed<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
@@ -401,8 +401,8 @@ interface Common {
   /** Skip this many rows. Needs an `order` to mean anything stable. */
   readonly offset?: number;
   /**
-   * Return one object instead of an array. Anything other than exactly one row is a `406`
-   * (`PGRST116`), so `data` is the row itself, never `undefined`.
+   * Return one object instead of an array. Anything other than exactly one row is a `not_single_row`
+   * error, so `data` is the row itself, never `undefined`.
    */
   readonly single?: boolean;
   /**
@@ -417,7 +417,7 @@ interface Common {
   readonly count?: "exact" | "planned" | "estimated";
   /** Leave `null` fields out of the result rather than spelling them out. */
   readonly stripNulls?: boolean;
-  /** Refuse the call -- and roll it back -- if it would affect more rows than this (`PGRST124`). */
+  /** Refuse the call -- and roll it back -- if it would affect more rows than this (`too_many_affected`). */
   readonly maxAffected?: number;
   /** Run the statement in this time zone, which is what `timestamptz` values are rendered in. */
   readonly timezone?: string;
@@ -771,8 +771,8 @@ export interface TypedQueryInstance<Db extends AnyDatabase> extends Omit<
    * level security and privileges work as they do over HTTP. They are the database's business: no
    * type here knows what a role may do.
    *
-   * A failure is part of the result: `error` is a `QueryError` carrying the PostgREST status and
-   * body, and exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and
+   * A failure is part of the result: `error` is a `QueryError` (a `kind`, a `message`, `details`,
+   * `hint` and the SQLSTATE of a database error), and exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and
    * `count`. It never rejects.
    *
    * @example
@@ -782,7 +782,7 @@ export interface TypedQueryInstance<Db extends AnyDatabase> extends Omit<
    *   where: { done: false },
    *   limit: 10,
    * });
-   * if (error) return c.json(error.body, error.status);
+   * if (error) return c.json({ error: error.message, kind: error.kind }, 400);
    * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
    */
   query<const Q extends TypedQuery<Db>>(

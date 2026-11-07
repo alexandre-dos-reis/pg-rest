@@ -75,8 +75,7 @@ try {
   );
   const failed: any = await api.query({ table: "cients" });
   assert.equal(failed.data, null);
-  assert.equal(failed.status, 404);
-  assert.equal(failed.error.body.code, "PGRST205");
+  assert.equal(failed.error.kind, "undefined_object");
   assert.equal(failed.error.input.table, "cients");
   assert.equal(rows.error, null);
 

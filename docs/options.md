@@ -87,14 +87,16 @@ const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 ## Errors
 
-Everything the library throws carries a PostgREST body (`code`, `message`, `details`, `hint`):
+**`@tsql/rest`** throws errors that carry a PostgREST body (`code`, `message`, `details`, `hint`):
 
 | | |
 | --- | --- |
 | `PgRestError` | thrown by the pure layers (parsers, SQL builders) with a status and a `PGRSTxxx` code |
 | `DbQueryError` | a database failure, normalised from any driver by its SQLSTATE |
 | `ApiError` | either of the above mapped to a status and a body. `handle()` turns it into a response |
-| `QueryError` | an `ApiError` in a `query()` result, plus the input that produced it |
 
-`handle()` never rejects: a failure becomes a PostgREST-shaped JSON response. `query()` never rejects either: it
-returns the error. See [`query.md`](query.md#errors) for the codes you are likely to meet.
+`handle()` never rejects: a failure becomes a PostgREST-shaped JSON response.
+
+**`@tsql/query`** has errors of its own, and none of the above: `query()` never rejects either, it returns a
+`QueryError` — a `kind` to switch on, the `message`, `details` and `hint`, the `sqlState` of a database error, and the
+input that produced it. See [`query.md`](query.md#errors).

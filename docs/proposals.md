@@ -22,7 +22,7 @@ Every addition on this page makes pg-rest look a little more like an ORM, and th
 library with no HTTP counterpart. So the line has to be a criterion rather than a feeling, and the criterion is not how
 many functions the instance has. **It is who owns the query language.**
 
-The database does. `generateTypes()` reads `pg_catalog`, in one direction: there is no schema to declare, which is the
+The database does. `generateModule()` reads `pg_catalog`, in one direction: there is no schema to declare, which is the
 first thing an ORM owns and the thing everything else of its follows from. And the query language is PostgREST's, which
 is a closed grammar — so what pg-rest does *not* have is not a backlog:
 

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ApiError, createPgRest, QueryError, type QueryInput, type RequestContext } from "./support/pgrest";
+import { createPgRest, QueryError, type QueryInput, type RequestContext } from "./support/pgrest";
 import { createTestDb, hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
 import { toParams } from "../packages/query/src/query";
@@ -134,7 +134,7 @@ describe.skipIf(!hasDb)("query()", () => {
     // orders: 1 paid 250, 2 new 40.50, 3 paid 99.99, 4 shipped 500
     const ids = async (where: object) => {
       const r = await t.api.query({ table: "orders", select: ["id"], where, order: ["id"] } as never);
-      if (r.error) throw new Error(JSON.stringify(r.error.body));
+      if (r.error) throw new Error(r.error.summary);
       return (r.data as Array<{ id: number }>).map((o) => o.id);
     };
     expect(await ids({ total: { $gte: 100, $lt: 500 } })).toEqual([1]);
@@ -150,14 +150,17 @@ describe.skipIf(!hasDb)("query()", () => {
 
   /**
    * The guarantee this API rests on: the object and the equivalent URL go through the same
-   * parser, SQL and error mapping, so they must answer with the same thing.
+   * parser and SQL, so they must answer with the same thing -- the same rows, or the same reason.
    */
   const same = async (input: QueryInput, path: string, ctx = authed()) => {
     const viaHttp = await t.get(path, { ctx, headers: { Prefer: "return=representation" } });
     const viaObject = await t.api.query(input, ctx);
     if (viaObject.error) {
-      expect(viaObject.error.body).toEqual(viaHttp.json());
-      expect(viaObject.error.status).toBe(viaHttp.status);
+      const wire = viaHttp.json() as { code: string; message: string; details: string | null; hint: string | null };
+      expect(viaObject.error.message).toBe(wire.message);
+      expect(viaObject.error.details).toBe(wire.details);
+      expect(viaObject.error.hint).toBe(wire.hint);
+      expect(viaObject.error.sqlState).toBe(/^[0-9A-Z]{5}$/.test(wire.code) ? wire.code : undefined);
     } else {
       expect(viaObject.data).toEqual(viaHttp.json());
     }
@@ -168,7 +171,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("the shape the question started with", async () => {
       const r = await t.api.query<Array<{ id: number }>>({ table: "orders", select: ["id"], limit: 10 });
       expect(r.data).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
-      expect(r.status).toBe(200);
+      expect(r.error).toBeNull();
       expect(r.count).toBeUndefined();
     });
 
@@ -183,7 +186,6 @@ describe.skipIf(!hasDb)("query()", () => {
       });
       expect(r.data).toEqual([{ total: 250 }]);
       expect(r.count).toBe(2);
-      expect(r.status).toBe(206);
     });
 
     test("single gives one object", async () => {
@@ -236,14 +238,14 @@ describe.skipIf(!hasDb)("query()", () => {
         authed(),
       );
       expect(inserted.data).toEqual([{ id: expect.any(Number), name: "Hopper" }]);
-      expect(inserted.status).toBe(201);
+      expect(inserted.error).toBeNull();
 
       const quiet = await t.api.query(
         { table: "clients", action: "insert", rows: { name: "Quiet" }, returning: "minimal" },
         authed(),
       );
       expect(quiet.data).toBeNull();
-      expect(quiet.status).toBe(201);
+      expect(quiet.error).toBeNull();
     });
 
     test("upsert, update and delete", async () => {
@@ -279,7 +281,7 @@ describe.skipIf(!hasDb)("query()", () => {
         { table: "orders", action: "update", set: { status: "x" }, maxAffected: 1 },
         authed(),
       );
-      expect(error?.body.code).toBe("PGRST124");
+      expect(error?.kind).toBe("too_many_affected");
       expect(
         (await t.api.query<Array<{ status: string }>>({ table: "orders", select: ["status"], where: { status: "x" } }))
           .data,
@@ -336,33 +338,26 @@ describe.skipIf(!hasDb)("query()", () => {
   });
 
   describe("errors", () => {
-    test("the error is a QueryError carrying the PostgREST body and the input", async () => {
+    test("the error is a QueryError carrying the reason and the input", async () => {
       const input: QueryInput = { table: "cients", select: ["id"] };
-      const { data, count, status, error: e } = await t.api.query(input);
+      const { data, count, error: e } = await t.api.query(input);
       expect(data).toBeNull();
       expect(count).toBeUndefined();
-      expect(status).toBe(404);
       expect(e).toBeInstanceOf(QueryError);
-      expect(e).toBeInstanceOf(ApiError);
       expect(e).toBeInstanceOf(Error);
-      expect(e!.body).toEqual({
-        code: "PGRST205",
-        message: "Could not find the table 'api.cients' in the schema cache",
-        details: null,
-        hint: "Perhaps you meant the table 'api.clients'",
-      });
-      expect(e!.input).toBe(input);
-      // the message stays the one-line summary ApiError builds; the wire body is untouched
-      expect(e!.message).toBe(
-        "PGRST205: Could not find the table 'api.cients' in the schema cache hint: Perhaps you meant the table 'api.clients'",
-      );
-      // and `summary` is the same failure written out -- the call it came from, the reason, the kind
       expect(e!.kind).toBe("undefined_object");
+      expect(e!.message).toBe("Could not find the table 'api.cients' in the schema cache");
+      expect(e!.details).toBeNull();
+      expect(e!.hint).toBe("Perhaps you meant the table 'api.clients'");
+      // not a database error, so there is no SQLSTATE
+      expect(e!.sqlState).toBeUndefined();
+      expect(e!.input).toBe(input);
+      // `summary` is the same failure written out -- the call it came from, the reason, the kind
       expect(e!.summary).toBe(
         [
           `select on "cients" failed: Could not find the table 'api.cients' in the schema cache`,
           "  hint: Perhaps you meant the table 'api.clients'",
-          "  kind: undefined_object -- no such table, view or function (PGRST205, HTTP 404)",
+          "  kind: undefined_object -- no such table, view or function",
         ].join("\n"),
       );
     });
@@ -399,22 +394,22 @@ describe.skipIf(!hasDb)("query()", () => {
       await closed.close();
     });
 
-    test("permissions, RLS and database errors keep their PostgREST code", async () => {
+    test("permissions and database errors keep the SQLSTATE", async () => {
       const denied = await t.api.query({ table: "clients", action: "insert", rows: { name: "x" } });
-      expect(denied.status).toBe(401);
-      expect(denied.error?.body.code).toBe("42501");
+      // nobody is authenticated here, so what is missing is a login more than a privilege
+      expect(denied.error?.kind).toBe("unauthenticated");
+      expect(denied.error?.sqlState).toBe("42501");
 
       const dup = await t.api.query(
         { table: "clients", action: "insert", rows: { name: "dup", email: "ada@example.com" } },
         authed(),
       );
-      expect(dup.status).toBe(409);
-      expect(dup.error?.body.code).toBe("23505");
+      expect(dup.error?.kind).toBe("conflict");
+      expect(dup.error?.sqlState).toBe("23505");
 
       const raised = await t.api.query({ rpc: "boom" }, authed());
-      expect(raised.status).toBe(418);
-      expect(raised.error?.body).toEqual({
-        code: "PT418",
+      expect(raised.error).toMatchObject({
+        kind: "raised",
         message: "teapot",
         details: "tip me over",
         hint: "short and stout",
@@ -423,18 +418,16 @@ describe.skipIf(!hasDb)("query()", () => {
 
     test("single with the wrong number of rows, and an undeclared embed", async () => {
       const none = await t.api.query({ table: "clients", where: { id: 999 }, single: true });
-      expect(none.status).toBe(406);
-      expect(none.error?.body.code).toBe("PGRST116");
+      expect(none.error?.kind).toBe("not_single_row");
 
       const embed = await t.api.query({ table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } });
-      expect(embed.error?.body.code).toBe("PGRST108");
+      expect(embed.error?.kind).toBe("invalid_query");
     });
 
     test("anonymous access can be disabled", async () => {
       const closed = await makeApi({ anonymousRole: false });
       const { error } = await closed.api.query({ table: "clients" });
-      expect(error?.status).toBe(401);
-      expect(error?.body.code).toBe("PGRST302");
+      expect(error?.kind).toBe("unauthenticated");
       await closed.close();
     });
   });
@@ -448,13 +441,12 @@ describe.skipIf(!hasDb)("query()", () => {
         order: ["id"],
         count: "exact",
       });
-      expect(okq).toEqual({ data: [{ id: 1 }, { id: 2 }], count: 4, status: 206, error: null });
+      expect(okq).toEqual({ data: [{ id: 1 }, { id: 2 }], count: 4, error: null });
 
       const input: QueryInput = { table: "cients" };
       const bad = await t.api.query(input);
       expect(bad.data).toBeNull();
       expect(bad.count).toBeUndefined();
-      expect(bad.status).toBe(404);
       expect(bad.error).toBeInstanceOf(QueryError);
       expect(bad.error?.input).toBe(input);
     });
@@ -470,19 +462,19 @@ describe.skipIf(!hasDb)("query()", () => {
     test("every kind of failure comes back as error, never as a rejection", async () => {
       // refused by the builder, before any SQL
       const operator = await t.api.query({ table: "orders", where: { total: { $nope: 1 } as never } });
-      expect(operator.error?.body.code).toBe("PGRST100");
-      // refused by the schema cache
-      expect((await t.api.query({ table: "clients", select: ["nope"] })).error?.status).toBe(400);
+      expect(operator.error?.kind).toBe("invalid_query");
+      // refused by the schema
+      expect((await t.api.query({ table: "clients", select: ["nope"] })).error?.kind).toBe("undefined_object");
       // refused by Postgres (privileges), and by the response shaping
-      expect((await t.api.query({ table: "clients", action: "delete", where: { id: 1 } })).error?.body.code).toBe(
+      expect((await t.api.query({ table: "clients", action: "delete", where: { id: 1 } })).error?.sqlState).toBe(
         "42501",
       );
-      expect((await t.api.query({ table: "clients", where: { id: 999 }, single: true })).error?.body.code).toBe(
-        "PGRST116",
+      expect((await t.api.query({ table: "clients", where: { id: 999 }, single: true })).error?.kind).toBe(
+        "not_single_row",
       );
       // and the caller check that happens before anything else
       const closed = await makeApi({ anonymousRole: false });
-      expect((await closed.api.query({ table: "clients" })).error?.body.code).toBe("PGRST302");
+      expect((await closed.api.query({ table: "clients" })).error?.kind).toBe("unauthenticated");
       await closed.close();
     });
 
@@ -501,9 +493,8 @@ describe.skipIf(!hasDb)("query()", () => {
 
       const r = await api.query({ table: "clients", select: ["id"] });
       expect(r.data).toBeNull();
-      expect(r.status).toBe(500);
       expect(r.error).toBeInstanceOf(QueryError);
-      expect(r.error?.body).toEqual({ code: "PGRSTX00", message: "Internal error", details: null, hint: null });
+      expect(r.error).toMatchObject({ kind: "internal", message: "Internal error", details: null, hint: null });
       expect(r.error?.cause).toBe("boom");
 
       await api.close();
@@ -559,9 +550,8 @@ describe.skipIf(!hasDb)("query()", () => {
       const r = await db({ table: "clients" });
       expect(r.data).toBeNull();
       expect(r.count).toBeUndefined();
-      expect(r.status).toBe(500);
       expect(r.error).toBeInstanceOf(QueryError);
-      expect(r.error?.body.code).toBe("PGRSTX01");
+      expect(r.error?.kind).toBe("no_context");
       expect(r.error?.input).toEqual({ table: "clients" });
     });
 
@@ -571,9 +561,8 @@ describe.skipIf(!hasDb)("query()", () => {
       });
       const r = await db({ table: "clients" });
       expect(r.data).toBeNull();
-      expect(r.status).toBe(500);
       expect(r.error).toBeInstanceOf(QueryError);
-      expect(r.error?.body.code).toBe("PGRSTX00");
+      expect(r.error?.kind).toBe("internal");
       expect((r.error?.cause as Error | undefined)?.message).toBe("boom");
     });
 

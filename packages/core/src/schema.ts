@@ -120,7 +120,7 @@ export interface FunctionDef {
   readonly returnMediaType?: { readonly name: string; readonly bytea: boolean };
 }
 
-/** A custom media type handler: an aggregate named after the media type that returns a domain (see PostgREST's "custom media types"). */
+/** A custom media type handler: an aggregate named after the media type that returns a domain. */
 export interface MediaHandler {
   readonly schema: string;
   /** The aggregate's name, i.e. the media type (for example `text/plain`, or the catch-all). */
