@@ -1,6 +1,37 @@
 import { PgRestError } from "@tsql/core/errors";
 import { parseError } from "@tsql/core/parse/field";
-import type { MediaChoice, Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
+import type {
+  Method,
+  Preferences,
+} from "@tsql/core/parse/request"; /** A custom media type the target can answer with (see `media.ts`). */
+export interface MediaChoice {
+  readonly mediaType: string;
+  /** `Content-Type` of the response. */
+  readonly contentType: string;
+  /** The body is binary (a `bytea` domain). */
+  readonly bytea: boolean;
+  /** Aggregate that renders the rows (`"schema"."media/type"(…)`), or `undefined` when the body is the scalar result itself. */
+  readonly aggregate?: string;
+  /** Cast the row to this table type before aggregating (the aggregate takes a table row, not `anyelement`). */
+  readonly rowType?: string;
+}
+
+export type Negotiated =
+  | { readonly kind: "handler"; readonly choice: MediaChoice }
+  | { readonly kind: "json"; readonly stripNulls: boolean }
+  | { readonly kind: "object"; readonly stripNulls: boolean }
+  | { readonly kind: "csv" }
+  /** `application/geo+json`: a GeoJSON FeatureCollection built by PostGIS's `ST_AsGeoJSON(record)`. */
+  | { readonly kind: "geojson" }
+  | { readonly kind: "openapi" }
+  /** `application/vnd.pgrst.plan`: answer with the EXPLAIN of the query that `inner` describes. */
+  | {
+      readonly kind: "plan";
+      readonly format: "json" | "text";
+      readonly forType: string;
+      readonly options: ReadonlyArray<string>;
+      readonly inner: Negotiated;
+    };
 
 const METHODS: ReadonlySet<string> = new Set(["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"]);
 
@@ -156,7 +187,7 @@ export const parseAccept = (
   isRoot: boolean,
   planEnabled = false,
   choices: ReadonlyArray<MediaChoice> = [],
-): OutputFormat => {
+): Negotiated => {
   const entries = (accept ?? "*/*")
     .split(",")
     .map((e) => e.trim())

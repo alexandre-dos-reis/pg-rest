@@ -13,7 +13,7 @@ import {
   useSchema,
 } from "@tsql/core/core";
 import { PgRestError } from "@tsql/core/errors";
-import type { Method, OutputFormat } from "@tsql/core/parse/request";
+import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
 import { buildOpenApi } from "./openapi";
@@ -25,7 +25,9 @@ import {
   parsePrefer,
   parseRange,
   parseTarget,
+  type Negotiated,
 } from "./request";
+import { toEngineFormat } from "./render";
 
 /** What only the HTTP entry point reads, on top of what both entry points share. */
 export interface HttpConfig extends CoreConfig {
@@ -75,9 +77,9 @@ const parseCookies = (header: string | null): Record<string, string> => {
 const toResponse = (
   outcome: Outcome,
   method: Method,
-  format: OutputFormat,
+  format: Negotiated,
   plan: Plan,
-  wantsPlan: Extract<OutputFormat, { kind: "plan" }> | undefined,
+  wantsPlan: Extract<Negotiated, { kind: "plan" }> | undefined,
 ): Response => {
   if (wantsPlan) {
     const opts = wantsPlan.options.length ? `; options=${wantsPlan.options.join("|")}` : "";
@@ -199,6 +201,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
     mediaChoices(env.cache, schema, target, url.searchParams.has("select")),
   );
   const format = requested.kind === "plan" ? requested.inner : requested;
+  const engineFormat = toEngineFormat(format);
   const wantsPlan = requested.kind === "plan" ? requested : undefined;
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
   const body = await parseBody(request, method);
@@ -206,9 +209,9 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const qp: QueryParams = { params: [...url.searchParams], bare: bareKeys(url.search) };
   let plan: Plan;
   if (target.type === "table") {
-    plan = planTable(env, method, schema, target.name, qp, prefer, format, range, body);
+    plan = planTable(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
   } else {
-    plan = planRpc(env, method, schema, target.name, qp, prefer, format, range, body);
+    plan = planRpc(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
   }
 
   const headers: Record<string, string> = {};
@@ -220,6 +223,6 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
     request,
     http: env.config.requestSettings ? { headers, cookies: parseCookies(request.headers.get("cookie")) } : undefined,
   };
-  const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, honoredTx, wantsPlan);
+  const outcome = await execute(env, ctx, caller, method, schema, prefer, engineFormat, plan, honoredTx, wantsPlan);
   return toResponse(outcome, method, format, plan, wantsPlan);
 };

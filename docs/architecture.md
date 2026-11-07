@@ -65,7 +65,8 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | --- | --- |
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the headers and cookies SQL will read, and the `Response` made out of an outcome; the HTTP-only settings |
-| `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept`, the body (JSON, form, CSV) |
+| `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept` (the negotiated format), the body (JSON, form, CSV) |
+| `packages/rest/src/render.ts` | the SQL of the formats beyond JSON — CSV, GeoJSON, custom media type handlers — and how a negotiated format becomes what the engine is told |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery` and the instance: `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
@@ -74,7 +75,7 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes`, published as `@tsql/query/types`, loaded on demand |
 | `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
-| `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` |
+| `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
 | `packages/core/src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `packages/core/src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement`, and `expression` (the computed `set`) |

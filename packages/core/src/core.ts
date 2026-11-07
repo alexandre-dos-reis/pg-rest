@@ -95,11 +95,9 @@ export interface QueryParams {
   readonly setClauses?: ReadonlyArray<string> | undefined;
 }
 
-/** Statement options that depend on the negotiated output format. */
+/** Statement options that depend on the output format. */
 const formatOptions = (format: OutputFormat) => ({
-  csv: format.kind === "csv",
-  geojson: format.kind === "geojson",
-  handler: format.kind === "handler" ? format.choice : undefined,
+  render: format.kind === "rendered" ? format.sql : undefined,
 });
 
 // ---------------------------------------------------------------------------
@@ -673,7 +671,11 @@ export const planRpc = (
 
   // GeoJSON is built for void functions too (and fails in PostGIS, like PostgREST).
   const shape: BodyShape =
-    call.shape === "void" && format.kind !== "geojson" ? "none" : call.shape === "scalar" ? "scalar" : "scalar-array";
+    call.shape === "void" && !(format.kind === "rendered" && format.voidRows)
+      ? "none"
+      : call.shape === "scalar"
+        ? "scalar"
+        : "scalar-array";
   return { ...base, shape, statement: buildStatement({ rows: call.source, shape, ...formatOptions(format) }) };
 };
 
@@ -700,7 +702,7 @@ export const execute = async (
   format: OutputFormat,
   plan: Plan,
   honoredTx: boolean,
-  wantsPlan?: Extract<OutputFormat, { kind: "plan" }>,
+  wantsPlan?: { readonly format: "json" | "text"; readonly options: ReadonlyArray<string> },
 ): Promise<Outcome> => {
   const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };

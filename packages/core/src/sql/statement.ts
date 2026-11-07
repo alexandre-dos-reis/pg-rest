@@ -6,8 +6,6 @@
  * - `scalar`:      a single JSON value (scalar RPC)
  * - `none`:        empty body
  */
-import type { MediaChoice } from "../parse/request";
-
 export type BodyShape = "array" | "object" | "scalar-array" | "scalar" | "none";
 
 export interface StatementOptions {
@@ -19,12 +17,11 @@ export interface StatementOptions {
   readonly count?: string | undefined;
   readonly shape: BodyShape;
   readonly stripNulls?: boolean | undefined;
-  /** Render the body as CSV, the way PostgREST does: header from the first row, then PostgreSQL's record text. */
-  readonly csv?: boolean | undefined;
-  /** Render the rows as a GeoJSON FeatureCollection, the way PostgREST does (needs PostGIS). */
-  readonly geojson?: boolean | undefined;
-  /** Render the body with a custom media type handler; binary bodies come back hex-encoded. */
-  readonly handler?: MediaChoice | undefined;
+  /**
+   * An aggregate over the rows `_t` giving the body as text, in place of JSON (CSV, GeoJSON, a media type
+   * handler: the caller knows which). Ignored when the shape is `none`.
+   */
+  readonly render?: string | undefined;
   /**
    * `source` flags inserted rows in a `pgrst_inserted` column (merge-duplicates upsert). These are the
    * source's other columns; the status becomes 200 when rows were returned but none was inserted.
@@ -32,29 +29,8 @@ export interface StatementOptions {
   readonly upsertColumns?: ReadonlyArray<string> | undefined;
 }
 
-const CSV_BODY =
-  `coalesce((SELECT string_agg(k, ',') FROM (SELECT json_object_keys(r)::text AS k FROM ` +
-  `(SELECT row_to_json(hh) AS r FROM pgrst_body AS hh LIMIT 1) s) a), '') || E'\\n' || ` +
-  `coalesce(string_agg(substring(_t::text, 2, length(_t::text) - 2), E'\\n'), '')`;
-
-const handlerBody = (h: MediaChoice): string => {
-  if (h.aggregate) {
-    const call = `${h.aggregate}(${h.rowType ? `ROW(_t.*)::${h.rowType}` : "_t"})`;
-    return h.bytea ? `coalesce(encode(${call}::bytea, 'hex'), '')` : `coalesce(${call}::text, '')`;
-  }
-  return h.bytea
-    ? `coalesce(encode((array_agg(_t.pgrst_scalar::bytea))[1], 'hex'), '')`
-    : `coalesce((array_agg(_t.pgrst_scalar::text))[1], '')`;
-};
-
-const GEOJSON_BODY =
-  `json_build_object('type', 'FeatureCollection', 'features', ` +
-  `coalesce(json_agg(ST_AsGeoJSON(_t)::json), '[]'::json))::text`;
-
-const bodyExpr = (shape: BodyShape, strip: boolean, csv: boolean, handler?: MediaChoice, geojson?: boolean): string => {
-  if (geojson && shape !== "none") return GEOJSON_BODY;
-  if (handler && shape !== "none") return handlerBody(handler);
-  if (csv && shape !== "none") return CSV_BODY;
+const bodyExpr = (shape: BodyShape, strip: boolean, render?: string): string => {
+  if (render && shape !== "none") return render;
   const wrap = (e: string) => (strip ? `json_strip_nulls(${e})` : e);
   switch (shape) {
     case "array":
@@ -90,7 +66,7 @@ export const buildStatement = (o: StatementOptions): string => {
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
     `count(*)::text AS page_total, ` +
-    `${bodyExpr(o.shape, Boolean(o.stripNulls), Boolean(o.csv), o.handler, o.geojson)} AS body, ` +
+    `${bodyExpr(o.shape, Boolean(o.stripNulls), o.render)} AS body, ` +
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
     `nullif(current_setting('response.headers', true), '') AS response_headers, ` +
     (up

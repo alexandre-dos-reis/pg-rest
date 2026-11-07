@@ -1,4 +1,4 @@
-import type { MediaChoice } from "@tsql/core/parse/request";
+import type { MediaChoice } from "./request";
 import { quoteQualified } from "@tsql/core/quote";
 import { relKey, type FunctionDef, type SchemaCache } from "@tsql/core/schema";
 

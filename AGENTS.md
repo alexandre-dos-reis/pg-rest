@@ -41,6 +41,7 @@ reference lives in `docs/`.
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest`, `RestOptions`, the HTTP-only settings |
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, OpenAPI root, plans, cookies and headers for SQL, the `Response` (`HttpConfig`) |
 | `packages/rest/src/request.ts` | reading HTTP: method, path, `Prefer`, `Range`, `Accept`, the body |
+| `packages/rest/src/render.ts` | the SQL of CSV, GeoJSON and media type handlers; the engine only knows `OutputFormat` (`json`, `object`, or `rendered` by SQL it is given) |
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery`, `QueryInstance`, the public types |
 | `packages/query/src/query.ts` | `query(input)`: the object API, in-process, no `Request` (see below) |

@@ -17,32 +17,19 @@ export interface Preferences {
   readonly invalid: ReadonlyArray<string>;
 }
 
-/** A custom media type the target can answer with (see `@tsql/rest`). */
-export interface MediaChoice {
-  readonly mediaType: string;
-  /** `Content-Type` of the response. */
-  readonly contentType: string;
-  /** The body is binary (a `bytea` domain). */
-  readonly bytea: boolean;
-  /** Aggregate that renders the rows (`"schema"."media/type"(…)`), or `undefined` when the body is the scalar result itself. */
-  readonly aggregate?: string;
-  /** Cast the row to this table type before aggregating (the aggregate takes a table row, not `anyelement`). */
-  readonly rowType?: string;
-}
-
+/**
+ * How the body of a response is rendered. JSON is the engine's own (`json_agg`, with `json_strip_nulls`
+ * for `stripNulls`, and the first row only for `object`). Anything else (CSV, GeoJSON, a media type
+ * handler: what `Accept` can ask for over HTTP) is `rendered` by SQL that the caller supplies, so the engine
+ * knows none of those formats.
+ */
 export type OutputFormat =
-  | { readonly kind: "handler"; readonly choice: MediaChoice }
   | { readonly kind: "json"; readonly stripNulls: boolean }
   | { readonly kind: "object"; readonly stripNulls: boolean }
-  | { readonly kind: "csv" }
-  /** `application/geo+json`: a GeoJSON FeatureCollection built by PostGIS's `ST_AsGeoJSON(record)`. */
-  | { readonly kind: "geojson" }
-  | { readonly kind: "openapi" }
-  /** `application/vnd.pgrst.plan`: answer with the EXPLAIN of the query that `inner` describes. */
   | {
-      readonly kind: "plan";
-      readonly format: "json" | "text";
-      readonly forType: string;
-      readonly options: ReadonlyArray<string>;
-      readonly inner: OutputFormat;
+      readonly kind: "rendered";
+      /** An aggregate over the rows `_t` that gives the body as text. */
+      readonly sql: string;
+      /** A function returning nothing still has rows to render (GeoJSON), instead of an empty body. */
+      readonly voidRows: boolean;
     };
