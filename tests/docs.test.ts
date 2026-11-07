@@ -23,16 +23,18 @@ const root = new URL("..", import.meta.url).pathname;
  * written against the test fixture.
  */
 const preamble = (dbTypes: string) => `
-import { createPgRest, QueryError } from "../src/index";
-import type { RequestContext } from "../src/index";
-import type { DbAdapter } from "../src/adapter";
+import { createQuery, createRest, QueryError } from "./support/pgrest";
+import type { RequestContext, RestInstance, SchemaDescriptor } from "./support/pgrest";
+import type { DbAdapter } from "../packages/core/src/adapter";
 import type { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabasePgRest } from "${dbTypes}";
 
 type Database = DatabasePgRest;
 declare const pool: unknown;
+declare const schema: SchemaDescriptor;
 declare const nodePostgresAdapter: (p: unknown) => DbAdapter;
-declare const pgRest: Awaited<ReturnType<typeof createPgRest<Database>>>;
+declare const pgRest: ReturnType<typeof createQuery<Database>>;
+declare const rest: RestInstance;
 declare const ctx: { role: string; claims: { sub: string; email: string } };
 declare const user: { id: string; email: string };
 declare const mySessionLookup: (req: Request) => Promise<{ id: string; email: string } | undefined>;
@@ -47,12 +49,14 @@ declare const app: {
 // the AsyncLocalStorage the setContextQuery examples read from
 declare const store: AsyncLocalStorage<RequestContext>;
 declare const generateTypes: (cache: unknown, options?: { name?: string }) => string;
-void [createPgRest, QueryError, pool, nodePostgresAdapter, pgRest, ctx, user];
-void [mySessionLookup, pg, writeFileSync, generateTypes, serve, app, store];
+declare const generateModule: (cache: unknown, options?: { name?: string }) => string;
+declare const introspect: (db: DbAdapter, schemas: string[]) => Promise<unknown>;
+void [createQuery, createRest, QueryError, pool, nodePostgresAdapter, pgRest, rest, ctx, user];
+void [mySessionLookup, pg, writeFileSync, generateTypes, generateModule, introspect, schema, serve, app, store];
 `;
 
 const DB_TYPES_OF = (page: string) =>
-  page === "README.md" ? "../examples/with-generated-types/db.types" : "./support/fixture.types";
+  page === "README.md" ? "../examples/with-generated-types/db.generated" : "./support/fixture.types";
 
 /** ```ts fenced blocks, minus their import lines (the preamble has those). */
 const blocksOf = (markdown: string): string[] => {

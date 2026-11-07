@@ -42,8 +42,8 @@ in middleware on the Hono app or in `resolveContext`.
 
 ## Server-side, without HTTP
 
-The server holds the `pgRest` instance, so code in this process does not have to call itself over the network, nor write the
-same SQL a second time. `query()` takes an object and the caller:
+Code in this process does not have to call itself over the network. `@tsql/query` runs the same database from an object —
+a second instance next to the handler, built from a schema generated at build time (see below) — and takes the caller:
 
 ```ts
 app.get("/dashboard", async (c) => {
@@ -60,7 +60,7 @@ app.get("/dashboard", async (c) => {
     },
     ctx,
   );
-  if (error) return c.json(error.body, error.status);
+  if (error) return c.json({ error: error.message, kind: error.kind }, 500);
 
   return c.json(todos);
 });
@@ -68,10 +68,10 @@ app.get("/dashboard", async (c) => {
 
 Same role, same claims, same RLS policies as the REST route: `anon` without a session (the two seeded todos), the user's own
 rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and a failure comes
-back as `error`, with the PostgREST `code` and body on it, ready to answer with. See [`docs/query.md`](../../docs/query.md).
+back as `error`, with a `kind` to switch on and the `message`, ready to answer with. See [`docs/query.md`](../../docs/query.md).
 
-Generate the types for this schema once (`generateTypes(await pgRest.schemaCache())`, from `@adrdp/pg-rest/types`), pass them
-to `createPgRest<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
+Generate the module for this schema once (`generateModule(await introspect(adapter, ["api"]))`, from `@tsql/query/types`), pass
+its `schema` to `createQuery<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
 relationship, `done` as a boolean — with `data` inferred as
 `Array<{ id: number; title: string; done: boolean; tags: Array<{ label: string }> }>`. See
 [`docs/types.md`](../../docs/types.md).

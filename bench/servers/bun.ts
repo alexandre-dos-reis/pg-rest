@@ -1,10 +1,10 @@
 // pg-rest on Bun: Bun.serve + Bun.sql. Uses the *built* package, as a consumer would.
 import { SQL } from "bun";
-import { createPgRest } from "../../dist/index.js";
-import { bunSqlAdapter } from "../../dist/adapters/bun.js";
+import { createRest } from "../../packages/rest/dist/index.js";
+import { bunSqlAdapter } from "../../packages/rest/dist/adapters/bun.js";
 
 const sql = new SQL({ url: process.env.DATABASE_URL!, max: Number(process.env.POOL ?? 10) });
-const pgRest = await createPgRest({
+const pgRest = await createRest({
   db: bunSqlAdapter(sql),
   schemas: ["api"],
   anonymousRole: "anon",

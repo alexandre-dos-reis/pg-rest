@@ -1,11 +1,11 @@
-// The client your application code imports: one instance, created once, typed by db.types.ts.
-// Handing the generated type to createPgRest is the whole of what makes the queries below check
+// The client your application code imports: one instance, created once, typed by db.generated.ts.
+// Handing the generated type to createQuery is the whole of what makes the queries below check
 // themselves -- and it is why this file comes *after* `npm run gen:types`.
-import { createPgRest } from "@adrdp/pg-rest";
+import { createQuery } from "@tsql/query";
 import { pgRestOptions, pglite } from "./db.ts";
-import type { DatabasePgRest } from "./db.types.ts";
+import { schema, type DatabasePgRest } from "./db.generated.ts";
 
-export const pgRest = await createPgRest<DatabasePgRest>(pgRestOptions);
+export const pgRest = createQuery<DatabasePgRest>({ ...pgRestOptions, schema });
 
 export const close = async (): Promise<void> => {
   await pgRest.close();

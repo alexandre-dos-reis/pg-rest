@@ -1,53 +1,22 @@
 {
-  "name": "@adrdp/pg-rest",
-  "version": "0.5.0",
-  "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) — no JWT required.",
+  "name": "tsql",
+  "private": true,
+  "description": "Monorepo of @tsql/rest (a PostgREST-compatible handler) and @tsql/query (typed in-process queries).",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git"
   },
-  "files": [
-    "dist"
-  ],
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./types": {
-      "types": "./dist/types.d.ts",
-      "default": "./dist/types.js"
-    },
-    "./adapters/bun": {
-      "types": "./dist/adapters/bun.d.ts",
-      "default": "./dist/adapters/bun.js"
-    },
-    "./adapters/node-postgres": {
-      "types": "./dist/adapters/node-postgres.d.ts",
-      "default": "./dist/adapters/node-postgres.js"
-    },
-    "./adapters/postgres-js": {
-      "types": "./dist/adapters/postgres-js.d.ts",
-      "default": "./dist/adapters/postgres-js.js"
-    },
-    "./adapters/pglite": {
-      "types": "./dist/adapters/pglite.d.ts",
-      "default": "./dist/adapters/pglite.js"
-    },
-    "./package.json": "./package.json"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
+    "build": "bun --filter '@tsql/rest' --filter '@tsql/query' build",
+    "dev": "bun --filter '@tsql/rest' --filter '@tsql/query' dev",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build",
     "test:compare": "bun test tests/compare",
     "bench": "bun bench/run.ts",
     "changeset": "changeset",
@@ -56,9 +25,9 @@
     "prepare": "git rev-parse --git-dir > /dev/null 2>&1 && git config core.hooksPath scripts/githooks || true",
     "check:examples": "bun run scripts/check-example-versions.ts",
     "link:examples": "scripts/link-examples.sh",
-    "lint": "oxlint src tests",
-    "fmt": "oxfmt src tests",
-    "fmt:check": "oxfmt --check src tests"
+    "lint": "oxlint packages tests",
+    "fmt": "oxfmt packages tests",
+    "fmt:check": "oxfmt --check packages tests"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",
@@ -75,22 +44,6 @@
     "postgres": "^4.0.0",
     "tsdown": "^0.17.0",
     "typescript": "^5.9.3"
-  },
-  "peerDependencies": {
-    "@electric-sql/pglite": ">=0.2.0",
-    "pg": "^8.0.0",
-    "postgres": ">=3.0.0"
-  },
-  "peerDependenciesMeta": {
-    "pg": {
-      "optional": true
-    },
-    "postgres": {
-      "optional": true
-    },
-    "@electric-sql/pglite": {
-      "optional": true
-    }
   },
   "devEngines": {
     "runtime": {

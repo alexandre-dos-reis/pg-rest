@@ -16,6 +16,8 @@ env:
 
 jobs:
   bench:
+    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:

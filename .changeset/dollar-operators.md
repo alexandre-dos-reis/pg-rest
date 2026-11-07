@@ -1,5 +1,5 @@
 ---
-"@adrdp/pg-rest": minor
+"@tsql/query": minor
 ---
 
 **Breaking:** `where` filters are written with `$`-prefixed operators, the way MongoDB and Prisma-style libraries do.

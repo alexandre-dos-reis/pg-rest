@@ -155,8 +155,8 @@ describe.skipIf(!hasDb)("hostile input", () => {
       ).toEqual([]);
       // a column name is an identifier: it is checked against the schema, never interpolated
       const key = await t.api.query({ table: "clients", where: { [p]: 1 } });
-      expect(key.status).toBeGreaterThanOrEqual(400);
-      expect(key.status).toBeLessThan(500);
+      expect(key.error).not.toBeNull();
+      expect(key.error?.kind).not.toBe("internal");
     }
     await intact();
   });
@@ -169,11 +169,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
       const r = await run({ name: { $concat: [{ $col: "name" }, p] } });
       expect(r.error).toBeNull();
       // a column, a type and a key are checked, never interpolated
-      expect((await run({ name: { $col: p } })).error?.status ?? 0).toBeLessThan(500);
-      expect((await run({ name: { $add: [{ $col: p }, 1] } })).error?.status ?? 0).toBeLessThan(500);
-      expect((await run({ name: { $cast: [1, p] } })).error?.status ?? 0).toBeLessThan(500);
-      expect((await run({ [p]: { $add: [1, 2] } })).error?.status ?? 0).toBeLessThan(500);
-      expect((await run({ name: { [p]: 1 } })).error?.status ?? 0).toBeLessThan(500);
+      expect((await run({ name: { $col: p } })).error?.kind).not.toBe("internal");
+      expect((await run({ name: { $add: [{ $col: p }, 1] } })).error?.kind).not.toBe("internal");
+      expect((await run({ name: { $cast: [1, p] } })).error?.kind).not.toBe("internal");
+      expect((await run({ [p]: { $add: [1, 2] } })).error?.kind).not.toBe("internal");
+      expect((await run({ name: { [p]: 1 } })).error?.kind).not.toBe("internal");
     }
     await intact();
   });

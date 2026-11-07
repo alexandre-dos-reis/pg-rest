@@ -13,34 +13,37 @@ interface DbAdapter {
 
 ## The four that ship
 
+They are exported by both packages, under the same names: `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`. The table
+uses `@tsql/rest`.
+
 | import | wraps | peer dependency |
 | --- | --- | --- |
-| `@adrdp/pg-rest/adapters/bun` → `bunSqlAdapter(sql)` | `new SQL(url)` from `"bun"` | none (built into Bun) |
-| `@adrdp/pg-rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(…)` | `pg` ≥ 8 |
-| `@adrdp/pg-rest/adapters/postgres-js` → `postgresJsAdapter(sql)` | `postgres(url)` | `postgres` ≥ 3 |
-| `@adrdp/pg-rest/adapters/pglite` → `pgliteAdapter(db)` | `new PGlite()` | `@electric-sql/pglite` |
+| `@tsql/rest/adapters/bun` → `bunSqlAdapter(sql)` | `new SQL(url)` from `"bun"` | none (built into Bun) |
+| `@tsql/rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(…)` | `pg` ≥ 8 |
+| `@tsql/rest/adapters/postgres-js` → `postgresJsAdapter(sql)` | `postgres(url)` | `postgres` ≥ 3 |
+| `@tsql/rest/adapters/pglite` → `pgliteAdapter(db)` | `new PGlite()` | `@electric-sql/pglite` |
 
 They are **structural**: an adapter never imports its driver, you pass the client in. So a project loads only the code
 it imports, and the drivers stay optional peer dependencies.
 
 ```ts
 import pg from "pg";
-import { nodePostgresAdapter } from "@adrdp/pg-rest/adapters/node-postgres";
+import { nodePostgresAdapter } from "@tsql/rest/adapters/node-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-const pgRest = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 ```
 
-pg-rest never closes your driver: `pgRest.close()` stops the handler, the pool is yours to end.
+The libraries never close your driver: `rest.close()` stops the handler, the pool is yours to end.
 
 ## Writing one
 
-About twenty lines; the sources in [`src/adapters`](../src/adapters) are good templates. Two things make it easy:
+About twenty lines; the sources in [`packages/core/src/adapters`](../packages/core/src/adapters) are good templates. Two things make it easy:
 
 - **Parameters are always text**, with an explicit `$n::text` cast in the SQL, so an adapter needs no type inference and
   no driver-specific binding. Values arrive as `string | null`.
 - **Errors are recognised by SQLSTATE**, read from `code`, `errno` or `sqlState` on whatever the driver throws
-  (`normalizeDbError` in [`src/errors.ts`](../src/errors.ts)), so an adapter does not translate them. Anything without a
+  (`normalizeDbError` in [`packages/core/src/errors.ts`](../packages/core/src/errors.ts)), so an adapter does not translate them. Anything without a
   SQLSTATE — a connection failure, a bug — passes through and becomes a `503`/`500`.
 
 `transaction` must run `fn` on a **single** connection and own the `BEGIN`/`COMMIT`/`ROLLBACK`: the role, the claims and
@@ -60,5 +63,5 @@ CREATE POLICY own ON api.notes
   USING (owner = (current_setting('request.jwt.claims', true)::json ->> 'sub'));
 ```
 
-`request.method`, `request.path`, `request.headers` and `request.cookies` are there too (`requestSettings`, on by
-default) — empty for an in-process `query()`, which has no headers. See [`security.md`](security.md).
+Over HTTP, `request.method`, `request.path`, `request.headers` and `request.cookies` are there too (`requestSettings`, on by
+default); an in-process `query()` has no request and sets none of them. See [`security.md`](security.md).

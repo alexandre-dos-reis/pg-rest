@@ -1,8 +1,8 @@
 // Application code. It runs queries and knows nothing about who is asking: no role, no claims, no
 // user id, no `ctx` threaded through its signatures. That is what the AsyncLocalStorage in
 // context.ts is for -- and a transaction reads it once, on entry.
-import type { TypedTransaction } from "@adrdp/pg-rest";
-import type { DatabasePgRest } from "./db.types.ts";
+import type { TypedTransaction } from "@tsql/query";
+import type { DatabasePgRest } from "./db.generated.ts";
 import { pgQuery } from "./context.ts";
 
 type Tx = TypedTransaction<DatabasePgRest>;
@@ -79,7 +79,7 @@ export const batch = (list: ReadonlyArray<Transfer>) =>
     const refused: string[] = [];
     for (const t of list) {
       const one = await tx.transaction((nested) => move(nested, t));
-      if (one.error) refused.push(`${t.memo ?? "?"} (${one.error.body.code})`);
+      if (one.error) refused.push(`${t.memo ?? "?"} (${one.error.sqlState ?? one.error.kind})`);
       else kept.push(one.data);
     }
     return { kept, refused };

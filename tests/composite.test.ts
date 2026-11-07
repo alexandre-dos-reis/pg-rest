@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { toParams } from "../src/query";
-import type { QueryInput } from "../src/index";
+import { toParams } from "../packages/query/src/query";
+import type { QueryInput } from "./support/pgrest";
 
 /** The query string the object describes, as `handle()` would receive it. */
 const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as Array<[string, string]>).toString();
@@ -155,7 +155,7 @@ describe.skipIf(!hasDb)("composite types", () => {
 
   describe("writing", () => {
     test("a nested object is the composite value, and a missing field is NULL", async () => {
-      const { data, status } = await t.api.query(
+      const { data, error } = await t.api.query(
         {
           table: "venues",
           action: "insert",
@@ -165,7 +165,7 @@ describe.skipIf(!hasDb)("composite types", () => {
         },
         authed(),
       );
-      expect(status).toBe(201);
+      expect(error).toBeNull();
       expect(data).toEqual({
         label: "New",
         owner: { name: "Edsger", home: { city: "Rotterdam", zip: null }, tags: null },

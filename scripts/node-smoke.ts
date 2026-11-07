@@ -4,8 +4,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import pg from "pg";
-import { createPgRest } from "../dist/index.js";
-import { nodePostgresAdapter } from "../dist/adapters/node-postgres.js";
+import { createRest } from "../packages/rest/dist/index.js";
+import { createQuery } from "../packages/query/dist/index.js";
+import { nodePostgresAdapter } from "../packages/rest/dist/adapters/node-postgres.js";
 
 const admin = process.env["TEST_DATABASE_URL"];
 if (!admin) throw new Error("TEST_DATABASE_URL is not set");
@@ -19,14 +20,23 @@ const pool = new pg.Pool({ connectionString: url.toString() });
 
 try {
   await pool.query(readFileSync(new URL("../tests/support/fixture.sql", import.meta.url), "utf8"));
-  const api = await createPgRest({
+  const options = {
     db: nodePostgresAdapter(pool as never),
     schemas: ["api"],
-    resolveContext: (req) => {
+    resolveContext: (req: Request) => {
       const sub = req.headers.get("x-user");
       return sub ? { role: "authenticated", claims: { sub } } : undefined;
     },
-  });
+  };
+  // the two packages, each built on its own: an app that uses both creates both
+  const rest = await createRest(options);
+  // query runs on a generated descriptor: the catalog is read here, at "build time", by the built generator
+  const { introspect, generateModule, generateSchema } = await import("../packages/query/dist/types.js");
+  const cache = await introspect(options.db, ["api"]);
+  const schemaModule = generateSchema(cache);
+  const schema = JSON.parse(schemaModule.slice(schemaModule.indexOf("= ") + 2, schemaModule.lastIndexOf(";")));
+  const { schemas: _schemas, ...queryOptions } = options;
+  const api = { ...createQuery({ ...queryOptions, schema }), handle: rest.handle };
   const call = async (path: string, init: RequestInit = {}) => {
     const res = await api.handle(new Request(`http://localhost${path}`, init));
     return { status: res.status, body: await res.json().catch(() => null) as any, headers: res.headers };
@@ -65,18 +75,15 @@ try {
   );
   const failed: any = await api.query({ table: "cients" });
   assert.equal(failed.data, null);
-  assert.equal(failed.status, 404);
-  assert.equal(failed.error.body.code, "PGRST205");
+  assert.equal(failed.error.kind, "undefined_object");
   assert.equal(failed.error.input.table, "cients");
   assert.equal(rows.error, null);
 
-  // generateTypes, both ways: the method (which loads the generator on demand, from the built
-  // chunk) and the standalone subpath. The generated module is plain text, with no imports.
-  const generated = await api.generateTypes({ name: "Db" });
+  // the generator is plain text, with the types and the descriptor in one module
+  const generated = generateModule(cache, { name: "Db" });
   assert.match(generated, /export type Db = \{/);
   assert.match(generated, /name: string;/);
-  const { generateTypes } = await import("../dist/types.js");
-  assert.equal(generateTypes(await api.schemaCache(), { name: "Db" }), generated);
+  assert.match(generated, /export const schema: SchemaDescriptor = /);
 
   // RPC + OpenAPI
   assert.equal((await call("/rpc/add?a=40&b=2")).body, 42);

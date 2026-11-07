@@ -8,6 +8,6 @@ cd "$(git rev-parse --show-toplevel)"
 staged="$(git diff --cached --name-only)"
 
 # Only worth running when a version or an example dependency is actually being committed.
-if grep -qE '^(package\.json|examples/[^/]+/package\.json)$' <<<"$staged"; then
+if grep -qE '^(package\.json|packages/[^/]+/package\.json|examples/[^/]+/package\.json)$' <<<"$staged"; then
   bun run scripts/check-example-versions.ts
 fi

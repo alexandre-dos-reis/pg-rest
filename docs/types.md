@@ -1,9 +1,12 @@
 # Types generated from the database
 
-`pgRest.generateTypes()` writes a TypeScript module describing your schema, and `createPgRest<Database>` hands it to
-`query()` so the queries check themselves. The types come from `schemaCache()` — the introspected `pg_catalog`, the same
-one the library reads to answer a request — so what they allow is what it accepts, with no second source of truth to
-drift.
+`generateModule()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands its types to
+`query()` so the queries check themselves. The module also carries the **schema descriptor** `createQuery` runs on, so
+the types and what the library does come from one read of `pg_catalog`, with no second source of truth to drift — and
+a running server never reads the catalog at all.
+
+The checking is the compiler's and nothing else: the descriptor is trusted as generated, and no query is validated
+against it at runtime, which keeps `query()` fast.
 
 - [Generating](#generating)
 - [What the file contains](#what-the-file-contains)
@@ -17,20 +20,18 @@ drift.
 ```ts
 // scripts/gen-types.ts — run it again after a migration
 import { writeFileSync } from "node:fs";
+import { generateModule, introspect } from "@tsql/query/types";
 
-writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }));
+const cache = await introspect(nodePostgresAdapter(pool), ["api"]);
+writeFileSync("src/db.generated.ts", generateModule(cache, { name: "Database" }));
 ```
 
-No CLI and no second database connection: you already have a driver, and the library has no runtime dependency to spend
-on one. The generator is loaded by that call and not before, so a server that only serves requests never carries it.
+The file exports the type `Database` and the descriptor `schema`, and `createQuery<Database>({ db, schema })` takes both.
+No CLI and no second database connection: you already have a driver. This is build-time code, which a server that only
+serves queries never loads.
 
-When you hold a `SchemaCache` rather than an instance, the same function is exported standalone:
-
-```ts
-import { generateTypes } from "@adrdp/pg-rest/types";
-
-const types = generateTypes(await pgRest.schemaCache(), { name: "Database" });
-```
+`generateTypes(cache)` gives the types alone and `generateSchema(cache)` the descriptor alone, for when they go in
+different files.
 
 | option | |
 | --- | --- |
@@ -74,7 +75,7 @@ export type Database = {
 | `insert` | what a write accepts: a generated or `GENERATED ALWAYS AS IDENTITY` column is **absent**, one with a default or a nullable one is optional. `never` when the relation cannot be written |
 | `update` | the same, all optional |
 | `pk`, `insertable`, `updatable`, `deletable` | the primary key, and what `pg_relation_is_updatable` says the relation accepts |
-| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the request path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the request will need one (`PGRST201`) |
+| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the query path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the query will need one (an `invalid_embed` error otherwise) |
 | `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, or `null` for `void` |
 | enums | the labels, as a union — `"sad" \| "ok" \| "happy"`, and `("sad" \| "ok")[]` for an array of them |
 | composite types | a named type per [composite type](https://www.postgresql.org/docs/current/rowtypes.html) the schema reaches, nesting included — see [below](#composite-types) |
@@ -119,7 +120,7 @@ Only the composite types the module actually mentions are declared, so a `noUnus
 ## A typed instance
 
 ```ts
-const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 ```
 
 From there, `table` and `rpc` are the ones that exist, `select`, `where` and `order` only name real columns and
@@ -140,12 +141,12 @@ relationships, the payload of a write is the relation's insert or update shape, 
 `"planned"` a `number | undefined` because an `EXPLAIN` can give nothing usable, and no `count` at all gives
 `undefined` — see [`query.md`](query.md#what-comes-back).
 
-The type argument goes on `createPgRest`, not on the call. TypeScript stops inferring the remaining type arguments as
+The type argument goes on `createQuery`, not on the call. TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<Database>({ … })` would check the input and then hand back `unknown` —
 measured both ways before settling on this shape.
 
 An instance created **without** a type argument keeps the loose input and `query<Todo[]>(…)` to name the result
-yourself, which is the escape hatch for everything below. `handle()` is identical either way: an HTTP request is a
+yourself, which is the escape hatch for everything below. `handle()` of `@tsql/rest` has no such type: an HTTP request is a
 string from outside and cannot be typed.
 
 ## In your editor

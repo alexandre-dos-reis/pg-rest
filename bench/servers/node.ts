@@ -1,11 +1,11 @@
 // pg-rest on Node.js: @hono/node-server (http -> Request/Response) + node-postgres.
 import { serve } from "@hono/node-server";
 import pg from "pg";
-import { createPgRest } from "../../dist/index.js";
-import { nodePostgresAdapter } from "../../dist/adapters/node-postgres.js";
+import { createRest } from "../../packages/rest/dist/index.js";
+import { nodePostgresAdapter } from "../../packages/rest/dist/adapters/node-postgres.js";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: Number(process.env.POOL ?? 10) });
-const pgRest = await createPgRest({
+const pgRest = await createRest({
   db: nodePostgresAdapter(pool as never),
   schemas: ["api"],
   anonymousRole: "anon",

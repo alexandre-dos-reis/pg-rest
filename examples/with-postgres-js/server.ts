@@ -1,11 +1,11 @@
 import { serve } from "@hono/node-server"; // only used to turn Node's http into Request/Response
 import postgres from "postgres";
-import { createPgRest } from "@adrdp/pg-rest";
-import { postgresJsAdapter } from "@adrdp/pg-rest/adapters/postgres-js";
+import { createRest } from "@tsql/rest";
+import { postgresJsAdapter } from "@tsql/rest/adapters/postgres-js";
 
 const sql = postgres(process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres");
 
-const pgRest = await createPgRest({
+const pgRest = await createRest({
   db: postgresJsAdapter(sql),
   schemas: ["api"],
   anonymousRole: "anon",

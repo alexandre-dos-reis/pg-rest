@@ -1,10 +1,10 @@
-// The instance the application imports, created once and typed by db.types.ts: `table` and `rpc`
+// The instance the application imports, created once and typed by db.generated.ts: `table` and `rpc`
 // are the ones that exist, and `data` is inferred from the `select` -- inside a transaction too.
-import { createPgRest } from "@adrdp/pg-rest";
+import { createQuery } from "@tsql/query";
 import { pgRestOptions } from "./db.ts";
-import type { DatabasePgRest } from "./db.types.ts";
+import { schema, type DatabasePgRest } from "./db.generated.ts";
 
-export const pgRest = await createPgRest<DatabasePgRest>(pgRestOptions);
+export const pgRest = createQuery<DatabasePgRest>({ ...pgRestOptions, schema });
 
 /** The two rows this example moves money between, read outside any scope. */
 export const balances = async (): Promise<string> => {

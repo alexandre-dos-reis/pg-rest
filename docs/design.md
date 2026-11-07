@@ -32,7 +32,7 @@ Not gaps — adding them would work against the point of the project.
 | Standalone server, CLI, host/port, unix sockets, TLS, `log-level`, `server-timing` | `handle(Request) => Response` is web-standard and runs under `Bun.serve`, `@hono/node-server`, or anything that hands you a `Request`. Owning the server would tie the library to one runtime and duplicate what your framework already does | Mount `handle` in your own server |
 | Admin server (`/live`, `/ready`, `/metrics`) | Health checks and metrics belong to the host process | Expose them in your app |
 | CORS headers | Policy depends on your deployment | Set them in your server or middleware |
-| Config file, environment variables, `PGRST_*` | Configuration is the `createPgRest(options)` call: typed, and living with the code | Pass options; read env vars yourself |
+| Config file, environment variables, `PGRST_*` | Configuration is the `createRest(options)` or `createQuery(options)` call: typed, and living with the code | Pass options; read env vars yourself |
 | Connection pool, `db-uri` | The pool belongs to your driver, and the driver is your choice. pg-rest never opens a connection | Create the pool, wrap it in an adapter |
 | In-database configuration (`db-pre-config`, per-role `ALTER ROLE … SET pgrst.*`) | Settings are options in code, so they are versioned and visible with the application | Use the options; `preRequest` can still call a SQL function for database-side logic |
 | Schema cache reload over SQL (`NOTIFY pgrst`, `db-channel`, `SIGUSR1`/`SIGUSR2`, DDL event triggers) | They need a dedicated `LISTEN` connection and signal handling, which a library must not hold open or assume — serverless, PGlite and pooled connections cannot `LISTEN`. The introspection itself is implemented | Call `reloadSchema()` after a migration, or wire it to your own `LISTEN` |
@@ -41,11 +41,11 @@ Not gaps — adding them would work against the point of the project.
 
 The same trade reversed: because it runs inside your process, it can do things a server cannot.
 
-- **Queries without HTTP.** `query({ table: "todos", select: ["id"] })` goes through the same parser, the same SQL and
-  the same errors as a request — no loopback call, and no second copy of the logic for your server components, jobs and
+- **Queries without HTTP.** `query({ table: "todos", select: ["id"] })` goes through the same parser and the same SQL as a
+  request — no loopback call, and no second copy of the logic for your server components, jobs and
   webhooks. → [`query.md`](query.md)
-- **Types from your own catalog.** `generateTypes()` reads the cache the library already holds, so the types describe
-  exactly what it accepts. → [`types.md`](types.md)
+- **Types from your own catalog.** `generateModule()` reads `pg_catalog` once, at build time, and writes the types and
+  the schema `createQuery` runs on: the types describe exactly what it accepts, and a running server never reads the catalog. → [`types.md`](types.md)
 - **Composite values as objects.** `where: { owner: { city: "Paris" } }` compares a
   [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
   PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.

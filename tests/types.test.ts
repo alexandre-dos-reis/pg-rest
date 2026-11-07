@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { generateTypes } from "../src/types";
-import { createPgRest } from "../src/index";
-import { introspect, type Column, type CompositeType, type Relation, type SchemaCache } from "../src/schema";
+import { generateModule, generateTypes } from "../packages/query/src/types";
+import {
+  fromDescriptor,
+  introspect,
+  toDescriptor,
+  type Column,
+  type CompositeType,
+  type Relation,
+  type SchemaCache,
+} from "../packages/core/src/schema";
 import { createTestDb, hasDb, requirePostgis, type TestDb } from "./support/db";
 
 const column = (name: string, type: string, extra: Partial<Column> = {}): Column => ({
@@ -144,13 +151,16 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
   });
   afterAll(() => db.drop());
 
-  test("the instance generates the same thing, with the generator loaded on demand", async () => {
-    const api = await createPgRest({ db: db.adapter, schemas: ["api", "v2"] });
-    expect(await api.generateTypes({ name: "DatabasePgRest" })).toBe(generateTypes(cache, { name: "DatabasePgRest" }));
-    // the options are the generator's own
-    expect(await api.generateTypes()).toContain("export type Database = {");
-    expect(await api.generateTypes({ header: false })).not.toStartWith("//");
-    await api.close();
+  test("the module carries the descriptor createQuery runs on", () => {
+    const mod = generateModule(cache, { name: "DatabasePgRest" });
+    expect(mod).toContain("export type DatabasePgRest = {");
+    expect(mod).toContain("export const schema: SchemaDescriptor = ");
+    // the descriptor is the cache as plain data, and reads back to the same cache
+    const back = fromDescriptor(JSON.parse(JSON.stringify(toDescriptor(cache))));
+    expect([...back.relations.keys()]).toEqual([...cache.relations.keys()]);
+    expect([...back.functions.keys()]).toEqual([...cache.functions.keys()]);
+    expect(back.foreignKeys).toEqual(cache.foreignKeys);
+    expect(generateTypes(cache, { header: false })).not.toStartWith("//");
   });
 
   test("the committed types are exactly what the generator produces", async () => {

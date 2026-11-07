@@ -4,7 +4,7 @@
 // can come from anywhere -- and the application code in transfers.ts never mentions a role, a
 // claim or a user id. It just runs queries.
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RequestContext } from "@adrdp/pg-rest";
+import type { RequestContext } from "@tsql/query";
 import { pgRest } from "./client.ts";
 
 const store = new AsyncLocalStorage<RequestContext>();

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createPgRest, type TypedPgRestInstance } from "../src/index";
+import { createPgRest, type TypedPgRestInstance } from "./support/pgrest";
 import { createTestDb, hasDb, type TestDb } from "./support/db";
 import type { DatabasePgRest } from "./support/fixture.types";
 
@@ -346,7 +346,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     assertType<Equal<typeof data, Array<{ name: string }>>>();
     expect(data).toEqual([{ name: "Ada" }]);
 
-    // 0 rows with `single` is a 406 PGRST116, and the failed half is what comes back
+    // 0 rows with `single` is `not_single_row`, and the failed half is what comes back
     const failed = await pgRest.query({ table: "clients", select: ["name"], where: { id: 999 }, single: true });
     if (!failed.error) throw new Error("expected a failure");
     assertType<Equal<typeof failed.data, null>>();
@@ -368,8 +368,8 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   test("the types do not know the role: that stays the database's job", async () => {
     // this compiles: `clients` is a writable table, and nothing in the type mentions `anon`
     const denied = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } });
-    expect(denied.error?.status).toBe(401);
-    expect(denied.error?.body.code).toBe("42501"); // insufficient_privilege, straight from Postgres
+    expect(denied.error?.kind).toBe("unauthenticated");
+    expect(denied.error?.sqlState).toBe("42501"); // insufficient_privilege, straight from Postgres
     // the same call as a role that was granted the write succeeds
     const allowed = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } }, authed);
     expect(allowed.error).toBeNull();

@@ -1,7 +1,7 @@
 # `query()` — asking in-process
 
-pg-rest is a library, so the HTTP envelope is optional: `query()` takes a plain object, runs in the calling process, and
-goes through the same parser, the same SQL and the same errors as `handle(request)`. One example per field below; the
+`@tsql/query` asks Postgres from inside your process: `query()` takes a plain object and answers a result, with no
+`Request`, no URL and no HTTP status in between. One example per field below; the
 options of the instance itself are in [`options.md`](options.md), and the types the examples rely on in
 [`types.md`](types.md).
 
@@ -121,7 +121,7 @@ CREATE FUNCTION api.recent_orders(api.clients) RETURNS SETOF api.orders …;
 Without a type argument, the input is loosely typed and you name the result yourself:
 
 ```ts
-const pgRest = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const { data } = await pgRest.query<Array<{ id: number; name: string }>>({
   table: "clients",
@@ -132,15 +132,15 @@ const { data } = await pgRest.query<Array<{ id: number; name: string }>>({
 With one, everything inside is checked and the result is inferred. The type comes from the catalog — see [`types.md`](types.md):
 
 ```ts
-import type { Database } from "./db.types.ts";
+import type { Database } from "./db.generated.ts";
 
-const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 const { data } = await pgRest.query({ table: "clients", select: ["id", "name"] });
 // data: Array<{ id: number; name: string }>
 ```
 
-Everything below assumes the typed instance. The rest of the API — `handle`, `schemaCache`, `reloadSchema`, `close` — is
+Everything below assumes the typed instance. The rest of the API — `setContextQuery`, `transaction`, `close` — is
 unchanged.
 
 ## Reading
@@ -234,7 +234,7 @@ const manager = await pgRest.query({
 // manager.data: Array<{ name: string; manager: { name: string } | null }>
 
 // `hint` names the relationship to follow, which is required when more than one leads to the same
-// resource (`PGRST201` tells you so, and lists them)
+// resource (the error is `invalid_embed`, and its `details` list them)
 const hinted = await pgRest.query({
   table: "orders",
   select: ["id", { clients: { select: ["name"], hint: "orders_client_id_fkey" } }],
@@ -286,7 +286,7 @@ const nulls = await pgRest.query({
 });
 ```
 
-Every operator PostgREST has, by what it works on. A `$` key is an operator; the table at the end lists them all.
+Every operator, by what it works on. A `$` key is an operator; the table at the end lists them all.
 
 **Comparison** works on numbers, text, dates, enums and arrays:
 
@@ -333,7 +333,7 @@ const regex = await pgRest.query({
 `IS NOT NULL`; `$is` is for the three-valued logic of booleans:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const nulls = await pgRest.query({
   table: "clients",
@@ -420,7 +420,7 @@ const whole = await pgRest.query({
 too, and the range operators on a range column:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const json = await pgRest.query({
   table: "clients",
@@ -445,7 +445,7 @@ const ranges = await untyped.query({
 operator applies to the result. It is available on an instance created without a type argument:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const paths = await untyped.query({
   table: "venues",
@@ -558,14 +558,13 @@ const sorted = await pgRest.query({
   offset: 20,
 });
 
-// `single` gives the object itself -- and a 406 (PGRST116) when there is not exactly one row
+// `single` gives the object itself -- and a `not_single_row` error when there is not exactly one row
 const one = await pgRest.query({ table: "clients", select: ["name"], where: { id: 1 }, single: true });
 // one.data: { name: string }
 
 // `count` fills `count` with the number of matching rows, ignoring limit/offset
 const counted = await pgRest.query({ table: "orders", select: ["id"], limit: 1, count: "exact" });
 // counted.count: number -- on a typed instance the mode decides the type, so there is nothing to test for
-// counted.status: 206 when the answer is partial
 
 // "planned" asks the planner, which can have no usable number: that one stays optional
 const guessed = await pgRest.query({ table: "orders", select: ["id"], count: "planned" });
@@ -606,7 +605,7 @@ const byOwner = await pgRest.query({
 // `{ name: "Ada" }` is not "whose name is Ada": it compares against a row whose other fields are
 // NULL. For one field, use its path -- on an instance created without a type argument, like any
 // other JSON path (see "What the typed path does not describe")
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 const byName = await untyped.query({ table: "venues", select: ["id"], where: { "owner->>name": "Ada" } });
 
 // writing one: the fields left out are NULL
@@ -620,10 +619,10 @@ const placed = await pgRest.query({
 ```
 
 The arrow operators reach a single field, and work on a composite column exactly as they do on `jsonb` — nested, and
-through an array — because pg-rest converts the column with `to_jsonb()` first, as PostgREST does:
+through an array — because the column is converted with `to_jsonb()` first:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const fields = await untyped.query({
   table: "venues",
@@ -635,20 +634,17 @@ const fields = await untyped.query({
 
 Two things to know:
 
-- **A whole-value filter is pg-rest's own.** PostgREST answers `0A000` (_input of anonymous composite types is not
-  implemented_) to any comparison against a composite column, because the literal it sends has no type. pg-rest sends
-  the value as JSON and turns it into a row of the column's own type, so the comparison works — over `handle()` too,
-  since both entry points share one pipeline. A bare Postgres row literal (`owner=eq.(Ada,,)`) still answers `0A000`,
-  like PostgREST.
+- **A whole-value filter compares the whole composite.** The value is sent as JSON and turned into a row of the
+  column's own type, so `{ owner: { name: "Ada" } }` works. A bare Postgres row literal as a string
+  (`owner: "(Ada,,)"`) is not a value of the column's type and the database refuses it.
 - **An object whose keys all start with `$` names operators.** `{ owner: { $eq: … } }` is a filter, not a composite
   value: any other object is read as a value. A composite type with a field whose name starts with `$` therefore cannot
   be compared through the object form — pass the JSON yourself, as a string: `{ owner: '{"$id":1,"name":"Ada"}' }`.
 
 ## Writing
 
-`action` says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`, which is the
-one place this API departs from PostgREST's default on purpose — a function that gives nothing back is of little use in a
-program.
+`action` says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`: a function
+that gives nothing back is of little use in a program.
 
 ```ts
 // insert one, and get it back
@@ -658,7 +654,7 @@ const created = await pgRest.query({
   rows: { name: "Hopper", email: "grace@example.com" },
   select: ["id", "name"],
 });
-// created.data: Array<{ id: number; name: string }>, created.status: 201
+// created.data: Array<{ id: number; name: string }>
 
 // insert many
 const bulk = await pgRest.query({
@@ -709,7 +705,7 @@ const deleted = await pgRest.query({
   where: { id: 99 },
   returning: "minimal",
 });
-// deleted.data: null, deleted.status: 204
+// deleted.data: null
 
 // refuse the whole thing if it would touch too many rows (the transaction rolls back)
 const careful = await pgRest.query({
@@ -743,8 +739,7 @@ void pgRest.query({ table: "clients", rows: { name: "x" } });
 
 ### Computed values
 
-`set` takes more than values. This part is pg-rest's own, a superset of PostgREST's `PATCH`, and it is only there in
-`query()`: over HTTP a `PATCH` body is PostgREST's, a JSON object. It follows PostgreSQL's `UPDATE … SET`, one column at
+`set` takes more than values. It follows PostgreSQL's `UPDATE … SET`, one column at
 a time: `column_name = { expression | DEFAULT }`.
 
 A plain value is still a plain value. An object whose keys all start with `$` is an expression the database computes,
@@ -904,7 +899,7 @@ const capped = await pgRest.query({
 `$ov` take two operands; `$and` and `$or` any number; `$not` one.
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const booleans = await untyped.query({
   table: "todos",
@@ -1020,7 +1015,7 @@ the request path, so its result is `Record<string, unknown>` and any `select` is
 ## Who is asking
 
 The second argument is the caller. It is applied with `set_config` inside the transaction, so row level security and
-privileges see exactly what they would behind PostgREST:
+privileges apply to the query as they would to any session of that role:
 
 ```ts
 const ctx = { role: "authenticated", claims: { sub: user.id, email: user.email } };
@@ -1065,7 +1060,7 @@ const { data, error } = await pgQuery({ table: "notes", select: ["body"] });
 
 ```ts ignore
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RequestContext } from "@adrdp/pg-rest";
+import type { RequestContext } from "@tsql/query";
 
 const store = new AsyncLocalStorage<RequestContext>();
 ```
@@ -1085,8 +1080,7 @@ await db({ table: "notes", select: ["id"] }, { role: "admin" });
 
 // a source that gives nothing -- the store was never entered -- is an error, not the anonymous role
 const forgotten = await db({ table: "notes" });
-forgotten.error?.status; //    500
-forgotten.error?.body.code; // "PGRSTX01"
+forgotten.error?.kind; // "no_context"
 ```
 
 Falling back to `anon` there would turn a missing middleware into a silent change of privileges, which is the kind of
@@ -1122,12 +1116,12 @@ const { data, error } = await pgRest.transaction(async (tx) => {
   return order.data.id; //                         this is the result's `data`
 }, ctx);
 
-error?.status; // the failure, if there was one -- `transaction()` never rejects
+error?.kind; //   the failure, if there was one -- `transaction()` never rejects
 data; //          number | null
 ```
 
-The result is a `QueryResult` around whatever the callback returned: `data` is that value, there is no `count`, and the
-status is `200`. A failure comes back the way `query()`'s does — a `QueryError` if it was one, a 500 carrying the
+The result is a `QueryResult` around whatever the callback returned: `data` is that value, and there is no `count`.
+A failure comes back the way `query()`'s does — a `QueryError` if it was one, an `internal` one carrying the
 original under `cause` if it was anything else.
 
 **`tx.query` differs from `query` in exactly two ways**, and both of them follow from sharing a transaction.
@@ -1161,7 +1155,7 @@ The promise that never rejects did not disappear; it moved from the query to the
 can mean anything now that several of them share a transaction. What `tx.query` throws is the same `QueryError`
 `query()` would have returned, so a `catch` can read it — and the section below is about why you rarely want to.
 
-What the context does _not_ cover is per-statement: the `search_path`, the `request.*` settings SQL reads and the
+What the context does _not_ cover is per-statement: the `search_path` and the
 `timezone` are issued with every query inside the scope, which is what lets two queries of one transaction name two
 schemas.
 
@@ -1174,7 +1168,7 @@ const refused = await pgRest.transaction(async (tx) => {
   await tx.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "a@b.c" } });
   return "unreachable"; //                       the second insert collides, so this is never reached
 }, ctx);
-refused.error?.body.code; // "23505" -- the query's own failure, carried out of the scope
+refused.error?.sqlState; // "23505" -- the query's own failure, carried out of the scope
 
 // 2. a throw of your own, for a reason the database knows nothing about
 await pgRest.transaction(async (tx) => {
@@ -1187,11 +1181,11 @@ const left = await pgRest.transaction(async (tx) => {
   await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
   tx.rollback();
 }, ctx);
-left.error?.body.code; // "PGRSTX02", kind "rolled_back"
+left.error?.kind; // "rolled_back"
 ```
 
 A fourth case is worth naming because it is the one that could have been wrong. `single` and `maxAffected`
-(`PGRST116`, `PGRST124`) are the library's own checks, raised _after_ a statement that worked, in order to undo the
+(`not_single_row`, `too_many_affected`) are the library's own checks, raised _after_ a statement that worked, in order to undo the
 write they just measured. Nothing has aborted the transaction when they fire — so a scope that committed because the
 callback returned would keep the row and hand you an `error` describing it as refused. **Any query that failed stops
 the scope from committing**, even if you caught what it threw and carried on:
@@ -1207,12 +1201,12 @@ const kept = await pgRest.transaction(async (tx) => {
   return "unreachable";
 }, ctx);
 kept.data; //            null -- the scope rolled back regardless
-kept.error?.status; //   406: the PGRST116 of the query that failed
+kept.error?.kind; //     "not_single_row": the query that failed
 ```
 
 Which is also why catching inside a scope buys little: PostgreSQL has aborted the transaction, the next statement
 answers `25P02` whatever it is, and the scope will not commit. pg-rest says so rather than passing that on —
-`PGRSTX03`, with the way out in its `hint`. The way out is the next section.
+a `rolled_back` error, with the way out in its `hint`. The way out is the next section.
 
 ### Letting one query fail: a nested scope
 
@@ -1228,7 +1222,7 @@ await pgRest.transaction(async (tx) => {
   const profile = await tx.transaction((nested) =>
     nested.query({ table: "profiles", action: "insert", rows: { client_id: client.data.id, bio: "hi" } }),
   );
-  profile.error?.body.code; //  "23505" perhaps -- and the scope is still good
+  profile.error?.sqlState; //  "23505" perhaps -- and the scope is still good
 
   return { client: client.data.id, profile: profile.error === null };
 }, ctx);
@@ -1282,7 +1276,7 @@ for.
 
 The bound form carries the scope too, and reads its source **once, on entry**: a transaction has one `set_config`, so a
 source answering differently halfway through could not be honoured anyway. A source that gives nothing is the
-`PGRSTX01` it already is, returned before the `BEGIN` rather than leaving an empty transaction open.
+`no_context` error it already is, returned before the `BEGIN` rather than leaving an empty transaction open.
 
 ```ts
 const pgQuery = pgRest.setContextQuery(() => store.getStore());
@@ -1310,8 +1304,8 @@ between two accounts, the caller read from an `AsyncLocalStorage`, and one scope
 
 ## Errors
 
-`query()` never rejects: a failure is part of the result, as an `error` carrying the PostgREST status and body plus the
-input that produced it. Exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and `count`.
+`query()` never rejects: a failure is part of the result, as an `error` carrying what went wrong and the input that
+produced it. Exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and `count`.
 
 ```ts
 const { data, count, error } = await pgRest.query(
@@ -1319,24 +1313,23 @@ const { data, count, error } = await pgRest.query(
   ctx,
 );
 if (error) {
-  error.kind; //         "conflict" -- one of a closed set of strings, to switch on
-  error.status; //       409
-  error.body.code; //    "23505" -- the SQLSTATE, or a PGRSTxxx code
-  error.body.message; // "duplicate key value violates unique constraint …"
-  error.body.details;
-  error.body.hint;
-  error.input; //        the object you passed
-  error.message; //      "23505: duplicate key … " -- one line, for your logs
-  error.summary; //      the same failure written out for a person to read (below)
+  error.kind; //     "conflict" -- one of a closed set of strings, to switch on
+  error.message; //  "duplicate key value violates unique constraint …"
+  error.details; //  "Key (email)=(ada@example.com) already exists."
+  error.hint; //     what to do about it, when the database or the parser knew -- or null
+  error.sqlState; // "23505" -- for a failure that came from the database, otherwise undefined
+  error.input; //    the object you passed
+  error.summary; //  the same failure written out for a person to read (below)
 } else {
   data; //  non-null here, and `count` is the type the query asked for
   void count;
 }
 ```
 
-`error` is a `QueryError`, an `ApiError`, an `Error`: throw it, log it, or hand `error.body` straight to an HTTP client.
-Even a failure the library did not foresee arrives this way -- a 500 carrying the original under `cause` -- so no
-`try`/`catch` is needed anywhere.
+`error` is a `QueryError`, an `Error`: throw it, log it, or read its fields. Even a failure the library did not foresee
+arrives this way -- an `internal` one carrying the original under `cause` -- so no `try`/`catch` is needed anywhere.
+There is no HTTP status on it: `query()` has no response, and what to answer is for the caller to decide from the
+`kind`.
 
 `error.summary` is the same failure written out for whoever reads it: the call it came from, then what the database or
 the parser said, then `details`, `hint` and the kind, each on its own line.
@@ -1344,18 +1337,18 @@ the parser said, then `details`, `hint` and the kind, each on its own line.
 ```
 insert on "clients" failed: duplicate key value violates unique constraint "clients_email_key"
   details: Key (email)=(ada@example.com) already exists.
-  kind: conflict -- a unique or foreign key constraint rejected the row (23505, HTTP 409)
+  kind: conflict -- a unique or foreign key constraint rejected the row (23505)
 ```
 
-It is a separate field rather than the `message`, which stays the one-line `"23505: duplicate key … hint: …"` summary
-`ApiError` builds for a response: a multi-line `Error.message` is not what a log collector expects. `console.error(error.summary)`
-when you want the long form, `throw error` when you want the short one. `body` is untouched either way -- it stays
-exactly the JSON PostgREST answers with.
+It is a separate field rather than the `message`, which stays the one line the database or the parser gave: a
+multi-line `Error.message` is not what a log collector expects. `console.error(error.summary)` when you want the long
+form, `throw error` when you want the short one.
 
 ### `kind`: the error to switch on
 
-`code` is exact and there are dozens of them; `kind` is the handful of cases that call for _different reactions_, as a
-string union, so a `switch` is checked by the compiler rather than by a table of codes you keep yourself:
+`kind` is the handful of cases that call for _different reactions_, as a string union, so a `switch` is checked by the
+compiler rather than by a table of codes you keep yourself. For a database error the exact reason is still there, in
+`sqlState`:
 
 ```ts
 const addClient = async (name: string, email: string) => {
@@ -1369,15 +1362,15 @@ const addClient = async (name: string, email: string) => {
     case "unauthenticated":
     case "forbidden":
       // about who is asking, not about what they asked
-      throw new Response(error.body.message, { status: error.status });
+      throw new Error(error.message);
     case "conflict":
       return { ok: false as const, why: "that email is already taken" };
     case "invalid_data":
       // a check constraint or a NOT NULL: the database says which
-      return { ok: false as const, why: error.body.message };
+      return { ok: false as const, why: error.message };
     case "raised":
       // your own RAISE, so your own wording
-      return { ok: false as const, why: error.body.message };
+      return { ok: false as const, why: error.message };
     case "unavailable":
       return { ok: false as const, why: "the database is down, try again" };
     default:
@@ -1393,7 +1386,7 @@ Every kind, and what it means:
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
 | `invalid_payload`   | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write          |
-| `undefined_object`  | no table, view or function by that name — a typo (read the `hint`), or a migration the schema cache has not seen                     |
+| `undefined_object`  | no table, view or function by that name — a typo (read the `hint`), or a migration the generated schema has not seen                 |
 | `invalid_embed`     | no relationship between two resources, or more than one, which needs a `hint`                                                        |
 | `not_single_row`    | `single` matched other than exactly one row — both "not found" and "found several"                                                   |
 | `too_many_affected` | the write would have touched more rows than `maxAffected`, and was rolled back                                                       |
@@ -1401,36 +1394,20 @@ Every kind, and what it means:
 | `forbidden`         | the role lacks the privilege. RLS _hiding_ rows is empty data, not an error                                                          |
 | `conflict`          | a unique or foreign key constraint rejected the row                                                                                  |
 | `invalid_data`      | the values themselves were refused: a check constraint, a `NOT NULL`, a failed cast                                                  |
-| `raised`            | your own `RAISE` in SQL (`P0001`, `PTxyz`, `PGRST`), with the message you wrote                                                      |
+| `raised`            | your own `RAISE` in SQL, with the message you wrote                                                                                  |
 | `unsupported`       | not implemented, or not over `query()`                                                                                               |
 | `unavailable`       | the database could not be reached, is out of connections, or timed out — retrying may work                                           |
 | `no_context`        | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once))                                             |
+| `rolled_back`       | a transaction scope will not commit: `rollback()` was called, or a query in it already failed                                        |
 | `internal`          | anything left: a bug, or an error pg-rest did not foresee. The original is under `cause`                                             |
 
-A later version may map a code onto a kind it did not have before, and new kinds are additive — which is why the
-`default` above matters, and why `code` remains the thing to test when you need the exact reason. The same mapping is
-exported for an `ApiError` you hold from `handle()`: `errorKind(status, code)`, and `describeErrorKind(kind)` for its
-wording.
-
-The codes behind them, and what you are likely to see:
-
-| code                    | status    | `kind`                          | when                                                                                     |
-| ----------------------- | --------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
-| `PGRST205`              | 404       | `undefined_object`              | no such table — with a `hint` suggesting the nearest name                                |
-| `PGRST204`              | 400       | `invalid_payload`               | no such column in a write payload                                                        |
-| `PGRST200` / `PGRST201` | 400 / 300 | `invalid_embed`                 | no relationship between two resources, or more than one (pass a `hint`)                  |
-| `PGRST116`              | 406       | `not_single_row`                | `single` matched something other than exactly one row                                    |
-| `PGRST124`              | 400       | `too_many_affected`             | `maxAffected` exceeded                                                                   |
-| `PGRST302`              | 401       | `unauthenticated`               | no context and anonymous access disabled                                                 |
-| `PGRSTX01`              | 500       | `no_context`                    | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once)) |
-| `42501`                 | 401 / 403 | `unauthenticated` / `forbidden` | the role lacks the privilege                                                             |
-| `23505` / `23503`       | 409       | `conflict`                      | unique / foreign key violation                                                           |
-| `PT4xx`                 | 4xx       | `raised`                        | your own `RAISE … USING ERRCODE = 'PT404'`                                               |
-| `PGRST001`              | 503       | `unavailable`                   | the database connection failed                                                           |
+A later version may map a failure onto a kind it did not have before, and new kinds are additive — which is why the
+`default` above matters, and why `sqlState` remains the thing to test when you need the exact reason of a database
+error. `describeErrorKind(kind)` gives a kind's wording, for a log line.
 
 ## What the typed path does not describe
 
-Three PostgREST forms change or invent a column in a `select`, and reading them back out of a string literal would cost
+Three string forms of a `select` change or invent a column, and reading them back out of a string literal would cost
 more than it gives. A JSON path in a `where` is the exception, because a filter does not change the result: it is
 accepted on its column, with a value checked no further than its shape.
 
@@ -1454,22 +1431,13 @@ void pgRest.query({ table: "orders", select: ["status", "total.sum()"] });
 They work on an instance created without a type argument, where the input is loose:
 
 ```ts
-const loose = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const loose = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const { data } = await loose.query<Array<{ status: string; sum: number }>>({
   table: "orders",
   select: ["status", "total.sum()"],
   order: ["status"],
 });
-```
-
-Content negotiation stays on `handle()` entirely — CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
-headers, `OPTIONS` and the OpenAPI document:
-
-```ts
-const csv = await pgRest.handle(
-  new Request("http://localhost/orders?select=id,total", { headers: { Accept: "text/csv" } }),
-);
 ```
 
 ## Every field
@@ -1484,7 +1452,7 @@ const csv = await pgRest.handle(
 | `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
-| `single`          | one object instead of an array (406 otherwise)                                                            |
+| `single`          | one object instead of an array (`not_single_row` otherwise)                                                            |
 | `count`           | `"exact"`, `"planned"`, `"estimated"` → `count`. The mode decides its type: see [below](#what-comes-back) |
 | `stripNulls`      | leave null fields out of the result                                                                       |
 | `maxAffected`     | refuse and roll back beyond this many affected rows                                                       |
@@ -1499,8 +1467,8 @@ const csv = await pgRest.handle(
 
 ### What comes back
 
-`{ data, count, status }` — the rows, one object with `single`, or `null` for a minimal write; the total when a `count`
-was asked for; and the status the same call would have answered over HTTP.
+`{ data, count, error }` — the rows, one object with `single`, or `null` for a minimal write; the total when a `count`
+was asked for; and `error`, which is `null` when the query worked.
 
 On a [typed instance](types.md) `count` is typed from the mode the query asked for, which is exactly what the runtime
 answers:

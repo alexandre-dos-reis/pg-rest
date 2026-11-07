@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "paths": { "@tsql/core/*": ["../core/src/*"] }
+  },
+  "include": ["src", "../core/src"]
+}
