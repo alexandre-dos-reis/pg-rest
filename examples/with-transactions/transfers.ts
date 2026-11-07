@@ -2,7 +2,7 @@
 // user id, no `ctx` threaded through its signatures. That is what the AsyncLocalStorage in
 // context.ts is for -- and a transaction reads it once, on entry.
 import type { TypedTransaction } from "@tsql/query";
-import type { DatabasePgRest } from "./db.types.ts";
+import type { DatabasePgRest } from "./db.generated.ts";
 import { pgQuery } from "./context.ts";
 
 type Tx = TypedTransaction<DatabasePgRest>;

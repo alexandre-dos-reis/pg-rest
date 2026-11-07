@@ -5,7 +5,7 @@ queries that **check themselves** against types generated from the database. Thi
 
 ```sh
 bun install
-bun run gen:types   # 1. read the catalog, write db.types.ts
+bun run gen:types   # 1. read the catalog, write db.generated.ts
 bun start           # 2. run typed queries
 bun run typecheck   # and see that the mistakes in mistakes.ts really are mistakes
 ```
@@ -36,14 +36,14 @@ nothing to start. It deliberately knows nothing about the generated types: the g
 
 ```ts
 const types = await pgRest.generateTypes({ name: "DatabasePgRest" });
-writeFileSync(new URL("./db.types.ts", import.meta.url), types);
+writeFileSync(new URL("./db.generated.ts", import.meta.url), types);
 ```
 
 The types come from the catalog the instance already read to answer requests, so they describe exactly what it accepts.
 No CLI and no second connection: you already have a driver. This script builds its own *untyped* instance -- a generator
 cannot be typed by the file it is about to write, which is also why it imports `db.ts` and not `client.ts`.
 
-**`client.ts`** -- the instance your application code imports, created once and typed by `db.types.ts`:
+**`client.ts`** -- the instance your application code imports, created once and typed by `db.generated.ts`:
 
 ```ts
 export const pgRest = await createQuery<DatabasePgRest>(options);

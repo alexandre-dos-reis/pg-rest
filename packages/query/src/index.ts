@@ -1,5 +1,5 @@
 import type { RequestContext } from "@tsql/core/core";
-import { type EngineOptions, createEngine } from "@tsql/core/engine";
+import { type EngineOptions, createStaticEngine } from "@tsql/core/engine";
 import {
   type ContextQuery,
   type ContextSource,
@@ -15,8 +15,7 @@ import {
   runTransaction,
   toFailedResult,
 } from "./query";
-import type { SchemaCache } from "@tsql/core/schema";
-import type { GenerateTypesOptions } from "./types";
+import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
@@ -74,24 +73,21 @@ export type {
   UpdateQuery,
   Where,
 } from "./query";
-export type {
-  Column,
-  CompositeAttribute,
-  CompositeRef,
-  CompositeType,
-  ForeignKey,
-  FunctionDef,
-  Relation,
-  SchemaCache,
-} from "@tsql/core/schema";
-export { SchemaLoadError } from "@tsql/core/service";
-export type { GenerateTypesOptions } from "./types";
+export type { SchemaDescriptor } from "@tsql/core/schema";
 
 /**
  * What `createQuery` takes: the database and the settings a query reads. There is nothing about HTTP
  * here -- that is `@tsql/rest`.
  */
-export interface QueryOptions extends EngineOptions {}
+export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
+  /**
+   * The schema of the database, as generated at build time by `@tsql/query/types`. Nothing is read
+   * from the catalog when the instance is created or while it runs, and the descriptor is not
+   * checked: the types are what keep a query and the schema in step. The first schema it lists is
+   * the default one.
+   */
+  readonly schema: SchemaDescriptor;
+}
 
 export interface QueryInstance {
   /**
@@ -158,43 +154,26 @@ export interface QueryInstance {
    * to fail without taking the rest of the transaction with it.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>, options?: TransactionOptions): Promise<QueryResult<A, undefined>>;
-  /** Re-read the database catalog (after migrations). */
-  reloadSchema(): Promise<void>;
-  /** The current introspected schema. */
-  schemaCache(): Promise<SchemaCache>;
-  /**
-   * TypeScript types for this database, as the text of a module. Write it next to your code, keep
-   * it in version control, and hand the type it exports to `createQuery<Database>` so queries
-   * check themselves. Run it again after a migration.
-   *
-   * ```ts
-   * writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }));
-   * ```
-   *
-   * The generator is loaded on demand, so a server that never calls this never pays for it. The
-   * same function is exported standalone as `@tsql/query/types` for when you hold a
-   * {@link SchemaCache} rather than an instance.
-   */
-  generateTypes(options?: GenerateTypesOptions): Promise<string>;
   /** Stop the instance. The database adapter is left open: close it yourself. */
   close(): Promise<void>;
 }
 
 export interface CreateQuery {
-  (options: QueryOptions): Promise<QueryInstance>;
+  (options: QueryOptions): QueryInstance;
   /**
    * With a database type from `generateTypes` (`@tsql/query/types`), `query` is typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
    * name real columns and relationships, and `data` is inferred from the `select`.
    */
-  <Db extends AnyDatabase>(options: QueryOptions): Promise<TypedQueryInstance<Db>>;
+  <Db extends AnyDatabase>(options: QueryOptions): TypedQueryInstance<Db>;
 }
 
-const create = async (options: QueryOptions): Promise<QueryInstance> => {
-  const { adapter, config, store } = await createEngine(options);
+const create = (options: QueryOptions): QueryInstance => {
+  const cache = fromDescriptor(options.schema);
+  const { adapter, config } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
 
   const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
     try {
-      return (await runQuery({ db: adapter, config, cache: store.current() }, input, ctx ?? {})) as QueryResult<T>;
+      return (await runQuery({ db: adapter, config, cache }, input, ctx ?? {})) as QueryResult<T>;
     } catch (e) {
       // runQuery does not throw; this covers everything around it, so the promise cannot reject
       return toFailedResult(input, e) as QueryResult<T>;
@@ -206,7 +185,7 @@ const create = async (options: QueryOptions): Promise<QueryInstance> => {
     scope?: TransactionOptions,
   ): Promise<QueryResult<A, undefined>> => {
     try {
-      return await runTransaction<A>({ db: adapter, config, cache: store.current() }, fn, scope);
+      return await runTransaction<A>({ db: adapter, config, cache }, fn, scope);
     } catch (e) {
       // runTransaction does not throw; this covers everything around it, so the promise cannot reject
       return failedTransaction(e) as QueryResult<A, undefined>;
@@ -256,12 +235,6 @@ const create = async (options: QueryOptions): Promise<QueryInstance> => {
     query,
     setContextQuery,
     transaction,
-    // Type generation is a build-time job: importing it here would put the generator in the bundle
-    // of every server that only serves requests, so it is fetched when it is actually wanted.
-    generateTypes: async (forTypes?: GenerateTypesOptions) =>
-      (await import("./types")).generateTypes(store.current(), forTypes),
-    reloadSchema: async () => void (await store.reload()),
-    schemaCache: async () => store.current(),
     close: async () => {},
   };
 };

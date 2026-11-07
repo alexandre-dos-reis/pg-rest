@@ -78,8 +78,9 @@ npm i @tsql/query pg
 ```ts
 import { createQuery } from "@tsql/query";
 import { nodePostgresAdapter } from "@tsql/query/adapters/node-postgres";
+import { schema } from "./db.generated"; // written at build time: see below
 
-const pgRest = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
 ```
 
 ### In the same process, with types from your schema
@@ -122,14 +123,16 @@ that never rejects is the scope's. `tx.transaction()`, a savepoint, is how one q
 
 → [`docs/query.md`](docs/query.md)
 
-One command writes the types for your database, and one type argument puts them to work:
+One build-time call reads the catalog and writes the types and the schema `createQuery` runs on, and one type
+argument puts the types to work. A running server never reads the catalog, and checks nothing at runtime: the compiler
+is what keeps a query and the schema in step.
 
 ```ts
-writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }));
+writeFileSync("src/db.generated.ts", generateModule(await introspect(nodePostgresAdapter(pool), ["api"]), { name: "Database" }));
 ```
 
 ```ts
-const pgRest = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 const { data, count, error } = await pgRest.query({
   table: "todos", //                             only a relation that exists

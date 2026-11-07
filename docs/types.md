@@ -1,9 +1,12 @@
 # Types generated from the database
 
-`pgRest.generateTypes()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands it to
-`query()` so the queries check themselves. The types come from `schemaCache()` — the introspected `pg_catalog`, the same
-one the library reads to answer a request — so what they allow is what it accepts, with no second source of truth to
-drift.
+`generateModule()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands its types to
+`query()` so the queries check themselves. The module also carries the **schema descriptor** `createQuery` runs on, so
+the types and what the library does come from one read of `pg_catalog`, with no second source of truth to drift — and
+a running server never reads the catalog at all.
+
+The checking is the compiler's and nothing else: the descriptor is trusted as generated, and no query is validated
+against it at runtime, which keeps `query()` fast.
 
 - [Generating](#generating)
 - [What the file contains](#what-the-file-contains)
@@ -17,20 +20,18 @@ drift.
 ```ts
 // scripts/gen-types.ts — run it again after a migration
 import { writeFileSync } from "node:fs";
+import { generateModule, introspect } from "@tsql/query/types";
 
-writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }));
+const cache = await introspect(nodePostgresAdapter(pool), ["api"]);
+writeFileSync("src/db.generated.ts", generateModule(cache, { name: "Database" }));
 ```
 
-No CLI and no second database connection: you already have a driver, and the library has no runtime dependency to spend
-on one. The generator is loaded by that call and not before, so a server that only serves requests never carries it.
+The file exports the type `Database` and the descriptor `schema`, and `createQuery<Database>({ db, schema })` takes both.
+No CLI and no second database connection: you already have a driver. This is build-time code, which a server that only
+serves queries never loads.
 
-When you hold a `SchemaCache` rather than an instance, the same function is exported standalone:
-
-```ts
-import { generateTypes } from "@tsql/query/types";
-
-const types = generateTypes(await pgRest.schemaCache(), { name: "Database" });
-```
+`generateTypes(cache)` gives the types alone and `generateSchema(cache)` the descriptor alone, for when they go in
+different files.
 
 | option | |
 | --- | --- |
@@ -119,7 +120,7 @@ Only the composite types the module actually mentions are declared, so a `noUnus
 ## A typed instance
 
 ```ts
-const pgRest = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 ```
 
 From there, `table` and `rpc` are the ones that exist, `select`, `where` and `order` only name real columns and

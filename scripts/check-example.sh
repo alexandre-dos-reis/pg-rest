@@ -24,7 +24,7 @@ if [ ! -f server.ts ]; then
     bun run gen:types >/dev/null
     # the generated file is committed, so the generator's output for this schema is pinned here
     # (only that file: the rest of the example may legitimately differ in a working tree)
-    check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "examples/$name/db.types.ts")"
+    check "the generated types are what is committed" "" "$(cd "$root" && git diff --name-only -- "examples/$name/db.generated.ts")"
   fi
   # every @ts-expect-error has to still be an error, and the rest has to compile
   tsc_out="$(bun run typecheck 2>&1)" || { echo "FAIL typecheck:"; echo "$tsc_out"; exit 1; }

@@ -58,11 +58,15 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 
 | | |
 | --- | --- |
-| `query(input, ctx?)` | a request from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
+| `query(input, ctx?)` | a request from an object, in-process: `{ data, count, error }`. Never rejects → [`query.md`](query.md) |
 | `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
 | `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
-| `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
-| `schemaCache()`, `reloadSchema()`, `close()` | as above |
+| `close()` | stop the instance. Your driver is left open |
+
+`createQuery` takes the schema as an option, `schema`, generated at build time by `@tsql/query/types` → [`types.md`](types.md).
+It never reads the catalog, so there is nothing to reload: after a migration, generate the module again. It is the one
+place `createQuery` differs from `createRest`, which reads the catalog itself and has `schemaCache()` and
+`reloadSchema()`.
 
 With a generated database type — `createQuery<Database>(options)` — `query` is typed by it and everything else is
 unchanged.
@@ -73,11 +77,12 @@ body for pg-rest to parse straight back, two passes over a query you are already
 are built on one core, so the database sees the same thing either way; only the envelope differs. `@tsql/rest` stays
 PostgREST's, to the byte; what goes beyond PostgREST (the `$` filters, computed updates) is in `@tsql/query` only.
 
-An app that uses both creates both, and calls `reloadSchema()` on both after a migration:
+An app that uses both creates both; after a migration it calls `reloadSchema()` on the handler and regenerates the
+module for the query API:
 
 ```ts
 const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
-const db = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 ```
 
 ## Errors

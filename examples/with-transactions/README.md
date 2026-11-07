@@ -6,7 +6,7 @@ pg-rest a REST process cannot offer: `transaction()` lends a transaction to **yo
 
 ```sh
 bun install
-bun run gen:types   # read the catalog, write db.types.ts
+bun run gen:types   # read the catalog, write db.generated.ts
 bun start           # seven scopes, one process
 bun run typecheck
 ```
@@ -44,7 +44,7 @@ followed it and the ledger row never happened — the balances are exactly what 
 Row Level Security policy that lets a member record a transfer only out of their own account.
 
 **`db.ts`** and **`gen-types.ts`** — PGlite, the schema loaded in memory, the options, and the
-generator that writes `db.types.ts` from the catalog (`bun run gen:types`, again after a migration).
+generator that writes `db.generated.ts` from the catalog (`bun run gen:types`, again after a migration).
 See [`with-generated-types`](../with-generated-types) for what that file looks like and why it is a
 separate step.
 

@@ -1,6 +1,7 @@
 import type { DbAdapter, DbSession } from "./adapter";
 import type { CoreConfig } from "./core";
 import { normalizeDbError } from "./errors";
+import type { SchemaCache } from "./schema";
 import { type SchemaStore, createSchemaStore } from "./service";
 
 /** What the two entry points (`@tsql/rest`'s `handle`, `@tsql/query`'s `query`) have in common. */
@@ -33,9 +34,11 @@ export interface Engine {
   readonly store: SchemaStore;
 }
 
+const staticStore = (cache: SchemaCache): SchemaStore => ({ current: () => cache, reload: async () => cache });
+
 const UNEXPOSABLE = new Set(["pg_catalog", "information_schema"]);
 
-export const createEngine = async (options: EngineOptions): Promise<Engine> => {
+const build = (options: EngineOptions): Pick<Engine, "adapter" | "config"> => {
   const schemas = options.schemas?.length ? [...options.schemas] : ["public"];
   for (const s of schemas) {
     if (UNEXPOSABLE.has(s)) {
@@ -74,7 +77,17 @@ export const createEngine = async (options: EngineOptions): Promise<Engine> => {
     preRequest: options.preRequest,
   };
 
-  // Read the catalog now so connection or catalog problems surface at startup.
-  const store = await createSchemaStore(adapter, schemas);
-  return { adapter, config, store };
+  return { adapter, config };
 };
+
+/** The catalog is read now, so connection or catalog problems surface at startup; `reload()` reads it again. */
+export const createEngine = async (options: EngineOptions): Promise<Engine> => {
+  const { adapter, config } = build(options);
+  return { adapter, config, store: await createSchemaStore(adapter, config.schemas) };
+};
+
+/** A cache already in hand (from a generated descriptor): the catalog is never read. */
+export const createStaticEngine = (options: EngineOptions, schema: SchemaCache): Engine => ({
+  ...build(options),
+  store: staticStore(schema),
+});

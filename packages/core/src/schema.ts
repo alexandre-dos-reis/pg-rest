@@ -144,6 +144,50 @@ export interface SchemaCache {
   readonly composites: ReadonlyMap<string, CompositeType>;
 }
 
+/**
+ * A {@link SchemaCache} as plain data: JSON-serializable, so it can be written to a module at build
+ * time and read back without touching the database. Maps become lists; nothing else changes.
+ */
+export interface SchemaDescriptor {
+  readonly schemas: ReadonlyArray<string>;
+  readonly relations: ReadonlyArray<Relation>;
+  readonly foreignKeys: ReadonlyArray<ForeignKey>;
+  readonly functions: ReadonlyArray<FunctionDef>;
+  readonly composites: ReadonlyArray<CompositeType>;
+  readonly mediaHandlers: ReadonlyArray<MediaHandler>;
+}
+
+export const toDescriptor = (cache: SchemaCache): SchemaDescriptor => ({
+  schemas: cache.schemas,
+  relations: [...cache.relations.values()],
+  foreignKeys: cache.foreignKeys,
+  functions: [...cache.functions.values()].flat(),
+  composites: [...cache.composites.values()],
+  mediaHandlers: cache.mediaHandlers,
+});
+
+/**
+ * Rebuild the cache from its descriptor. The descriptor is trusted as it is: there is no check at
+ * runtime, since it comes from the generator and the types are what hold it to the code.
+ */
+export const fromDescriptor = (d: SchemaDescriptor): SchemaCache => {
+  const functions = new Map<string, FunctionDef[]>();
+  for (const f of d.functions) {
+    const k = `${f.schema}.${f.name}`;
+    const list = functions.get(k);
+    if (list) list.push(f);
+    else functions.set(k, [f]);
+  }
+  return {
+    schemas: d.schemas,
+    relations: new Map(d.relations.map((r) => [`${r.schema}.${r.name}`, r])),
+    foreignKeys: d.foreignKeys,
+    functions,
+    composites: new Map(d.composites.map((c) => [`${c.schema}.${c.name}`, c])),
+    mediaHandlers: d.mediaHandlers,
+  };
+};
+
 export const relKey = (schema: string, name: string) => `${schema}.${name}`;
 
 /** The composite type of a column or attribute, from the cache. */

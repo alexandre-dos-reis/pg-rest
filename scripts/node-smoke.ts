@@ -30,7 +30,13 @@ try {
   };
   // the two packages, each built on its own: an app that uses both creates both
   const rest = await createRest(options);
-  const api = { ...(await createQuery(options)), handle: rest.handle };
+  // query runs on a generated descriptor: the catalog is read here, at "build time", by the built generator
+  const { introspect, generateModule, generateSchema } = await import("../packages/query/dist/types.js");
+  const cache = await introspect(options.db, ["api"]);
+  const schemaModule = generateSchema(cache);
+  const schema = JSON.parse(schemaModule.slice(schemaModule.indexOf("= ") + 2, schemaModule.lastIndexOf(";")));
+  const { schemas: _schemas, ...queryOptions } = options;
+  const api = { ...createQuery({ ...queryOptions, schema }), handle: rest.handle };
   const call = async (path: string, init: RequestInit = {}) => {
     const res = await api.handle(new Request(`http://localhost${path}`, init));
     return { status: res.status, body: await res.json().catch(() => null) as any, headers: res.headers };
@@ -74,13 +80,11 @@ try {
   assert.equal(failed.error.input.table, "cients");
   assert.equal(rows.error, null);
 
-  // generateTypes, both ways: the method (which loads the generator on demand, from the built
-  // chunk) and the standalone subpath. The generated module is plain text, with no imports.
-  const generated = await api.generateTypes({ name: "Db" });
+  // the generator is plain text, with the types and the descriptor in one module
+  const generated = generateModule(cache, { name: "Db" });
   assert.match(generated, /export type Db = \{/);
   assert.match(generated, /name: string;/);
-  const { generateTypes } = await import("../packages/query/dist/types.js");
-  assert.equal(generateTypes(await api.schemaCache(), { name: "Db" }), generated);
+  assert.match(generated, /export const schema: SchemaDescriptor = /);
 
   // RPC + OpenAPI
   assert.equal((await call("/rpc/add?a=40&b=2")).body, 42);

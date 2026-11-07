@@ -1,4 +1,4 @@
-// Step 2: use them. Every property below is checked against db.types.ts, and the result is inferred
+// Step 2: use them. Every property below is checked against db.generated.ts, and the result is inferred
 // from the select -- hover `todos` in your editor, or read the comments.
 //   node main.ts
 import { close, pgRest } from "./client.ts";
