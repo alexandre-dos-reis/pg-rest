@@ -47,17 +47,17 @@ describe("input -> query string", () => {
     expect(qs({ table: "orders", where: { status: { $not: { $in: ["paid", "shipped"] } } } })).toBe(
       "status=not.in.%28paid%2Cshipped%29",
     );
-    expect(qs({ table: "clients", where: { tags: { $any: ["vip", "early"] } } })).toBe(
-      "tags=eq%28any%29.%7Bvip%2Cearly%7D",
+    expect(qs({ table: "clients", where: { name: { $any: ["Ada", "Bob"] } } })).toBe(
+      "name=eq%28any%29.%7BAda%2CBob%7D",
     );
-    expect(qs({ table: "clients", where: { tags: { $any: { $eq: ["vip", "early"] } } } })).toBe(
-      "tags=eq%28any%29.%7Bvip%2Cearly%7D",
+    expect(qs({ table: "clients", where: { name: { $any: { $eq: ["Ada", "Bob"] } } } })).toBe(
+      "name=eq%28any%29.%7BAda%2CBob%7D",
     );
-    expect(qs({ table: "clients", where: { tags: { $not: { $all: ["vip"] } } } })).toBe(
-      "tags=not.eq%28all%29.%7Bvip%7D",
+    expect(qs({ table: "clients", where: { name: { $not: { $all: ["Ada"] } } } })).toBe(
+      "name=not.eq%28all%29.%7BAda%7D",
     );
-    expect(qs({ table: "clients", where: { tags: { $not: { $all: { $like: ["a*"] } } } } })).toBe(
-      "tags=not.like%28all%29.%7Ba*%7D",
+    expect(qs({ table: "clients", where: { name: { $not: { $all: { $like: ["a*"] } } } } })).toBe(
+      "name=not.like%28all%29.%7Ba*%7D",
     );
     expect(qs({ table: "clients", where: { name: { $fts: { query: "ada", config: "english" } } } })).toBe(
       "name=fts%28english%29.ada",

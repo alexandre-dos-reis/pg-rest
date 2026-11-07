@@ -325,9 +325,10 @@ interface QuantifiedOps<V> {
   readonly $imatch?: ReadonlyArray<string>;
 }
 
+/** The column against each value of a list, so on a column that holds one value: an array column has no `$any`. */
 interface Quantifiers<V> {
-  readonly $any?: ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
-  readonly $all?: ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
+  readonly $any?: NonNullable<V> extends ReadonlyArray<unknown> ? never : ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
+  readonly $all?: NonNullable<V> extends ReadonlyArray<unknown> ? never : ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
 }
 
 /**

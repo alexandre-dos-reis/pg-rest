@@ -337,13 +337,15 @@ const more = await pgRest.query({
 | `ov`                             | `&&` (overlap)                                                   |
 | `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
 
-`$any` and `$all` compare the column with each value of a list (`eq(any)`, or another operator when you wrap the list), `$not` wraps one operator (or a plain value, which means `eq`), and `$and`, `$or` and `$not` take nested groups:
+`$any` and `$all` compare a column with each value of a list (`LIKE ANY (…)`). A bare list, `{ $any: ["a", "b"] }`, is
+`eq`, which `$in` already says; they are not for array columns, where `$cs` and `$ov` do the job. `$not` wraps one operator
+(or a plain value, which means `eq`), and `$and`, `$or` and `$not` take nested groups:
 
 ```ts
 const quantified = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { tags: { $any: ["vip", "early"] } }, //  eq(any); { $any: { $like: ["a*"] } } for another operator
+  where: { name: { $any: { $like: ["A*", "B*"] } } }, //  LIKE ANY, for a column that holds one value
 });
 
 const logic = await pgRest.query({
