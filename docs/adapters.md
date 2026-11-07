@@ -51,7 +51,7 @@ the `search_path` are set with `set_config(…, true)`, which is transaction-loc
 leak its caller into the next.
 
 Adding one to the repository: implement the interface, add an entry to `tsdown.config.ts` and to `package.json`'s
-`exports`, an optional peer dependency, a case in `tests/agnostic.test.ts`, an `examples/with-*`, and a line in the CI
+`exports`, an optional peer dependency, a case in `tests/agnostic.test.ts`, an `examples/rest/with-*` or `examples/query/with-*`, and a line in the CI
 matrix.
 
 ## What SQL sees

@@ -2,7 +2,7 @@
 # Point the examples at the local build instead of the published @tsql/rest and @tsql/query, without committing anything local
 # (so check-example-versions.ts stays happy).
 #   scripts/link-examples.sh                      all examples
-#   scripts/link-examples.sh with-better-auth     just one
+#   scripts/link-examples.sh with-better-auth     just one (or rest/with-better-auth)
 #   scripts/link-examples.sh --unlink             back to the version in package.json
 #
 # The examples depend on the packages by version, and that version is usually not on the registry yet, so a plain
@@ -17,10 +17,13 @@ scoped() { node -p 'Object.keys(require(require("path").resolve(process.argv[1])
 
 unlink=0
 if [ "${1:-}" = "--unlink" ]; then unlink=1; shift; fi
-if [ "$#" -gt 0 ]; then names=("$@"); else names=($(ls examples)); fi
+# Examples live in examples/rest/* and examples/query/*, and are named by the directory alone
+# (with-bun) or with the group (rest/with-bun).
+find_example() { for d in "examples/$1" examples/*/"$1"; do [ -f "$d/package.json" ] && { echo "$d"; return 0; }; done; return 1; }
+if [ "$#" -gt 0 ]; then names=("$@"); else names=($(ls -d examples/*/*/ | sed 's#examples/##; s#/$##')); fi
 
 for name in "${names[@]}"; do
-  [ -d "examples/$name" ] || { echo "no such example: $name" >&2; exit 1; }
+  find_example "$name" >/dev/null || { echo "no such example: $name" >&2; exit 1; }
 done
 
 if [ "$unlink" = 0 ]; then
@@ -31,7 +34,7 @@ if [ "$unlink" = 0 ]; then
 fi
 
 for name in "${names[@]}"; do
-  dir="examples/$name"
+  dir="$(find_example "$name")"
   pkgs="$(scoped "$dir")"
 
   if [ "$unlink" = 1 ]; then

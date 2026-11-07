@@ -144,9 +144,9 @@ racing; against a real server the second one gets its `40001` and the replay win
 
 ## Where to look next
 
-[`docs/query.md`](../../docs/query.md#transactions) is the reference for scopes, and
-[`docs/query.md#binding-it-once`](../../docs/query.md#binding-it-once) for the ambient context. The
-other examples add a server and HTTP ([`with-pglite`](../with-pglite),
-[`with-node-postgres`](../with-node-postgres)) and a real sign-in
-([`with-better-auth`](../with-better-auth)). Joining a transaction your *application* opened is the
-half that is not built: [`docs/proposals.md`](../../docs/proposals.md).
+[`docs/query.md`](../../../docs/query.md#transactions) is the reference for scopes, and
+[`docs/query.md#binding-it-once`](../../../docs/query.md#binding-it-once) for the ambient context. The
+other examples add a server and HTTP ([`with-pglite`](../../rest/with-pglite),
+[`with-node-postgres`](../../rest/with-node-postgres)) and a real sign-in
+([`with-better-auth`](../../rest/with-better-auth)). Joining a transaction your *application* opened is the
+half that is not built: [`docs/proposals.md`](../../../docs/proposals.md).

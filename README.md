@@ -167,21 +167,27 @@ fields of your composite types, and which embeds a foreign key actually permits.
 
 ## Examples
 
-Self-contained projects in [`examples/`](examples) — a todo API with Row Level Security, one per driver, each with its
-own README, schema and `server.ts`:
+Self-contained projects in [`examples/`](examples), one folder per package. Each has its own README, schema and scripts.
 
-| example                                                 | runtime         | driver                                        | needs a database server       |
-| ------------------------------------------------------- | --------------- | --------------------------------------------- | ----------------------------- |
-| [`with-bun`](examples/with-bun)                         | Bun             | `Bun.sql` (built in)                          | yes (docker-compose included) |
-| [`with-node-postgres`](examples/with-node-postgres)     | Node.js ≥ 22.18 | `pg`                                          | yes (docker-compose included) |
-| [`with-postgres-js`](examples/with-postgres-js)         | Node.js ≥ 22.18 | `postgres`                                    | yes (docker-compose included) |
-| [`with-pglite`](examples/with-pglite)                   | Node.js ≥ 22.18 | `@electric-sql/pglite`                        | no (Postgres in WebAssembly)  |
-| [`with-better-auth`](examples/with-better-auth)         | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) | yes (docker-compose included) |
-| [`with-generated-types`](examples/with-generated-types) | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
-| [`with-transactions`](examples/with-transactions)       | Bun             | `@electric-sql/pglite`                        | no — and no server either     |
+**[`examples/rest`](examples/rest)** — `@tsql/rest`: a todo API with Row Level Security, one per driver, each with a `server.ts`:
 
-[`with-generated-types`](examples/with-generated-types) is the shortest way to see the typed path: two tables, an enum,
-a composite type, `bun run gen:types && bun start`. [`with-transactions`](examples/with-transactions) is the other
+| example                                                      | runtime         | driver                                        | needs a database server       |
+| ------------------------------------------------------------ | --------------- | --------------------------------------------- | ----------------------------- |
+| [`with-bun`](examples/rest/with-bun)                         | Bun             | `Bun.sql` (built in)                          | yes (docker-compose included) |
+| [`with-node-postgres`](examples/rest/with-node-postgres)     | Node.js ≥ 22.18 | `pg`                                          | yes (docker-compose included) |
+| [`with-postgres-js`](examples/rest/with-postgres-js)         | Node.js ≥ 22.18 | `postgres`                                    | yes (docker-compose included) |
+| [`with-pglite`](examples/rest/with-pglite)                   | Node.js ≥ 22.18 | `@electric-sql/pglite`                        | no (Postgres in WebAssembly)  |
+| [`with-better-auth`](examples/rest/with-better-auth)         | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) | yes (docker-compose included) |
+
+**[`examples/query`](examples/query)** — `@tsql/query`: no server, no HTTP:
+
+| example                                                      | runtime | driver                 | needs a database server   |
+| ------------------------------------------------------------ | ------- | ---------------------- | ------------------------- |
+| [`with-generated-types`](examples/query/with-generated-types) | Bun     | `@electric-sql/pglite` | no — and no server either |
+| [`with-transactions`](examples/query/with-transactions)       | Bun     | `@electric-sql/pglite` | no — and no server either |
+
+[`with-generated-types`](examples/query/with-generated-types) is the shortest way to see the typed path: two tables, an enum,
+a composite type, `bun run gen:types && bun start`. [`with-transactions`](examples/query/with-transactions) is the other
 library-only one: money moving between two accounts, with the caller read from an `AsyncLocalStorage`.
 
 ## Development

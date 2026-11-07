@@ -68,13 +68,13 @@ app.get("/dashboard", async (c) => {
 
 Same role, same claims, same RLS policies as the REST route: `anon` without a session (the two seeded todos), the user's own
 rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and a failure comes
-back as `error`, with a `kind` to switch on and the `message`, ready to answer with. See [`docs/query.md`](../../docs/query.md).
+back as `error`, with a `kind` to switch on and the `message`, ready to answer with. See [`docs/query.md`](../../../docs/query.md).
 
 Generate the module for this schema once (`generateModule(await introspect(adapter, ["api"]))`, from `@tsql/query/types`), pass
 its `schema` to `createQuery<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
 relationship, `done` as a boolean — with `data` inferred as
 `Array<{ id: number; title: string; done: boolean; tags: Array<{ label: string }> }>`. See
-[`docs/types.md`](../../docs/types.md).
+[`docs/types.md`](../../../docs/types.md).
 
 ## Try it
 

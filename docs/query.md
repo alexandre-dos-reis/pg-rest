@@ -1299,7 +1299,7 @@ half, still under consideration in [`proposals.md`](proposals.md) — along with
 [the line none of these may cross](proposals.md#the-line-none-of-these-may-cross), which is where a page of additions
 says what it refuses to become.
 
-All of the above runs, end to end, in [`examples/with-transactions`](../examples/with-transactions): money moving
+All of the above runs, end to end, in [`examples/query/with-transactions`](../examples/query/with-transactions): money moving
 between two accounts, the caller read from an `AsyncLocalStorage`, and one scope per rule here.
 
 ## Errors

@@ -11,7 +11,7 @@ bun run typecheck   # and see that the mistakes in mistakes.ts really are mistak
 ```
 
 It runs on **Bun** -- `@types/bun` carries Bun's globals and Node's typings, so one package covers both -- over PGlite,
-which keeps the driver in-process. `Bun.sql` and its adapter (see [`with-bun`](../with-bun)) need a Postgres server
+which keeps the driver in-process. `Bun.sql` and its adapter (see [`with-bun`](../../rest/with-bun)) need a Postgres server
 listening somewhere, and this example is about the types, so it stays on the driver that needs nothing started.
 Everything here runs the same on Node (`node gen-types.ts`, `node main.ts`) with `@types/node` instead.
 
@@ -136,6 +136,6 @@ working exactly as before.
 ## Where to look next
 
 This example is deliberately bare. The others add what a real application needs: a server
-([`with-pglite`](../with-pglite), [`with-node-postgres`](../with-node-postgres)), Row Level Security, and a real sign-in
-([`with-better-auth`](../with-better-auth)). The reference for everything above is
-[`docs/query.md`](../../docs/query.md) and [`docs/types.md`](../../docs/types.md).
+([`with-pglite`](../../rest/with-pglite), [`with-node-postgres`](../../rest/with-node-postgres)), Row Level Security, and a real sign-in
+([`with-better-auth`](../../rest/with-better-auth)). The reference for everything above is
+[`docs/query.md`](../../../docs/query.md) and [`docs/types.md`](../../../docs/types.md).

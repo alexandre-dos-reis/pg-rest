@@ -55,6 +55,6 @@ A read runs in a `READ ONLY` transaction, so a `GET` cannot write even through a
 - **`planEnabled`.** A query plan reveals the shape of the database; leave it off in production, or restrict it.
 - **Exposed schemas.** `schemas` is an allowlist: `pg_catalog` and `information_schema` are refused outright, and
   anything you do not name is unreachable. Keep auth tables in a schema you do not expose — that is what
-  [`examples/with-better-auth`](../examples/with-better-auth) does with Better Auth's tables.
+  [`examples/rest/with-better-auth`](../examples/rest/with-better-auth) does with Better Auth's tables.
 - **The connecting role.** pg-rest only ever `SET LOCAL role`s to what you give it, so the driver's own role should be
   one that can assume those roles and nothing more.
