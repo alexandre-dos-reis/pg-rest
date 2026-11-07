@@ -130,6 +130,24 @@ describe.skipIf(!hasDb)("query()", () => {
   });
   afterAll(() => t.close());
 
+  test("the $ operators and groups select the right rows", async () => {
+    // orders: 1 paid 250, 2 new 40.50, 3 paid 99.99, 4 shipped 500
+    const ids = async (where: object) => {
+      const r = await t.api.query({ table: "orders", select: ["id"], where, order: ["id"] } as never);
+      if (r.error) throw new Error(JSON.stringify(r.error.body));
+      return (r.data as Array<{ id: number }>).map((o) => o.id);
+    };
+    expect(await ids({ total: { $gte: 100, $lt: 500 } })).toEqual([1]);
+    expect(await ids({ $not: { status: "paid", total: { $gte: 100 } } })).toEqual([2, 3, 4]);
+    expect(await ids({ $not: { $or: [{ status: "paid" }, { status: "new" }] } })).toEqual([4]);
+    expect(await ids({ $or: [{ $not: { status: "paid" } }, { id: 4 }] })).toEqual([2, 4]);
+    expect(await ids({ $and: [{ status: { $like: "p*" } }, { status: { $like: "*d" } }] })).toEqual([1, 3]);
+    expect(await ids({ status: { $not: "paid" } })).toEqual([2, 4]);
+    expect(await ids({ status: { $not: null } })).toEqual([1, 2, 3, 4]);
+    expect(await ids({ status: { $any: { $like: ["p*", "n*"] } } })).toEqual([1, 2, 3]);
+    expect(await ids({ status: { $fts: { query: "paid", config: "english" } } })).toEqual([1, 3]);
+  });
+
   /**
    * The guarantee this API rests on: the object and the equivalent URL go through the same
    * parser, SQL and error mapping, so they must answer with the same thing.
