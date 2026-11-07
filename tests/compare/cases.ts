@@ -84,6 +84,13 @@ const allCases: Case[] = [
   get("/clients?select=id&or=(id.eq.1,id.eq.3)&order=id"),
   get("/clients?select=id&and=(id.gt.1,or(name.eq.Grace,name.eq.Linus))&order=id"),
   get("/clients?select=id&not.or=(id.eq.1,id.eq.2)"),
+  // what the object API's $not, $and and repeated operators render to (tests/query.test.ts)
+  get("/clients?select=id&not.and=(id.gt.1,name.eq.Grace)&order=id"),
+  get("/clients?select=id&not.and=(or(id.eq.1,id.eq.2))&order=id"),
+  get("/clients?select=id&or=(not.and(id.eq.1),id.eq.3)&order=id"),
+  get("/clients?select=id&and=(name.like.G*,name.like.*e)&order=id"),
+  get("/clients?select=id&id=gte.1&id=lt.3&order=id"),
+  get("/clients?select=id&name=like.*a*&name=not.like.*d*&order=id"),
   get("/clients?select=id&name=eq.Ada&name=eq.Linus"),
   get("/clients?select=id&id=eq.1,2"),
   get("/clients?select=id&name=match.^A"),
