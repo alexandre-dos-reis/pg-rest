@@ -5,6 +5,7 @@ import { quoteIdent, quoteQualified } from "../quote";
 import { type Relation, type SchemaCache, resolveRelationship } from "../schema";
 import type { OrderTerm } from "../parse/filter";
 import { fieldSql, whereSql } from "./filters";
+import { type Values, inlined } from "./values";
 
 export const ROOT_ALIAS = "pgrst_root";
 
@@ -16,6 +17,8 @@ export interface ReadOptions {
   readonly query: ParsedQuery;
   readonly limit?: number | undefined;
   readonly offset?: number | undefined;
+  /** How a filter's value gets into the SQL; literals when not given. */
+  readonly values?: Values | undefined;
 }
 
 export interface ReadSql {
@@ -53,6 +56,7 @@ interface Ctx {
   readonly cache: SchemaCache;
   readonly query: ParsedQuery;
   readonly aliases: Aliases;
+  readonly values: Values;
 }
 
 const fieldExpr = (item: FieldItem, alias: string, rel: Relation): string => {
@@ -238,7 +242,7 @@ const buildEmbed = (
   }
   if (inner.joins.length) from += ` ${inner.joins.map((j) => j.sql).join(" ")}`;
 
-  conds.push(...(params ? whereSql(params.filters, cAlias, child) : []));
+  conds.push(...(params ? whereSql(params.filters, cAlias, child, ctx.values) : []));
   conds.push(...presenceConditions(params, inner.joins));
 
   const order = params ? orderClause(ctx, params.order, child, cAlias, item.items) : "";
@@ -302,11 +306,11 @@ const buildEmbed = (
 
 /** Build the SELECT (and matching COUNT) for a read request. */
 export const buildRead = (opts: ReadOptions): ReadSql => {
-  const ctx: Ctx = { cache: opts.cache, query: opts.query, aliases: new Aliases() };
+  const ctx: Ctx = { cache: opts.cache, query: opts.query, aliases: new Aliases(), values: opts.values ?? inlined };
   const built = buildItems(ctx, opts.query.select, opts.rel, ROOT_ALIAS, []);
 
   const where = [
-    ...whereSql(opts.query.root.filters, ROOT_ALIAS, opts.rel),
+    ...whereSql(opts.query.root.filters, ROOT_ALIAS, opts.rel, ctx.values),
     ...presenceConditions(opts.query.root, built.joins),
   ];
   const whereClause = where.length ? ` WHERE ${where.join(" AND ")}` : "";

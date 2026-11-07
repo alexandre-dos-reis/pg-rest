@@ -844,7 +844,7 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);
-  let qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed };
+  let qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed, bind: true };
   let body = bodyOf(input);
   if (!isRpc(input) && "action" in input && input.action === "update") {
     // the expressions of `set` are compiled here, the plain values stay the JSON body
@@ -917,8 +917,11 @@ interface PreparedPlan {
   readonly names: ReadonlyArray<string>;
   readonly build: (args: PreparedArgs) => QueryInput;
   readonly plan: Plan;
+  /** The statement; text with a literal for an argument only where a value could not be bound (a json column). */
   readonly statement: Template;
   readonly planned: Template | undefined;
+  /** The parameters: `args[i]` is the argument a parameter is made of, or `undefined` when it is fixed. */
+  readonly params: ReadonlyArray<number | undefined>;
   readonly method: Method;
   readonly schema: string;
   readonly prefer: Preferences;
@@ -1018,12 +1021,25 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);
-  const qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed };
+  const qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed, bind: true };
   const plan = planTable(env, "GET", schema, input.table, qp, prefer, format, undefined, undefined);
 
   const statement = templateOf(plan.statement, marker, names);
   const planned = plan.planned === undefined ? undefined : templateOf(plan.planned, marker, names);
-  const used = new Set([...statement.slots, ...(planned?.slots ?? [])]);
+  // a bound value is a parameter that is the stand-in itself; a stand-in inside a longer parameter
+  // (a containment array) would need the quoting of its value, which only the ordinary route does
+  const whole = new RegExp(`^${marker}x(\\d+)x$`);
+  const params = plan.params.map((p) => {
+    const m = whole.exec(p);
+    if (m) return Number(m[1]);
+    if (p.includes(marker)) {
+      throw new TypeError(
+        "prepare: an argument is used inside a list or an array literal (`$cs`, `$cd`, `$ov`...); use it as a whole value",
+      );
+    }
+    return undefined;
+  });
+  const used = new Set([...statement.slots, ...(planned?.slots ?? []), ...params.filter((i) => i !== undefined)]);
   const unused = names.filter((_n, i) => !used.has(i));
   if (unused.length) {
     throw new TypeError(`prepare: ${unused.map((n) => `'${n}'`).join(", ")} never ends up as a value in the SQL`);
@@ -1035,6 +1051,7 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     plan,
     statement,
     planned,
+    params,
     method: "GET",
     schema,
     prefer,
@@ -1050,11 +1067,14 @@ const runPrepared = async (env: Env, call: Prepared, ctx: RequestContext): Promi
   // a value that changes the SQL itself: build the object and run it like any other
   if (!values.every(isPlain)) return run(env, c.build(call.args), ctx);
   assertRole(env, ctx);
-  const literals = values.map((v) => literal(String(v)));
+  const texts = values.map(String);
+  // the statement is the same text for every call, except where a value could only be a literal
+  const literals = c.statement.slots.length || c.planned?.slots.length ? texts.map((t) => literal(t)) : [];
   const plan: Plan = {
     ...c.plan,
-    statement: fill(c.statement, literals),
-    planned: c.planned && fill(c.planned, literals),
+    statement: c.statement.slots.length ? fill(c.statement, literals) : c.plan.statement,
+    planned: c.planned && (c.planned.slots.length ? fill(c.planned, literals) : c.plan.planned),
+    params: c.params.map((slot, i) => (slot === undefined ? c.plan.params[i]! : texts[slot]!)),
   };
   const outcome = await execute(env, ctx, c.caller, c.method, c.schema, c.prefer, c.format, plan, false, undefined);
   return answerOf(outcome);

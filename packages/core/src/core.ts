@@ -8,6 +8,7 @@ import { getRelation, type Relation, type SchemaCache } from "./schema";
 import { buildRead } from "./sql/read";
 import { buildRpc, isSingleUnnamedParam, resolveFunction, type RpcCall } from "./sql/rpc";
 import { buildStatement, type BodyShape } from "./sql/statement";
+import { type Values, bindFrom, inlined } from "./sql/values";
 import { buildDelete, buildInsert, upsertColumns, buildUpdate, type JsonObject, type Returning } from "./sql/write";
 
 /** Who is making the request, as far as the database is concerned. */
@@ -102,11 +103,20 @@ export interface QueryParams {
   readonly bare: ReadonlySet<string>;
   readonly parse: (options?: ParseOptions) => ParsedQuery;
   /**
+   * Pass the values of the filters to the driver as parameters instead of writing them into the SQL.
+   * The text of the statement then depends on the shape of the query only, which is what lets the
+   * driver and the server reuse it. `@tsql/query` does; HTTP keeps the literals it always had.
+   */
+  readonly bind?: boolean | undefined;
+  /**
    * `SET` clauses already compiled to SQL, for an update: the expressions of `query()`'s `set`
    * (`sql/expression.ts`). Only `query()` fills it; a PATCH over HTTP is PostgREST's, a JSON body.
    */
   readonly setClauses?: ReadonlyArray<string> | undefined;
 }
+
+/** Where the values of the filters go: into the SQL, or into parameters numbered after `taken` others. */
+const valuesFor = (qp: QueryParams, taken: number): Values => (qp.bind ? bindFrom(taken) : inlined);
 
 /** Statement options that depend on the output format. */
 const formatOptions = (format: OutputFormat) => ({
@@ -338,6 +348,7 @@ export const planTable = (
 
   if (method === "GET" || method === "HEAD") {
     const { limit, offset } = effectivePaging(env, query, range);
+    const values = valuesFor(qp, 0);
     const read = buildRead({
       cache: env.cache,
       rel,
@@ -345,6 +356,7 @@ export const planTable = (
       query,
       limit,
       offset,
+      values,
     });
     const shape: BodyShape = singular ? "object" : "array";
     const paged = limit !== undefined || offset > 0;
@@ -354,7 +366,7 @@ export const planTable = (
       kind: "read",
       readOnly: true,
       source: false,
-      params: [],
+      params: values.bound,
       shape,
       rel,
       offset,
@@ -434,12 +446,15 @@ export const planTable = (
     const first = Array.isArray(body.value) ? body.value[0] : body.value;
     const obj: JsonObject =
       first !== null && typeof first === "object" && !Array.isArray(first) ? (first as JsonObject) : {};
+    // the JSON body is `$1` when there is one, and the filters' parameters come after it
+    const values = valuesFor(qp, Object.keys(obj).length ? 1 : 0);
     const updateSql = buildUpdate({
       rel,
       body: obj as JsonObject,
       clauses: qp.setClauses,
       filters: query.root.filters,
       returning,
+      values,
     });
     const { rows: outRows, shape } = rowsFor(returning);
     if (updateSql === null) {
@@ -463,7 +478,7 @@ export const planTable = (
       ...common,
       kind: "update",
       returning,
-      params: Object.keys(obj).length ? [JSON.stringify(obj)] : [],
+      params: [...(Object.keys(obj).length ? [JSON.stringify(obj)] : []), ...values.bound],
       shape,
       statement: buildStatement({
         source: updateSql,
@@ -476,13 +491,14 @@ export const planTable = (
   }
 
   if (method === "DELETE") {
-    const deleteSql = buildDelete({ rel, filters: query.root.filters, returning });
+    const values = valuesFor(qp, 0);
+    const deleteSql = buildDelete({ rel, filters: query.root.filters, returning, values });
     const { rows: outRows, shape } = rowsFor(returning);
     return {
       ...common,
       kind: "delete",
       returning,
-      params: [],
+      params: values.bound,
       shape,
       statement: buildStatement({
         source: deleteSql,
@@ -642,6 +658,8 @@ export const planRpc = (
     ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson]
     : [];
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
+  // the function's arguments are `$1` when it has a body, and the filters' parameters come after
+  const values = valuesFor(qp, params.length);
 
   const base = {
     method,
@@ -658,12 +676,21 @@ export const planRpc = (
 
   if (call.shape === "rows" || call.shape === "object") {
     const { limit, offset } = effectivePaging(env, query, range);
-    const read = buildRead({ cache: env.cache, rel: call.relation, from: `(${call.source})`, query, limit, offset });
+    const read = buildRead({
+      cache: env.cache,
+      rel: call.relation,
+      from: `(${call.source})`,
+      query,
+      limit,
+      offset,
+      values,
+    });
     const shape: BodyShape = call.shape === "object" || format.kind === "object" ? "object" : "array";
     const paged = limit !== undefined || offset > 0;
     const needCount = prefer.count === "exact" || prefer.count === "estimated";
     return {
       ...base,
+      params: [...params, ...values.bound],
       offset,
       limit,
       pagedRead: paged,
@@ -742,7 +769,10 @@ export const execute = async (
 
         let planned: number | undefined;
         if (plan.planned) {
-          const ex = await s.query(`EXPLAIN (FORMAT JSON) ${plan.planned}`);
+          const ex = await s.query(
+            `EXPLAIN (FORMAT JSON) ${plan.planned}`,
+            plan.params.length ? plan.params : undefined,
+          );
           const cell = ex[0]?.["QUERY PLAN"];
           const parsed = typeof cell === "string" ? JSON.parse(cell) : cell;
           const n = Number((parsed as any)?.[0]?.Plan?.["Plan Rows"]);

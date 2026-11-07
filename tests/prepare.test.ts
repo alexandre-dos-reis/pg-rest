@@ -9,13 +9,13 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   let db: TestDb;
   let q: QueryInstance;
   /** Every statement that reached the driver, in order. */
-  let sent: string[] = [];
+  let sent: Array<{ text: string; params: unknown[] | undefined }> = [];
 
   beforeAll(async () => {
     db = await createTestDb();
     const schema = toDescriptor(await introspect(db.adapter, ["api"]));
     const spy = (s: { query: (t: string, p?: unknown[]) => Promise<any> }) => ({
-      query: (t: string, p?: unknown[]) => (sent.push(t), s.query(t, p)),
+      query: (t: string, p?: unknown[]) => (sent.push({ text: t, params: p }), s.query(t, p)),
     });
     q = createQuery({
       db: { ...db.adapter, transaction: (fn: any) => db.adapter.transaction((s: any) => fn(spy(s))) } as never,
@@ -24,8 +24,8 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   });
   afterAll(() => db.drop());
 
-  /** The statement a query sends: the last one of its transaction. */
-  const statementOf = async (run: () => Promise<unknown>): Promise<string> => {
+  /** The statement a query sends -- the last one of its transaction -- with the parameters it travels with. */
+  const statementOf = async (run: () => Promise<unknown>): Promise<{ text: string; params: unknown[] | undefined }> => {
     sent = [];
     await run();
     return sent[sent.length - 1]!;
@@ -49,7 +49,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     ]) {
       const by = { prepared: () => q.run(find(args), authed), direct: () => q.query(paid(args), authed) };
       const [a, b] = [await statementOf(by.prepared), await statementOf(by.direct)];
-      expect(a).toBe(b);
+      expect(a).toEqual(b);
       expect(await by.prepared()).toEqual(await by.direct());
     }
     expect((await q.run(find({ status: "paid", min: 100 }), authed)).data).toEqual([
@@ -137,7 +137,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
       order: ["id"],
     });
     const args = { a: "new", b: "paid", id: 3 };
-    expect(await statementOf(() => q.run(find(args), authed))).toBe(
+    expect(await statementOf(() => q.run(find(args), authed))).toEqual(
       await statementOf(() => q.query(direct(args), authed)),
     );
     expect((await q.run(find(args), authed)).data).toEqual([{ id: 2 }, { id: 3 }]);
@@ -186,5 +186,102 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     const direct = await time(() => q.query(paid({ status: "paid", min: 100 }), authed));
     // not a benchmark -- the database dominates -- but it must not be slower than doing the work again
     expect(prepared).toBeLessThan(direct * 1.25);
+  });
+});
+
+describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
+  let db: TestDb;
+  let q: QueryInstance;
+  let sent: Array<{ text: string; params: unknown[] | undefined }> = [];
+
+  beforeAll(async () => {
+    db = await createTestDb();
+    const schema = toDescriptor(await introspect(db.adapter, ["api"]));
+    const spy = (s: { query: (t: string, p?: unknown[]) => Promise<any> }) => ({
+      query: (t: string, p?: unknown[]) => (sent.push({ text: t, params: p }), s.query(t, p)),
+    });
+    q = createQuery({
+      db: { ...db.adapter, transaction: (fn: any) => db.adapter.transaction((s: any) => fn(spy(s))) } as never,
+      schema,
+    });
+  });
+  afterAll(() => db.drop());
+
+  const lastOf = async (input: QueryInput) => {
+    sent = [];
+    const r = await q.query(input, authed);
+    expect(r.error).toBeNull();
+    return { ...sent[sent.length - 1]!, result: r };
+  };
+
+  test("the text depends on the shape of the query, not on its values", async () => {
+    const a = await lastOf({ table: "orders", select: ["id"], where: { status: "paid", total: { $gte: 100 } } });
+    const b = await lastOf({ table: "orders", select: ["id"], where: { status: "new", total: { $gte: 5 } } });
+    expect(a.text).toBe(b.text);
+    expect(a.text).not.toContain("'paid'");
+    expect(a.params).toEqual(["paid", "100"]);
+    expect(b.params).toEqual(["new", "5"]);
+  });
+
+  test("a value is never part of the SQL", async () => {
+    const r = await lastOf({ table: "clients", select: ["id"], where: { name: "x' OR 1=1 --" } });
+    expect(r.text).not.toContain("OR 1=1");
+    expect(r.params).toEqual(["x' OR 1=1 --"]);
+    expect(r.result.data).toEqual([]);
+  });
+
+  test("in lists, groups, quantifiers, text search and embeds bind too", async () => {
+    const r = await lastOf({
+      table: "orders",
+      select: ["id", { clients: { select: ["name"], where: { name: { $like: "A*" } } } }],
+      where: { $or: [{ id: { $in: [1, 2] } }, { status: { $any: { $eq: ["paid", "new"] } } }] },
+    });
+    expect(r.text).not.toMatch(/'(paid|new|A%)'/);
+    // the embed is built with the select, before the filters of the root
+    expect(r.params).toEqual(["A%", "1", "2", "{paid,new}"]);
+    expect((r.result.data as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  test("numbers after the body of a write", async () => {
+    const r = await lastOf({
+      table: "orders",
+      action: "update",
+      set: { status: "x" },
+      where: { id: 9999 },
+      returning: "minimal",
+    });
+    expect(r.params).toEqual([JSON.stringify({ status: "x" }), "9999"]);
+    expect(r.text).toContain("$2");
+    const d = await lastOf({ table: "orders", action: "delete", where: { id: 9999 }, returning: "minimal" });
+    expect(d.params).toEqual(["9999"]);
+  });
+
+  test("json and jsonb columns keep a literal, a text path is bound", async () => {
+    const j = await lastOf({ table: "clients", select: ["id"], where: { meta: { $cs: { tier: "gold" } } } });
+    expect(j.params ?? []).toEqual([]);
+    expect(j.text).toContain("tier");
+    expect(j.result.data).toEqual([{ id: 1 }]);
+    const t = await lastOf({ table: "clients", select: ["id"], where: { "meta->>tier": "silver" } });
+    expect(t.params).toEqual(["silver"]);
+    expect(t.result.data).toEqual([{ id: 2 }]);
+    const p = await lastOf({ table: "clients", select: ["id"], where: { "meta->tier": '"gold"' } });
+    expect(p.params ?? []).toEqual([]);
+    expect(p.result.data).toEqual([{ id: 1 }]);
+  });
+
+  test("counts and plans work with bound values", async () => {
+    const c = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, limit: 1, count: "exact" });
+    expect((c.result as { count: number }).count).toBe(2);
+    const e = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, count: "planned" });
+    expect(e.result.error).toBeNull();
+  });
+
+  test("the HTTP route keeps its literals", async () => {
+    // `@tsql/rest` has not changed: only `query` binds (see `tests/compare`, which pins HTTP against PostgREST)
+    const { createRest } = await import("../packages/rest/src/index");
+    const rest = await createRest({ db: db.adapter, schemas: ["api"] });
+    const res = await rest.handle(new Request("http://x/orders?status=eq.paid&select=id"));
+    expect(res.status).toBe(200);
+    await rest.close();
   });
 });
