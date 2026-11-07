@@ -1,7 +1,7 @@
 # `query()` — asking in-process
 
-pg-rest is a library, so the HTTP envelope is optional: `query()` takes a plain object, runs in the calling process, and
-goes through the same parser, the same SQL and the same errors as `handle(request)`. One example per field below; the
+`@tsql/query` is `@tsql/rest` without the HTTP envelope: `query()` takes a plain object, runs in the calling process, and
+goes through the same parser, the same SQL and the same errors as `handle(request)` of `@tsql/rest`. One example per field below; the
 options of the instance itself are in [`options.md`](options.md), and the types the examples rely on in
 [`types.md`](types.md).
 
@@ -121,7 +121,7 @@ CREATE FUNCTION api.recent_orders(api.clients) RETURNS SETOF api.orders …;
 Without a type argument, the input is loosely typed and you name the result yourself:
 
 ```ts
-const pgRest = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const { data } = await pgRest.query<Array<{ id: number; name: string }>>({
   table: "clients",
@@ -134,7 +134,7 @@ With one, everything inside is checked and the result is inferred. The type come
 ```ts
 import type { Database } from "./db.types.ts";
 
-const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const { data } = await pgRest.query({ table: "clients", select: ["id", "name"] });
 // data: Array<{ id: number; name: string }>
@@ -333,7 +333,7 @@ const regex = await pgRest.query({
 `IS NOT NULL`; `$is` is for the three-valued logic of booleans:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const nulls = await pgRest.query({
   table: "clients",
@@ -420,7 +420,7 @@ const whole = await pgRest.query({
 too, and the range operators on a range column:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const json = await pgRest.query({
   table: "clients",
@@ -445,7 +445,7 @@ const ranges = await untyped.query({
 operator applies to the result. It is available on an instance created without a type argument:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const paths = await untyped.query({
   table: "venues",
@@ -606,7 +606,7 @@ const byOwner = await pgRest.query({
 // `{ name: "Ada" }` is not "whose name is Ada": it compares against a row whose other fields are
 // NULL. For one field, use its path -- on an instance created without a type argument, like any
 // other JSON path (see "What the typed path does not describe")
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 const byName = await untyped.query({ table: "venues", select: ["id"], where: { "owner->>name": "Ada" } });
 
 // writing one: the fields left out are NULL
@@ -623,7 +623,7 @@ The arrow operators reach a single field, and work on a composite column exactly
 through an array — because pg-rest converts the column with `to_jsonb()` first, as PostgREST does:
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const fields = await untyped.query({
   table: "venues",
@@ -904,7 +904,7 @@ const capped = await pgRest.query({
 `$ov` take two operands; `$and` and `$or` any number; `$not` one.
 
 ```ts
-const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const untyped = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const booleans = await untyped.query({
   table: "todos",
@@ -1065,7 +1065,7 @@ const { data, error } = await pgQuery({ table: "notes", select: ["body"] });
 
 ```ts ignore
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RequestContext } from "@adrdp/pg-rest";
+import type { RequestContext } from "@tsql/query";
 
 const store = new AsyncLocalStorage<RequestContext>();
 ```
@@ -1450,7 +1450,7 @@ void pgRest.query({ table: "orders", select: ["status", "total.sum()"] });
 They work on an instance created without a type argument, where the input is loose:
 
 ```ts
-const loose = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const loose = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const { data } = await loose.query<Array<{ status: string; sum: number }>>({
   table: "orders",
@@ -1459,11 +1459,11 @@ const { data } = await loose.query<Array<{ status: string; sum: number }>>({
 });
 ```
 
-Content negotiation stays on `handle()` entirely — CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
+Content negotiation stays on `handle()` of `@tsql/rest` entirely — CSV, GeoJSON, custom media type handlers, `EXPLAIN` plans, `Range`
 headers, `OPTIONS` and the OpenAPI document:
 
 ```ts
-const csv = await pgRest.handle(
+const csv = await rest.handle(
   new Request("http://localhost/orders?select=id,total", { headers: { Accept: "text/csv" } }),
 );
 ```

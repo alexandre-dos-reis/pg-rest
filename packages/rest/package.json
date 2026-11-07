@@ -1,0 +1,66 @@
+{
+  "name": "@tsql/rest",
+  "version": "0.0.0",
+  "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) -- no JWT required.",
+  "license": "MIT",
+  "author": "Alexandre Dos Reis",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git",
+    "directory": "packages/rest"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./adapters/bun": {
+      "types": "./dist/adapters/bun.d.ts",
+      "default": "./dist/adapters/bun.js"
+    },
+    "./adapters/node-postgres": {
+      "types": "./dist/adapters/node-postgres.d.ts",
+      "default": "./dist/adapters/node-postgres.js"
+    },
+    "./adapters/postgres-js": {
+      "types": "./dist/adapters/postgres-js.d.ts",
+      "default": "./dist/adapters/postgres-js.js"
+    },
+    "./adapters/pglite": {
+      "types": "./dist/adapters/pglite.d.ts",
+      "default": "./dist/adapters/pglite.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@tsql/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite": ">=0.2.0",
+    "pg": "^8.0.0",
+    "postgres": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "postgres": {
+      "optional": true
+    },
+    "@electric-sql/pglite": {
+      "optional": true
+    }
+  }
+}

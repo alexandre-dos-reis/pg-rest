@@ -48,7 +48,7 @@ generator that writes `db.types.ts` from the catalog (`bun run gen:types`, again
 See [`with-generated-types`](../with-generated-types) for what that file looks like and why it is a
 separate step.
 
-**`client.ts`** — the instance, typed by it: `createPgRest<DatabasePgRest>(options)`. That one type
+**`client.ts`** — the instance, typed by it: `createQuery<DatabasePgRest>(options)`. That one type
 argument reaches inside the scopes too, which is why nothing below declares a row shape.
 
 **`context.ts`** — who is asking, read from an `AsyncLocalStorage`:

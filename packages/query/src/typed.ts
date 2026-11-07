@@ -1,4 +1,4 @@
-import type { RequestContext } from "./core";
+import type { RequestContext } from "@tsql/core/core";
 import type {
   ContextSource,
   CountFrom,
@@ -10,7 +10,7 @@ import type {
   Scalar,
   TransactionOptions,
 } from "./query";
-import type { PgRestInstance } from "./index";
+import type { QueryInstance } from "./index";
 
 /**
  * The types `generateTypes` emits, as constraints. They describe a database, not a query: see
@@ -721,7 +721,7 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
 // ---------------------------------------------------------------------------
 
 /**
- * A {@link PgRestInstance} whose `query` is typed by a generated database type:
+ * A {@link QueryInstance} whose `query` is typed by a generated database type:
  * `table` and `rpc` are the ones that exist, `select` and `where` only name real columns and
  * relationships, and `data` is inferred from the `select`.
  *
@@ -732,7 +732,7 @@ export interface TypedContextQuery<Db extends AnyDatabase> {
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
-  /** {@link TypedPgRestInstance.transaction} with the context read from the source, once, on entry. */
+  /** {@link TypedQueryInstance.transaction} with the context read from the source, once, on entry. */
   transaction<A>(
     fn: (tx: TypedTransaction<Db>) => Promise<A>,
     options?: TransactionOptions,
@@ -758,8 +758,8 @@ export interface TypedTransaction<Db extends AnyDatabase> {
   rollback(): never;
 }
 
-export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<
-  PgRestInstance,
+export interface TypedQueryInstance<Db extends AnyDatabase> extends Omit<
+  QueryInstance,
   "query" | "setContextQuery" | "transaction"
 > {
   /**
@@ -791,7 +791,7 @@ export interface TypedPgRestInstance<Db extends AnyDatabase> extends Omit<
   ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
 
   /**
-   * {@link TypedPgRestInstance.query} with the context decided once -- typically read from an
+   * {@link TypedQueryInstance.query} with the context decided once -- typically read from an
    * `AsyncLocalStorage` your middleware entered -- so queries deep in the call stack no longer carry
    * it. The returned function is typed exactly like `query` minus `ctx`.
    *

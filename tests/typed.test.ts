@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createPgRest, type TypedPgRestInstance } from "../src/index";
+import { createPgRest, type TypedPgRestInstance } from "./support/pgrest";
 import { createTestDb, hasDb, type TestDb } from "./support/db";
 import type { DatabasePgRest } from "./support/fixture.types";
 

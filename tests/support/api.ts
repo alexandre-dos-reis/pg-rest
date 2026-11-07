@@ -1,4 +1,4 @@
-import { createPgRest, type PgRestInstance, type PgRestOptions, type RequestContext } from "../../src/index";
+import { createPgRest, type PgRestInstance, type PgRestOptions, type RequestContext } from "./pgrest";
 import { createTestDb, type TestDb } from "./db";
 
 export interface Reply {

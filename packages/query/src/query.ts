@@ -1,4 +1,4 @@
-import type { DbSession } from "./adapter";
+import type { DbSession } from "@tsql/core/adapter";
 import {
   type Caller,
   type Env,
@@ -11,16 +11,23 @@ import {
   planTable,
   transactionSetup,
   useSchema,
-} from "./core";
-import { ApiError, DbQueryError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
-import type { Operator } from "./parse/filter";
-import { FTS_ORDER, OPERATORS_ORDER } from "./parse/syntax";
-import { getRelation } from "./schema";
-import { compileSet } from "./sql/expression";
-import { ROOT_ALIAS } from "./sql/read";
-import type { Method, OutputFormat, Preferences } from "./parse/request";
-import { toApiError } from "./service";
-import type { JsonObject } from "./sql/write";
+} from "@tsql/core/core";
+import {
+  ApiError,
+  DbQueryError,
+  PgRestError,
+  type QueryErrorKind,
+  describeErrorKind,
+  errorKind,
+} from "@tsql/core/errors";
+import type { Operator } from "@tsql/core/parse/filter";
+import { FTS_ORDER, OPERATORS_ORDER } from "@tsql/core/parse/syntax";
+import { getRelation } from "@tsql/core/schema";
+import { compileSet } from "@tsql/core/sql/expression";
+import { ROOT_ALIAS } from "@tsql/core/sql/read";
+import type { Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
+import { toApiError } from "@tsql/core/service";
+import type { JsonObject } from "@tsql/core/sql/write";
 
 // ---------------------------------------------------------------------------
 // input

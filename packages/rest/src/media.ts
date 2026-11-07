@@ -1,6 +1,6 @@
-import type { MediaChoice } from "./parse/request";
-import { quoteQualified } from "./quote";
-import { relKey, type FunctionDef, type SchemaCache } from "./schema";
+import type { MediaChoice } from "@tsql/core/parse/request";
+import { quoteQualified } from "@tsql/core/quote";
+import { relKey, type FunctionDef, type SchemaCache } from "@tsql/core/schema";
 
 const choiceFor = (mediaType: string, bytea: boolean, extra: Partial<MediaChoice>): MediaChoice => ({
   mediaType,

@@ -1,8 +1,10 @@
 # Architecture
 
-Two entry points, one pipeline. `handle()` is the HTTP front door; `query()` takes an object. They meet as soon as the
-query parameters exist and share everything after that — parsing, planning, SQL, the transaction, the error mapping — so
-a feature or a fix lands in one place.
+Two packages, one core. `@tsql/rest`'s `handle()` is the HTTP front door; `@tsql/query`'s `query()` takes an object.
+They meet as soon as the query parameters exist and share everything after that — parsing, planning, SQL, the
+transaction, the error mapping — which lives in `packages/core`, a private package that each of the two bundles. A
+feature or a fix in the core lands in both; what is only HTTP (content negotiation, `Range`, OpenAPI, plans) never
+reaches `@tsql/query`, and what is only an extension of PostgREST never reaches `@tsql/rest`.
 
 ```
                       ┌─ handleRequest ─ URL, headers, body, content negotiation
@@ -20,7 +22,7 @@ a feature or a fix lands in one place.
 
 ## A request, step by step
 
-1. **Route and negotiate** (`core.handleRequest`). The method, the path (minus `basePath`) and the headers decide the
+1. **Route and negotiate** (`handleRequest`, in `@tsql/rest`). The method, the path (minus `basePath`) and the headers decide the
    target (`/table`, `/rpc/fn`, or the OpenAPI root), the schema (`Accept-Profile` / `Content-Profile`), the
    preferences (`Prefer`), the output format (`Accept`, including CSV, GeoJSON, custom media types and plans) and the
    range. The body is parsed for a write.
@@ -52,30 +54,37 @@ a feature or a fix lands in one place.
 and reads the `Response` back into `{ data, count, status }`. The HTTP-only parts — content negotiation, `Range`,
 plans, `OPTIONS`, OpenAPI — stay on `handle()`.
 
-`transaction()` (`src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
+`transaction()` (`packages/query/src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
 `tx.query` through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
 
 ## Where things live
 
 | path | |
 | --- | --- |
-| `src/index.ts` | `createPgRest`, the public types, and the instance: `handle`, `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
-| `src/core.ts` | routing, content negotiation, planning, the transaction, response building |
-| `src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
-| `src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement` |
-| `src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
-| `src/service.ts` | the schema store (serialised reloads), error mapping, `handleSafely` |
-| `src/errors.ts` | `PgRestError`, `ApiError`, `DbQueryError`, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
-| `src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
-| `src/typed.ts` | types only: the typed input and the result inference over a generated database type |
-| `src/types.ts` | `generateTypes`, published as `@adrdp/pg-rest/types`, loaded on demand |
-| `src/openapi.ts` | the Swagger 2.0 document |
-| `src/quote.ts` | identifier and literal quoting — every identifier goes through it |
-| `src/adapter.ts`, `src/adapters/*` | the driver interface and the four adapters |
+| `packages/rest/src/index.ts` | `@tsql/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
+| `packages/rest/src/http.ts` | routing, content negotiation, and the HTTP-only settings (`handleRequest`) |
+| `packages/rest/src/serve.ts` | `handleSafely` and the error response |
+| `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
+| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` and the instance: `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
+| `packages/query/src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
+| `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
+| `packages/query/src/types.ts` | `generateTypes`, published as `@tsql/query/types`, loaded on demand |
+| `packages/core/src/core.ts` | planning, the transaction, response building: what both entry points run |
+| `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
+| `packages/core/src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
+| `packages/core/src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement`, and `expression` (the computed `set`) |
+| `packages/core/src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
+| `packages/core/src/service.ts` | the schema store (serialised reloads) and error mapping |
+| `packages/core/src/errors.ts` | `PgRestError`, `ApiError`, `DbQueryError`, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
+| `packages/core/src/quote.ts` | identifier and literal quoting — every identifier goes through it |
+| `packages/core/src/adapter.ts`, `adapters/*` | the driver interface and the four adapters (each package re-exports them) |
+
+The dependency runs one way: `rest` and `query` import `core`, and `core` imports neither. `core` is a workspace package
+with no build of its own; `tsdown` bundles it into each published package, which is why neither depends on a third one.
 
 ## The schema cache
 
-`createPgRest` introspects `pg_catalog` once, so a connection or catalog problem surfaces at startup. The cache holds
+`createRest` and `createQuery` each introspect `pg_catalog` once, so a connection or catalog problem surfaces at startup. The cache holds
 relations with their columns (types, nullability, defaults, identity, enum labels, the table column a view column is
 read from), primary keys and unique constraints, what each relation accepts (`pg_relation_is_updatable`), foreign keys —
 **including the ones that travel through views** — functions with their arguments and return shapes, and the custom
@@ -106,9 +115,9 @@ They are the kind that break quietly, so each has a test that fails loudly:
   `query()` and `handle()` answer identically, error bodies included.
 - **PostgREST's behaviour is the specification.** `tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
-- **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `src/quote.ts`.
+- **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.
   `tests/security.test.ts` is the guard. → [`security.md`](security.md)
-- **One union member per table** in `src/typed.ts`, and every member declares `table`. Otherwise the editor silently
+- **One union member per table** in `packages/query/src/typed.ts`, and every member declares `table`. Otherwise the editor silently
   starts offering every table's columns while the compiler stays right; `tests/completions.test.ts` asks the language
   service and pins it. → [`types.md`](types.md#in-your-editor)
 - **The generated types compile, and are what the generator produces.** `tests/support/fixture.types.ts` is committed;

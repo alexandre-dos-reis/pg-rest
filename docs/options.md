@@ -1,7 +1,11 @@
-# `createPgRest(options)`
+# Options: `createRest` and `createQuery`
+
+`createRest` (`@tsql/rest`) gives the HTTP handler and `createQuery` (`@tsql/query`) the in-process API. They take the
+same options for the database and the role (the first group below); the second group is HTTP only, so only `createRest`
+takes it. An app that uses both creates both, and each keeps its own schema cache.
 
 ```ts
-const pgRest = await createPgRest({
+const rest = await createRest({
   db: nodePostgresAdapter(pool),
   schemas: ["api"],
   anonymousRole: "anon",
@@ -14,17 +18,26 @@ const pgRest = await createPgRest({
 
 Introspection runs here, so a connection or catalog problem surfaces at startup rather than on the first request.
 
+Introspection runs here, so a connection or catalog problem surfaces at startup rather than on the first request.
+
+**Both** (`EngineOptions`): the database and the role.
+
 | option | meaning |
 | --- | --- |
 | `db` | a `DbAdapter` built from your driver → [`adapters.md`](adapters.md) |
 | `schemas` | the exposed schemas; the first is the default, the others are selected with `Accept-Profile` / `Content-Profile` or `schema:` in a query. Default `["public"]` |
 | `anonymousRole` | the role for a call with no context. Default `"anon"`; `false` refuses anonymous calls with `401 PGRST302` |
-| `resolveContext(req)` | who is calling: return `{ role, claims, settings }`, or `undefined` for the anonymous role. Throw a `PgRestError` to reject outright. There is no JWT — use a cookie, an API key, your auth library |
 | `maxRows` | a cap on the rows a read returns (PostgREST's `db-max-rows`) |
-| `basePath` | a URL prefix to strip, so the handler can be mounted anywhere (`/api/rest`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
 | `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on |
 | `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path |
+
+**`createRest` only**: HTTP.
+
+| option | meaning |
+| --- | --- |
+| `resolveContext(req)` | who is calling: return `{ role, claims, settings }`, or `undefined` for the anonymous role. Throw a `PgRestError` to reject outright. There is no JWT — use a cookie, an API key, your auth library |
+| `basePath` | a URL prefix to strip, so the handler can be mounted anywhere (`/api/rest`) |
 | `allowTxOverride` | honour `Prefer: tx=rollback` (`db-tx-end`). Default off |
 | `planEnabled` | answer `Accept: application/vnd.pgrst.plan` with the query plan (`db-plan-enabled`). A plan reveals the shape of the database: keep it off in production. Default off |
 | `openApi` | serve the Swagger 2.0 document at `/`. Default on |
@@ -32,24 +45,40 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 
 ## What you get back
 
+**`createRest`** (`@tsql/rest`):
+
 | | |
 | --- | --- |
 | `handle(request, ctx?)` | the HTTP entry point. An explicit `ctx` overrides `resolveContext` |
-| `query(input, ctx?)` | the same thing from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
-| `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
-| `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
-| `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
 | `schemaCache()` | the introspected catalog |
 | `reloadSchema()` | re-read it after a migration. A failed reload keeps the previous cache |
 | `close()` | stop the handler. Your driver is left open |
 
-With a generated database type — `createPgRest<Database>(options)` — `query` is typed by it and everything else is
+**`createQuery`** (`@tsql/query`):
+
+| | |
+| --- | --- |
+| `query(input, ctx?)` | a request from an object, in-process: `{ data, count, status, error }`. Never rejects → [`query.md`](query.md) |
+| `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
+| `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
+| `generateTypes(options?)` | TypeScript types for this database, as the text of a module → [`types.md`](types.md) |
+| `schemaCache()`, `reloadSchema()`, `close()` | as above |
+
+With a generated database type — `createQuery<Database>(options)` — `query` is typed by it and everything else is
 unchanged.
 
 `handle` is for requests that come from outside: mount it in any server that speaks web-standard `Request`/`Response`.
 In the same process, reach for `query()` instead — a PostgREST client library over `handle` would build a URL and a
-body for pg-rest to parse straight back, two passes over a query you are already holding as an object. Both entry
-points share one pipeline, so the database sees the same thing either way; only the envelope differs.
+body for pg-rest to parse straight back, two passes over a query you are already holding as an object. Both packages
+are built on one core, so the database sees the same thing either way; only the envelope differs. `@tsql/rest` stays
+PostgREST's, to the byte; what goes beyond PostgREST (the `$` filters, computed updates) is in `@tsql/query` only.
+
+An app that uses both creates both, and calls `reloadSchema()` on both after a migration:
+
+```ts
+const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const db = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+```
 
 ## Errors
 

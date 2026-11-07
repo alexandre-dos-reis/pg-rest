@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { generateTypes } from "../src/types";
-import { createPgRest } from "../src/index";
-import { introspect, type Column, type CompositeType, type Relation, type SchemaCache } from "../src/schema";
+import { generateTypes } from "../packages/query/src/types";
+import { createPgRest } from "./support/pgrest";
+import {
+  introspect,
+  type Column,
+  type CompositeType,
+  type Relation,
+  type SchemaCache,
+} from "../packages/core/src/schema";
 import { createTestDb, hasDb, requirePostgis, type TestDb } from "./support/db";
 
 const column = (name: string, type: string, extra: Partial<Column> = {}): Column => ({

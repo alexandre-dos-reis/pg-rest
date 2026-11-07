@@ -1,4 +1,4 @@
-import type { Column, FunctionDef, Relation, SchemaCache } from "./schema";
+import type { Column, FunctionDef, Relation, SchemaCache } from "@tsql/core/schema";
 
 type Json = Record<string, unknown>;
 

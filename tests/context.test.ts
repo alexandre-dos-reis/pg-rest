@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { PgRestError } from "../src/index";
+import { PgRestError } from "./support/pgrest";
 
 describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", () => {
   let t: TestApi | undefined;
@@ -133,7 +133,7 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
   });
 
   test("schemas that cannot be exposed are refused at startup", async () => {
-    const { createPgRest } = await import("../src/index");
+    const { createPgRest } = await import("./support/pgrest");
     const probe = await makeApi();
     try {
       await expect(createPgRest({ db: probe.db.adapter, schemas: ["pg_catalog"] })).rejects.toThrow(
@@ -154,7 +154,7 @@ describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", (
       },
     };
     t = await makeApi();
-    const { createPgRest } = await import("../src/index");
+    const { createPgRest } = await import("./support/pgrest");
     // Start with a working adapter so the schema loads, then break it.
     let broken = false;
     const flaky = {

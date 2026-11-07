@@ -1,6 +1,6 @@
 import { SQL } from "bun";
-import { bunSqlAdapter } from "../../src/adapters/bun";
-import type { DbAdapter } from "../../src/adapter";
+import { bunSqlAdapter } from "../../packages/core/src/adapters/bun";
+import type { DbAdapter } from "../../packages/core/src/adapter";
 
 /** Superuser URL of a throwaway Postgres server. Integration tests are skipped without it. */
 export const ADMIN_URL = process.env["TEST_DATABASE_URL"];

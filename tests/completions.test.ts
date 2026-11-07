@@ -65,7 +65,7 @@ const text = (parts: TS.SymbolDisplayPart[] | undefined) => (parts ?? []).map((d
 
 const ask = (snippet: string): Asked => {
   const marked = `
-import { createPgRest } from "../src/index";
+import { createPgRest } from "./support/pgrest";
 import type { DatabasePgRest } from "./support/fixture.types";
 declare const pgRest: Awaited<ReturnType<typeof createPgRest<DatabasePgRest>>>;
 ${snippet}

@@ -1,5 +1,5 @@
 ---
-"@adrdp/pg-rest": minor
+"@tsql/query": minor
 ---
 
 `query()` can compute the columns of an `update` in the database, following PostgreSQL's `UPDATE … SET column = { expression | DEFAULT }`.

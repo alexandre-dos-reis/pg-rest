@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createTestDb, hasDb, type TestDb } from "./support/db";
-import { findRelationships, getRelation, introspect, resolveRelationship, type SchemaCache } from "../src/schema";
-import { PgRestError } from "../src/errors";
+import {
+  findRelationships,
+  getRelation,
+  introspect,
+  resolveRelationship,
+  type SchemaCache,
+} from "../packages/core/src/schema";
+import { PgRestError } from "../packages/core/src/errors";
 
 describe.skipIf(!hasDb)("schema introspection", () => {
   let db: TestDb;

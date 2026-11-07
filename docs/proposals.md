@@ -84,7 +84,7 @@ Whatever your driver's transaction scope is — `sql.begin` here, `adapter.trans
 `BEGIN`/`ROLLBACK`/`COMMIT` — it stays the owner of the boundary, and pg-rest only posts statements inside it.
 
 A driver's transaction handle is not a `DbSession`, hence the wrapper: the `session()` each adapter already builds
-internally (`src/adapters/*`) would have to be exported. That part is additive, and so is a `session` the core honours
+internally (`packages/core/src/adapters/*`) would have to be exported. That part is additive, and so is a `session` the core honours
 by running its statements on it instead of calling `adapter.transaction` — `Env.session` already exists, which is what
 the scope is built on. What is not additive is everything that follows from not owning the boundary.
 
@@ -119,7 +119,7 @@ and does not yet deliver, and the one thing a PostgREST process can never offer,
 
 ## 2. Observability hooks
 
-**Today.** Nothing. `grep -rn "onQuery\|hook\|logger" src/` finds one comment. PostgREST's `log-level` and
+**Today.** Nothing. `grep -rn "onQuery\|hook\|logger" packages/*/src/` finds one comment. PostgREST's `log-level` and
 `server-timing` are marked ➖ in [`PARITY.md`](../PARITY.md) as a host concern, and that is the right call — but the
 host cannot instrument what it cannot see. Right now a slow query inside `handle()` is invisible from the outside: the
 application holds the pool, and sees a `Response`.
@@ -127,7 +127,7 @@ application holds the pool, and sees a `Response`.
 **The shape.** One optional callback, called once per executed statement, and nothing else:
 
 ```ts ignore
-const pgRest = await createPgRest({
+const pgRest = await createQuery({
   db: nodePostgresAdapter(pool),
   onQuery: (event) => {
     //        sql, params, durationMs, rowCount, status, error, role, source: "handle" | "query"
@@ -189,7 +189,7 @@ HTTP.
 **The shape.** An opt-in that makes the pipeline's intermediate values visible where the result already is:
 
 ```ts ignore
-const pgRest = await createPgRest({ db: nodePostgresAdapter(pool), debug: true });
+const pgRest = await createQuery({ db: nodePostgresAdapter(pool), debug: true });
 
 const { data, error, debug } = await pgRest.query({ table: "todos", select: ["id", { tags: ["label"] }] });
 debug?.sql; //      the statement, as the builders wrote it

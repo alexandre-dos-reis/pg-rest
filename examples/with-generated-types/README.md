@@ -46,13 +46,13 @@ cannot be typed by the file it is about to write, which is also why it imports `
 **`client.ts`** -- the instance your application code imports, created once and typed by `db.types.ts`:
 
 ```ts
-export const pgRest = await createPgRest<DatabasePgRest>(options);
+export const pgRest = await createQuery<DatabasePgRest>(options);
 ```
 
 **`main.ts`** -- the queries. That one type argument is what makes everything inside follow:
 
 ```ts
-const pgRest = await createPgRest<DatabasePgRest>(options);
+const pgRest = await createQuery<DatabasePgRest>(options);
 
 const { data: todos, error } = await pgRest.query({
   table: "todos", //                                  only a relation of the exposed schema

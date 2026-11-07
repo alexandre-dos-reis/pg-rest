@@ -1,10 +1,10 @@
 import { SQL } from "bun";
-import { createPgRest } from "@adrdp/pg-rest";
-import { bunSqlAdapter } from "@adrdp/pg-rest/adapters/bun";
+import { createRest } from "@tsql/rest";
+import { bunSqlAdapter } from "@tsql/rest/adapters/bun";
 
 const sql = new SQL(process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres");
 
-const pgRest = await createPgRest({
+const pgRest = await createRest({
   db: bunSqlAdapter(sql),
   schemas: ["api"],
   anonymousRole: "anon",

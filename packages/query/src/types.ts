@@ -1,5 +1,5 @@
-import type { Column, CompositeRef, CompositeType, FunctionDef, Relation, SchemaCache } from "./schema";
-import { findRelationships, relKey } from "./schema";
+import type { Column, CompositeRef, CompositeType, FunctionDef, Relation, SchemaCache } from "@tsql/core/schema";
+import { findRelationships, relKey } from "@tsql/core/schema";
 
 /**
  * Generate TypeScript types from an introspected schema, as the text of a module.
@@ -353,7 +353,7 @@ export const generateTypes = (cache: SchemaCache, options: GenerateTypesOptions 
   // until nothing is new. Composite aliases come first so the relations read as a list of columns.
   const { lines: head, push: pushHead } = writer();
   if (options.header !== false) {
-    pushHead(0, `// ${options.header ?? `Generated from the database catalog by @adrdp/pg-rest. Do not edit.`}`);
+    pushHead(0, `// ${options.header ?? `Generated from the database catalog by @tsql/query. Do not edit.`}`);
     pushHead(0, "");
   }
   const emitted = new Set<string>();

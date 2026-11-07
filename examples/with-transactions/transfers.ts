@@ -1,7 +1,7 @@
 // Application code. It runs queries and knows nothing about who is asking: no role, no claims, no
 // user id, no `ctx` threaded through its signatures. That is what the AsyncLocalStorage in
 // context.ts is for -- and a transaction reads it once, on entry.
-import type { TypedTransaction } from "@adrdp/pg-rest";
+import type { TypedTransaction } from "@tsql/query";
 import type { DatabasePgRest } from "./db.types.ts";
 import { pgQuery } from "./context.ts";
 

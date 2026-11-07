@@ -4,8 +4,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import pg from "pg";
-import { createPgRest } from "../dist/index.js";
-import { nodePostgresAdapter } from "../dist/adapters/node-postgres.js";
+import { createRest } from "../packages/rest/dist/index.js";
+import { createQuery } from "../packages/query/dist/index.js";
+import { nodePostgresAdapter } from "../packages/rest/dist/adapters/node-postgres.js";
 
 const admin = process.env["TEST_DATABASE_URL"];
 if (!admin) throw new Error("TEST_DATABASE_URL is not set");
@@ -19,14 +20,17 @@ const pool = new pg.Pool({ connectionString: url.toString() });
 
 try {
   await pool.query(readFileSync(new URL("../tests/support/fixture.sql", import.meta.url), "utf8"));
-  const api = await createPgRest({
+  const options = {
     db: nodePostgresAdapter(pool as never),
     schemas: ["api"],
-    resolveContext: (req) => {
+    resolveContext: (req: Request) => {
       const sub = req.headers.get("x-user");
       return sub ? { role: "authenticated", claims: { sub } } : undefined;
     },
-  });
+  };
+  // the two packages, each built on its own: an app that uses both creates both
+  const rest = await createRest(options);
+  const api = { ...(await createQuery(options)), handle: rest.handle };
   const call = async (path: string, init: RequestInit = {}) => {
     const res = await api.handle(new Request(`http://localhost${path}`, init));
     return { status: res.status, body: await res.json().catch(() => null) as any, headers: res.headers };
@@ -75,7 +79,7 @@ try {
   const generated = await api.generateTypes({ name: "Db" });
   assert.match(generated, /export type Db = \{/);
   assert.match(generated, /name: string;/);
-  const { generateTypes } = await import("../dist/types.js");
+  const { generateTypes } = await import("../packages/query/dist/types.js");
   assert.equal(generateTypes(await api.schemaCache(), { name: "Db" }), generated);
 
   // RPC + OpenAPI

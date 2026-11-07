@@ -1,10 +1,10 @@
 // Same server, importing the TypeScript source so `bun compile` (AOT) can see the declared types.
 import { SQL } from "bun";
-import { createPgRest } from "../../src/index";
+import { createRest } from "../../packages/rest/src/index";
 import { bunSqlAdapter } from "../../src/adapters/bun";
 
 const sql = new SQL({ url: process.env.DATABASE_URL!, max: Number(process.env.POOL ?? 10) });
-const pgRest = await createPgRest({
+const pgRest = await createRest({
   db: bunSqlAdapter(sql),
   schemas: ["api"],
   anonymousRole: "anon",

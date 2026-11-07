@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { ApiError, createPgRest, QueryError, type QueryInput, type RequestContext } from "../src/index";
+import { ApiError, createPgRest, QueryError, type QueryInput, type RequestContext } from "./support/pgrest";
 import { createTestDb, hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { toParams } from "../src/query";
+import { toParams } from "../packages/query/src/query";
 
 /** The query string the object describes, as `handle()` would receive it. */
 const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as Array<[string, string]>).toString();

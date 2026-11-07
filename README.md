@@ -1,4 +1,16 @@
-# pg-rest
+# tsql
+
+Two packages for talking to PostgreSQL from your own process, built on one core:
+
+| package | what it is |
+| --- | --- |
+| **`@tsql/rest`** | **PostgREST v16, as a library.** `handle(Request) => Promise<Response>`, identical to PostgREST: nothing added, nothing taken away |
+| **`@tsql/query`** | **The same engine without HTTP.** `query()` from an object, typed from your schema, with `$` filters and computed updates PostgREST does not have |
+
+They share the parser, the SQL, the schema cache, the errors and the adapters (each package bundles that core, so there is
+nothing else to install). Use either, or both.
+
+## `@tsql/rest`
 
 **PostgREST v16, as a library.** The same URLs, the same negotiation, the same JSON, the same status codes and the same
 `PGRSTxxx` error bodies — as a web-standard `handle(Request) => Promise<Response>` you mount in your own server.
@@ -9,27 +21,26 @@ headers and body. One difference is accepted today, and asserted so it cannot qu
 
 Being a library is the rest of it. **No JWT and no server:** you decide who the caller is — cookie, API key, session,
 mTLS — and hand over a role and claims, applied with `set_config` so Row Level Security sees what it would behind
-PostgREST. **No HTTP needed either:** the same queries run in the calling process, typed from your own schema. And no
-runtime dependencies, nothing but web standards in the core, your driver staying yours.
+PostgREST. And no runtime dependencies, nothing but web standards in the core, your driver staying yours.
 
 > **Not an ORM:** there is no model of your database here to drift from it. The types are read out of the catalog, one
 > way, and the query language stays PostgREST's.
 > → [the line none of these may cross](docs/proposals.md#the-line-none-of-these-may-cross)
 
 ```sh
-npm i @adrdp/pg-rest pg      # or: bun add @adrdp/pg-rest (Bun.sql is built in), postgres, @electric-sql/pglite
+npm i @tsql/rest pg      # or: bun add @tsql/rest (Bun.sql is built in), postgres, @electric-sql/pglite
 ```
 
-## Over HTTP
+### Over HTTP
 
 ```ts
 import pg from "pg";
-import { createPgRest } from "@adrdp/pg-rest";
-import { nodePostgresAdapter } from "@adrdp/pg-rest/adapters/node-postgres";
+import { createRest } from "@tsql/rest";
+import { nodePostgresAdapter } from "@tsql/rest/adapters/node-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
-const pgRest = await createPgRest({
+const rest = await createRest({
   db: nodePostgresAdapter(pool), // you create and close the driver
   schemas: ["api"], //             the first one is the default schema
   anonymousRole: "anon",
@@ -41,13 +52,13 @@ const pgRest = await createPgRest({
 
 // any host that speaks Request/Response:
 // Bun:
-Bun.serve({ fetch: (req) => pgRest.handle(req) });
+Bun.serve({ fetch: (req) => rest.handle(req) });
 
 // Node:
-serve({ fetch: (req) => pgRest.handle(req) }); // @hono/node-server
+serve({ fetch: (req) => rest.handle(req) }); // @hono/node-server
 
 // Hono:
-app.all("/api/*", (c) => pgRest.handle(c.req.raw));
+app.all("/api/*", (c) => rest.handle(c.req.raw));
 ```
 
 ```sh
@@ -58,7 +69,20 @@ Any PostgREST client works — the wire format is the whole contract. Including
 [`@supabase/postgrest-js`](https://github.com/supabase/supabase-js/tree/master/packages/core/postgrest-js) and
 [`@neondatabase/postgrest-js`](https://github.com/neondatabase/neon-js/tree/main/packages/postgrest-js).
 
-## In the same process, with types from your schema
+## `@tsql/query`
+
+```sh
+npm i @tsql/query pg
+```
+
+```ts
+import { createQuery } from "@tsql/query";
+import { nodePostgresAdapter } from "@tsql/query/adapters/node-postgres";
+
+const pgRest = await createQuery({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+```
+
+### In the same process, with types from your schema
 
 No HTTP, no loopback call: the same parser, the same SQL and the same `set_config` of the role and claims, so Row Level
 Security applies as it would over the wire. If you know `postgrest-js`, `query()` is the same shape of request —
@@ -105,7 +129,7 @@ writeFileSync("src/db.types.ts", await pgRest.generateTypes({ name: "Database" }
 ```
 
 ```ts
-const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const { data, count, error } = await pgRest.query({
   table: "todos", //                             only a relation that exists
@@ -128,7 +152,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 | ---------------------------------------------- | ----------------------------------------------------------------- |
 | [`docs/query.md`](docs/query.md)               | `query()`, with an example for every field                        |
 | [`docs/types.md`](docs/types.md)               | generating types, the typed instance, and what it cannot describe |
-| [`docs/options.md`](docs/options.md)           | every `createPgRest` option, and what the instance gives back     |
+| [`docs/options.md`](docs/options.md)           | every `createRest` and `createQuery` option, and what they give back |
 | [`docs/adapters.md`](docs/adapters.md)         | `DbAdapter`, the four that ship, and writing your own             |
 | [`docs/design.md`](docs/design.md)             | what it does, and what it will never do because it is a library   |
 | [`docs/architecture.md`](docs/architecture.md) | how a request becomes SQL, and where each piece lives             |

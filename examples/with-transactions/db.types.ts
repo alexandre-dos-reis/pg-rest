@@ -1,4 +1,4 @@
-// Generated from the database catalog by @adrdp/pg-rest. Do not edit.
+// Generated from the database catalog by @tsql/query. Do not edit.
 
 type DatabasePgRestApiRelations = {
   accounts: {

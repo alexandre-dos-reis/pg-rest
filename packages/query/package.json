@@ -1,0 +1,70 @@
+{
+  "name": "@tsql/query",
+  "version": "0.0.0",
+  "description": "Typed, in-process queries over PostgreSQL, from an object: the same parser, SQL and errors as @tsql/rest, a superset of PostgREST's filters, and computed updates. No HTTP.",
+  "license": "MIT",
+  "author": "Alexandre Dos Reis",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git",
+    "directory": "packages/query"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    },
+    "./adapters/bun": {
+      "types": "./dist/adapters/bun.d.ts",
+      "default": "./dist/adapters/bun.js"
+    },
+    "./adapters/node-postgres": {
+      "types": "./dist/adapters/node-postgres.d.ts",
+      "default": "./dist/adapters/node-postgres.js"
+    },
+    "./adapters/postgres-js": {
+      "types": "./dist/adapters/postgres-js.d.ts",
+      "default": "./dist/adapters/postgres-js.js"
+    },
+    "./adapters/pglite": {
+      "types": "./dist/adapters/pglite.d.ts",
+      "default": "./dist/adapters/pglite.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@tsql/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite": ">=0.2.0",
+    "pg": "^8.0.0",
+    "postgres": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    },
+    "postgres": {
+      "optional": true
+    },
+    "@electric-sql/pglite": {
+      "optional": true
+    }
+  }
+}

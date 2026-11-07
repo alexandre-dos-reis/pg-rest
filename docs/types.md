@@ -1,6 +1,6 @@
 # Types generated from the database
 
-`pgRest.generateTypes()` writes a TypeScript module describing your schema, and `createPgRest<Database>` hands it to
+`pgRest.generateTypes()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands it to
 `query()` so the queries check themselves. The types come from `schemaCache()` — the introspected `pg_catalog`, the same
 one the library reads to answer a request — so what they allow is what it accepts, with no second source of truth to
 drift.
@@ -27,7 +27,7 @@ on one. The generator is loaded by that call and not before, so a server that on
 When you hold a `SchemaCache` rather than an instance, the same function is exported standalone:
 
 ```ts
-import { generateTypes } from "@adrdp/pg-rest/types";
+import { generateTypes } from "@tsql/query/types";
 
 const types = generateTypes(await pgRest.schemaCache(), { name: "Database" });
 ```
@@ -119,7 +119,7 @@ Only the composite types the module actually mentions are declared, so a `noUnus
 ## A typed instance
 
 ```ts
-const pgRest = await createPgRest<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+const pgRest = await createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 ```
 
 From there, `table` and `rpc` are the ones that exist, `select`, `where` and `order` only name real columns and
@@ -140,12 +140,12 @@ relationships, the payload of a write is the relation's insert or update shape, 
 `"planned"` a `number | undefined` because an `EXPLAIN` can give nothing usable, and no `count` at all gives
 `undefined` — see [`query.md`](query.md#what-comes-back).
 
-The type argument goes on `createPgRest`, not on the call. TypeScript stops inferring the remaining type arguments as
+The type argument goes on `createQuery`, not on the call. TypeScript stops inferring the remaining type arguments as
 soon as one is given explicitly, so `query<Database>({ … })` would check the input and then hand back `unknown` —
 measured both ways before settling on this shape.
 
 An instance created **without** a type argument keeps the loose input and `query<Todo[]>(…)` to name the result
-yourself, which is the escape hatch for everything below. `handle()` is identical either way: an HTTP request is a
+yourself, which is the escape hatch for everything below. `handle()` of `@tsql/rest` has no such type: an HTTP request is a
 string from outside and cannot be typed.
 
 ## In your editor

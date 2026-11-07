@@ -70,8 +70,8 @@ Same role, same claims, same RLS policies as the REST route: `anon` without a se
 rows with one. A `select` without `basePath`, without a `Request` and without parsing a response — and a failure comes
 back as `error`, with the PostgREST `code` and body on it, ready to answer with. See [`docs/query.md`](../../docs/query.md).
 
-Generate the types for this schema once (`generateTypes(await pgRest.schemaCache())`, from `@adrdp/pg-rest/types`), pass them
-to `createPgRest<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
+Generate the types for this schema once (`generateTypes(await pgRest.schemaCache())`, from `@tsql/rest/types`), pass them
+to `createRest<DatabasePgRest>({ … })`, and the query above checks itself: `"todos"` and its columns, `tags` as a real
 relationship, `done` as a boolean — with `data` inferred as
 `Array<{ id: number; title: string; done: boolean; tags: Array<{ label: string }> }>`. See
 [`docs/types.md`](../../docs/types.md).
