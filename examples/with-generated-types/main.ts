@@ -30,7 +30,7 @@ console.log("tags:", labels);
 const { data: urgent } = await pgRest.query({
   table: "todos",
   select: ["title"],
-  where: { priority: ["in", ["high"]] }, //      an enum is a union of its labels: "urgent" would not compile
+  where: { priority: { $in: ["high"] } }, //      an enum is a union of its labels: "urgent" would not compile
 });
 console.log("high priority:", urgent);
 

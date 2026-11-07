@@ -14,7 +14,7 @@ import {
 } from "./core";
 import { ApiError, DbQueryError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
 import type { Operator } from "./parse/filter";
-import { OPERATORS_ORDER } from "./parse/syntax";
+import { FTS_ORDER, OPERATORS_ORDER } from "./parse/syntax";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
 import { toApiError } from "./service";
 import type { JsonObject } from "./sql/write";
@@ -31,9 +31,9 @@ export type Scalar = string | number | boolean | null;
  * by name, nested composites and arrays included. It travels as JSON and is turned into a row of
  * the column's own type, so the fields may come in any order and a missing one is NULL.
  *
- * An object is read as a composite value only when it has no `op` key -- that is what tells it from
- * a {@link FilterSpec}. A composite type with a field actually named `op` therefore cannot use this
- * form; pass the JSON yourself, as a string: `{ item: '{"op":"and","name":"sock"}' }`.
+ * An object is read as a composite value unless its keys all start with `$` -- that is what tells
+ * it from an {@link OperatorSpec}. A composite type with a field whose name starts with `$`
+ * therefore cannot use this form; pass the JSON yourself, as a string.
  */
 export interface CompositeValue {
   readonly [field: string]: Scalar | CompositeValue | ReadonlyArray<Scalar | CompositeValue> | undefined;
@@ -48,36 +48,52 @@ export type FilterValue = Scalar | CompositeValue;
  */
 export type FilterOp = Operator;
 
-/** An operator with its modifiers: `not.`, a quantifier (`eq(any)`) or a text-search config (`fts(english)`). */
-export interface FilterSpec {
-  readonly op: FilterOp;
-  readonly value?: FilterValue | ReadonlyArray<FilterValue> | undefined;
-  /** Invert the operator (`not.eq.1`). */
-  readonly not?: boolean | undefined;
-  /** Apply the operator to every element of an array column (`eq(any)`). */
-  readonly quantifier?: "any" | "all" | undefined;
-  /** Text-search configuration: `{ op: "fts", config: "english", value: "cat" }` -> `fts(english).cat`. */
+/** The full-text search operators, which take a text-search configuration. */
+export type FtsOp = (typeof FTS_ORDER)[number];
+
+/** A text-search query with its configuration: `{ $fts: { query: "cat", config: "english" } }`. */
+export interface FtsValue {
+  readonly query: string;
   readonly config?: string | undefined;
 }
 
-/**
- * One condition. A plain value means `eq` (and `null` means `is.null`); a tuple is
- * `[operator, value]`; the object form adds the modifiers. An object without an `op` key is a
- * {@link CompositeValue} compared with `eq`.
- */
-export type Filter =
-  | Scalar
-  | CompositeValue
-  | readonly [FilterOp, FilterValue | ReadonlyArray<FilterValue>]
-  | FilterSpec;
+/** What an operator is given: one value, or a list (for `$in`, and for the array operators). */
+export type OperatorValue = FilterValue | ReadonlyArray<FilterValue>;
+
+/** The modifiers, each wrapping exactly one operator: `{ $not: { $eq: 1 } }`, `{ $any: { $eq: 1 } }`. */
+export interface OperatorModifiers {
+  /** Invert the operator (`not.eq.1`). */
+  readonly $not?: OperatorSpec | undefined;
+  /** Apply the operator to some element of an array column (`eq(any)`). */
+  readonly $any?: OperatorSpec | undefined;
+  /** Apply the operator to every element of an array column (`eq(all)`). */
+  readonly $all?: OperatorSpec | undefined;
+}
 
 /**
- * Conditions on columns, ANDed together, plus the reserved keys `and` and `or` which
- * take a list of nested groups. A key may be a dotted path into an embedded resource
- * (`"orders.total"`), exactly like the query string.
+ * The conditions on one column, by operator: `{ $gte: 100, $lt: 500 }` is `>= 100 AND < 500`. Every
+ * key starts with `$`.
+ */
+export type OperatorSpec = {
+  readonly [K in Exclude<FilterOp, FtsOp> as `$${K}`]?: OperatorValue | undefined;
+} & {
+  readonly [K in FtsOp as `$${K}`]?: string | FtsValue | undefined;
+} & OperatorModifiers;
+
+/**
+ * One condition. A plain value means `eq` (and `null` means `is.null`); an object whose keys all
+ * start with `$` names the operators; any other object is a {@link CompositeValue} compared with
+ * `eq`. To compare with an array, say so: `{ $eq: ["a", "b"] }`.
+ */
+export type Filter = Scalar | CompositeValue | OperatorSpec;
+
+/**
+ * Conditions on columns, ANDed together, plus the reserved keys `$and` and `$or`, which take a list
+ * of nested groups, and `$not`, which takes one group and inverts it. A key may be a dotted path
+ * into an embedded resource (`"orders.total"`), exactly like the query string.
  */
 export interface Where {
-  readonly [column: string]: Filter | ReadonlyArray<Where> | undefined;
+  readonly [column: string]: Filter | ReadonlyArray<Where> | Where | undefined;
 }
 
 /** `"created"`, or the object form for a direction and null placement. */
@@ -311,60 +327,155 @@ const listOf = (op: FilterOp, values: ReadonlyArray<FilterValue>): string => {
   return op === "in" ? `(${items})` : `{${items}}`;
 };
 
-const toSpec = (column: string, f: Filter): FilterSpec => {
-  if (f === null || typeof f !== "object") return { op: "eq", value: f };
-  if (Array.isArray(f)) {
-    const [op, value] = f as readonly [FilterOp, FilterValue | ReadonlyArray<FilterValue>];
-    if (typeof op !== "string" || !OPS.has(op)) {
-      throw bad(
-        `Unknown filter operator '${String(op)}' on '${column}'`,
-        "A filter is a value, a [operator, value] tuple or { op, value }",
-      );
-    }
-    return { op, value };
+/** One condition on a column, once its modifiers are resolved: `[not.]op[(modifier)].value`. */
+interface Leaf {
+  readonly op: FilterOp;
+  readonly value: OperatorValue | undefined;
+  readonly not: boolean;
+  readonly quantifier?: "any" | "all";
+  readonly config?: string;
+}
+
+const FTS_OPS: ReadonlySet<string> = new Set(FTS_ORDER);
+
+/** What a `{ op, value, ... }` object from the former syntax looks like. */
+const LEGACY_KEYS: ReadonlySet<string> = new Set(["op", "value", "not", "quantifier", "config"]);
+
+const isSpecKey = (k: string): boolean => k.startsWith("$");
+
+/** An object whose keys all start with `$` names operators; `undefined` for any other object. */
+const isOperatorSpec = (column: string, f: object): boolean => {
+  const keys = Object.keys(f);
+  const marked = keys.filter(isSpecKey).length;
+  if (marked === 0) return false;
+  if (marked < keys.length) {
+    throw bad(
+      `'${column}' mixes operators and fields: ${keys.join(", ")}`,
+      "Keys starting with $ are operators; an object with none is a composite value",
+    );
   }
-  // an object that does not name an operator is a composite value, compared with `eq`
-  if (!("op" in f)) return { op: "eq", value: f as CompositeValue };
-  const spec = f as FilterSpec;
-  if (!OPS.has(spec.op)) throw bad(`Unknown filter operator '${String(spec.op)}' on '${column}'`);
-  if (spec.quantifier && spec.config) {
-    throw bad(`'${column}' cannot have both a quantifier and a text-search configuration`);
-  }
-  return spec;
+  return true;
 };
 
-/** The right-hand side of a filter: `[not.]op[(modifier)].value`. */
-const renderFilter = (column: string, f: Filter, delimited: boolean): string => {
-  const spec = toSpec(column, f);
-  // `col = NULL` is never true in SQL, so comparing with null is a NULL test
-  if (spec.value === null && (spec.op === "eq" || spec.op === "neq")) {
-    return `${Boolean(spec.not) !== (spec.op === "neq") ? "not." : ""}is.null`;
+/** The one leaf a modifier wraps. */
+const single = (column: string, modifier: string, inner: OperatorSpec): Leaf => {
+  const leaves = leavesOf(column, inner);
+  if (leaves.length !== 1) throw bad(`'${modifier}' on '${column}' takes exactly one operator`);
+  return leaves[0]!;
+};
+
+const leavesOf = (column: string, spec: OperatorSpec): Leaf[] => {
+  const entries = Object.entries(spec).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) throw bad(`'${column}' has no operator`);
+  return entries.map(([key, value]): Leaf => {
+    if (key === "$not") {
+      const inner = single(column, key, value as OperatorSpec);
+      return { ...inner, not: !inner.not };
+    }
+    if (key === "$any" || key === "$all") {
+      const inner = single(column, key, value as OperatorSpec);
+      if (inner.not || inner.quantifier || inner.config) {
+        throw bad(
+          `'${key}' on '${column}' wraps a bare operator`,
+          "Put $not around the quantifier instead: { $not: { $any: { $eq: 1 } } }",
+        );
+      }
+      return { ...inner, quantifier: key === "$any" ? "any" : "all" };
+    }
+    const op = key.slice(1) as FilterOp;
+    if (!isSpecKey(key) || !OPS.has(op)) {
+      throw bad(`Unknown filter operator '${key}' on '${column}'`, "An operator is written $eq, $gte, $ilike, ...");
+    }
+    if (FTS_OPS.has(op) && value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const { query, config } = value as FtsValue;
+      return { op, value: query, not: false, ...(config ? { config } : {}) };
+    }
+    return { op, value: value as OperatorValue, not: false };
+  });
+};
+
+const toLeaves = (column: string, f: Filter): Leaf[] => {
+  if (f === null || typeof f !== "object") return [{ op: "eq", value: f, not: false }];
+  if (Array.isArray(f)) {
+    throw bad(
+      `'${column}' is compared with an array`,
+      "A filter is a value or an object of operators; to compare with an array, write { $eq: [...] }",
+    );
   }
-  const modifier = spec.quantifier ?? spec.config;
-  const op = `${spec.not ? "not." : ""}${spec.op}${modifier ? `(${modifier})` : ""}`;
-  const value = Array.isArray(spec.value)
-    ? listOf(spec.op, spec.value as ReadonlyArray<FilterValue>)
-    : lit(spec.value as FilterValue | undefined, delimited);
+  if (isOperatorSpec(column, f)) return leavesOf(column, f as OperatorSpec);
+  // `{ op: "gte", value: 1 }` was the former syntax: say so rather than compare with that object
+  const keys = Object.keys(f);
+  const op = (f as { op?: unknown }).op;
+  if (typeof op === "string" && OPS.has(op) && keys.every((k) => LEGACY_KEYS.has(k))) {
+    throw bad(`'${column}' uses the former { op, value } syntax`, `Write { $${op}: value } instead`);
+  }
+  return [{ op: "eq", value: f as CompositeValue, not: false }];
+};
+
+/** The right-hand side of one leaf: `[not.]op[(modifier)].value`. */
+const renderLeaf = (leaf: Leaf, delimited: boolean): string => {
+  // `col = NULL` is never true in SQL, so comparing with null is a NULL test
+  if (leaf.value === null && (leaf.op === "eq" || leaf.op === "neq")) {
+    return `${leaf.not !== (leaf.op === "neq") ? "not." : ""}is.null`;
+  }
+  if (leaf.quantifier && leaf.config)
+    throw bad("A filter cannot have both a quantifier and a text-search configuration");
+  const modifier = leaf.quantifier ?? leaf.config;
+  const op = `${leaf.not ? "not." : ""}${leaf.op}${modifier ? `(${modifier})` : ""}`;
+  const value = Array.isArray(leaf.value)
+    ? listOf(leaf.op, leaf.value as ReadonlyArray<FilterValue>)
+    : lit(leaf.value as FilterValue | undefined, delimited);
   return `${op}.${value}`;
 };
 
-const isGroupKey = (key: string): boolean => key === "and" || key === "or";
+/** The conditions on one column, as many as it has operators. */
+const renderFilters = (column: string, f: Filter, delimited: boolean): string[] =>
+  toLeaves(column, f).map((leaf) => renderLeaf(leaf, delimited));
+
+/** The logic-tree keys, by the name the query string gives them. */
+const GROUPS: Readonly<Record<string, string>> = { $and: "and", $or: "or", $not: "not.and" };
+
+const isGroupKey = (key: string): boolean => key in GROUPS;
+
+/** The members of a group: a list for `$and`/`$or`, one `Where` for `$not`. */
+const groupMembers = (key: string, value: unknown): ReadonlyArray<Where> => {
+  if (key === "$not") {
+    if (value === null || typeof value !== "object" || Array.isArray(value))
+      throw bad("'$not' takes one group of conditions");
+    return [value as Where];
+  }
+  if (!Array.isArray(value)) throw bad(`'${key}' takes a list of groups`);
+  return value as ReadonlyArray<Where>;
+};
+
+/** `name(member,member)`: a `$not` group is the AND of its conditions, inverted. */
+const renderGroupTree = (key: string, value: unknown): string => {
+  const members = groupMembers(key, value);
+  const inner = key === "$not" ? renderConditions(members[0]!) : members.map(renderGroup);
+  if (key === "$not" && inner.length === 0) throw bad("A $not group cannot be empty");
+  return `(${inner.join(",")})`;
+};
+
+/** A key that is neither a column nor a group. */
+const checkKey = (key: string): void => {
+  if (isSpecKey(key) && !isGroupKey(key)) {
+    throw bad(`Unknown key '${key}' in where`, "Only $and, $or and $not are reserved; a column is named without a $");
+  }
+};
 
 /** Every condition of a `Where`, rendered as a logic tree would carry them (`total.gte.100`). */
 const renderConditions = (w: Where): string[] =>
   Object.entries(w).flatMap(([key, value]) => {
     if (value === undefined) return [];
-    if (isGroupKey(key)) {
-      if (!Array.isArray(value)) throw bad(`'${key}' takes a list of groups`);
-      return [`${key}(${(value as ReadonlyArray<Where>).map(renderGroup).join(",")})`];
-    }
-    return [`${key}.${renderFilter(key, value as Filter, true)}`];
+    checkKey(key);
+    if (isGroupKey(key)) return [`${GROUPS[key]}${renderGroupTree(key, value)}`];
+    return renderFilters(key, value as Filter, true).map((f) => `${key}.${f}`);
   });
 
-/** One member of an `and`/`or` list. Several conditions in the same object are ANDed. */
+/** One member of an `$and`/`$or` list. Several conditions in the same object are ANDed. */
 const renderGroup = (w: Where): string => {
   const parts = renderConditions(w);
-  if (parts.length === 0) throw bad("An and/or group cannot be empty");
+  if (parts.length === 0) throw bad("An $and/$or group cannot be empty");
   return parts.length === 1 ? parts[0]! : `and(${parts.join(",")})`;
 };
 
@@ -381,12 +492,12 @@ const pushNode = (node: NodeFields, path: ReadonlyArray<string>, out: Params): v
   const at = path.length ? `${path.join(".")}.` : "";
   for (const [key, value] of Object.entries(node.where ?? {})) {
     if (value === undefined) continue;
+    checkKey(key);
     if (isGroupKey(key)) {
-      if (!Array.isArray(value)) throw bad(`'${key}' takes a list of groups`);
-      out.push([`${at}${key}`, `(${(value as ReadonlyArray<Where>).map(renderGroup).join(",")})`]);
+      out.push([`${at}${GROUPS[key]}`, renderGroupTree(key, value)]);
     } else {
       // a dotted key filters an embedded resource, and keeps its own path
-      out.push([`${at}${key}`, renderFilter(key, value as Filter, false)]);
+      for (const f of renderFilters(key, value as Filter, false)) out.push([`${at}${key}`, f]);
     }
   }
   if (node.order?.length) out.push([`${at}order`, node.order.map(renderOrder).join(",")]);
