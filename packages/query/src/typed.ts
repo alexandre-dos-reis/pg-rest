@@ -5,6 +5,8 @@ import type {
   DefaultValue,
   Expression,
   FtsValue,
+  Prepared,
+  PreparedArgs,
   QueryOk,
   QueryResult,
   Scalar,
@@ -740,6 +742,8 @@ export interface TypedContextQuery<Db extends AnyDatabase> {
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
     ctx?: RequestContext,
   ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Run a call of a prepared query, with this context. */
+  run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /** {@link TypedQueryInstance.transaction} with the context read from the source, once, on entry. */
   transaction<A>(
     fn: (tx: TypedTransaction<Db>) => Promise<A>,
@@ -760,6 +764,8 @@ export interface TypedTransaction<Db extends AnyDatabase> {
   query<const Q extends TypedQuery<Db>>(
     input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
   ): Promise<QueryOk<QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Run a call of a prepared query in this transaction. Like `query`, it rejects on failure. */
+  run<T, C extends number | undefined>(call: Prepared<T, C>): Promise<QueryOk<T, C>>;
   /** A nested scope on a `SAVEPOINT`: it rolls back on its own, leaving this one usable. */
   transaction<A>(fn: (tx: TypedTransaction<Db>) => Promise<A>): Promise<QueryResult<A, undefined>>;
   /** Roll this scope back and leave it. */
@@ -768,8 +774,34 @@ export interface TypedTransaction<Db extends AnyDatabase> {
 
 export interface TypedQueryInstance<Db extends AnyDatabase> extends Omit<
   QueryInstance,
-  "query" | "setContextQuery" | "transaction"
+  "query" | "prepare" | "setContextQuery" | "transaction"
 > {
+  /**
+   * Plan a select once and get a function that fills in its values: a call is string concatenation
+   * and the statement for the driver, with no parsing or planning. The query is checked against the
+   * database like `query`'s, and the result is typed by it. A call is run with `run`, on the
+   * instance, in a transaction scope (`tx.run`) or on a `setContextQuery` function.
+   *
+   * An argument is a **filter value and nothing else**: `build` runs once with a stand-in for each,
+   * so it cannot pick a column, an operator or a limit, and cannot branch on an argument. Preparing
+   * throws, at set-up time, for a query that does not follow that, and for anything but a select.
+   * A call whose values change the SQL itself (`null`, a `*` wildcard, a composite) is not an error: it runs the
+   * ordinary way.
+   *
+   * @example
+   * const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+   *   table: "orders",
+   *   select: ["id", "total"],
+   *   where: { status: a.status, total: { $gte: a.min } },
+   * }));
+   * const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
+   */
+  prepare<A extends PreparedArgs, const Q extends TypedQuery<Db>>(
+    build: (
+      args: A,
+    ) => Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
+  ): (args: A) => Prepared<QueryData<Db, Q>, CountFrom<Q>>;
+
   /**
    * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
    * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`

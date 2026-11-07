@@ -2,6 +2,7 @@ import type { DbSession } from "@tsql/core/adapter";
 import {
   type Caller,
   type Env,
+  type Outcome as EngineOutcome,
   type Plan,
   type QueryParams,
   type RequestContext,
@@ -26,6 +27,7 @@ import type {
 import type { SelectItem } from "@tsql/core/parse/select";
 import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
+import { literal } from "@tsql/core/quote";
 import { compileSet } from "@tsql/core/sql/expression";
 import { ROOT_ALIAS } from "@tsql/core/sql/read";
 import type { Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
@@ -952,7 +954,9 @@ const totalOf = (headers: Readonly<Record<string, string>>): number | undefined 
   return total === undefined || total === "*" ? undefined : Number(total);
 };
 
-const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
+const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
+  if (isPrepared(given)) return runPrepared(env, given, ctx);
+  const input = given;
   assertRole(env, ctx);
   if (isRpc(input) && "table" in input) {
     throw bad("A query names either a table or an rpc, not both");
@@ -980,12 +984,13 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
   // there is no request, so no `request.*` settings
   const caller: Caller = { path: isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}` };
   const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, false, undefined);
-
-  return {
-    data: outcome.text === "" ? null : (JSON.parse(outcome.text) as unknown),
-    count: totalOf(outcome.headers),
-  };
+  return answerOf(outcome);
 };
+
+const answerOf = (outcome: EngineOutcome): Omit<QueryOk, "error"> => ({
+  data: outcome.text === "" ? null : (JSON.parse(outcome.text) as unknown),
+  count: totalOf(outcome.headers),
+});
 
 /**
  * Run a query described by an object, in-process. Nothing here is HTTP: no request, no URL, no status.
@@ -993,12 +998,192 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
  * **This never rejects.** Every failure, including one the library did not foresee, comes back as
  * the `error` of the result, so a caller that checks it needs no `try`/`catch` at all.
  */
-export const runQuery = async (env: Env, input: QueryInput, ctx: RequestContext = {}): Promise<QueryResult> => {
+export const runQuery = async (
+  env: Env,
+  input: QueryInput | Prepared,
+  ctx: RequestContext = {},
+): Promise<QueryResult> => {
   try {
     return { ...(await run(env, input, ctx)), error: null };
   } catch (e) {
-    return failureOf(env, ctx, input, e);
+    return failureOf(env, ctx, inputOf(input), e);
   }
+};
+
+// ---------------------------------------------------------------------------
+// prepared queries
+// ---------------------------------------------------------------------------
+
+/** What a prepared query takes: values, by name. */
+export type PreparedArgs = { readonly [name: string]: Scalar };
+
+const PREPARED = Symbol("tsql.prepared");
+
+/**
+ * One call of a prepared query, as `prepare()` returns it: hand it to `query`, `tx.query` or a
+ * `setContextQuery` function, wherever a query object goes. `T` and `C` are what `data` and
+ * `count` will be.
+ */
+export interface Prepared<T = unknown, C extends number | undefined = number | undefined> {
+  /** Not for reading: this only carries `T` and `C` to the result type. */
+  readonly __result?: { readonly data: T; readonly count: C };
+  readonly [PREPARED]: PreparedPlan;
+  readonly args: PreparedArgs;
+}
+
+interface Template {
+  readonly parts: ReadonlyArray<string>;
+  /** `parts[i + 1]` follows the value of argument `slots[i]`. */
+  readonly slots: ReadonlyArray<number>;
+}
+
+interface PreparedPlan {
+  readonly names: ReadonlyArray<string>;
+  readonly build: (args: PreparedArgs) => QueryInput;
+  readonly plan: Plan;
+  readonly statement: Template;
+  readonly planned: Template | undefined;
+  readonly method: Method;
+  readonly schema: string;
+  readonly prefer: Preferences;
+  readonly format: OutputFormat;
+  readonly caller: Caller;
+}
+
+const isPrepared = (x: unknown): x is Prepared => typeof x === "object" && x !== null && PREPARED in x;
+
+/** The query object a call stands for, for a failure to name. */
+const inputOf = (x: QueryInput | Prepared): QueryInput => {
+  if (!isPrepared(x)) return x;
+  try {
+    return x[PREPARED].build(x.args);
+  } catch {
+    return { table: x[PREPARED].caller.path.slice(1) };
+  }
+};
+
+/**
+ * Cut `sql` at the literals that stand for arguments. A literal is `'<marker>'`, and nothing else
+ * may hold the marker: an argument used as a column, an operator or a number would be baked into the
+ * SQL and not follow the value.
+ */
+const templateOf = (sql: string, marker: string, names: ReadonlyArray<string>): Template => {
+  const parts: string[] = [];
+  const slots: number[] = [];
+  let from = 0;
+  for (const m of sql.matchAll(new RegExp(`'${marker}x(\\d+)x'`, "g"))) {
+    parts.push(sql.slice(from, m.index));
+    slots.push(Number(m[1]));
+    from = m.index + m[0].length;
+  }
+  parts.push(sql.slice(from));
+  const stray = parts.find((p) => p.includes(marker));
+  if (stray !== undefined) {
+    throw new TypeError(
+      "prepare: an argument is used somewhere other than a value to compare with (a column, an operator, a limit...); only filter values can change between calls",
+    );
+  }
+  void names;
+  return { parts, slots };
+};
+
+const fill = (t: Template, literals: ReadonlyArray<string>): string => {
+  let out = t.parts[0]!;
+  for (let i = 0; i < t.slots.length; i++) out += literals[t.slots[i]!]! + t.parts[i + 1]!;
+  return out;
+};
+
+/**
+ * A value whose SQL is the same text in any position it can take: the literal of its string form.
+ * `null` is a different comparison (`IS NULL`), a `*` is a wildcard for `like`, and a value that
+ * opens a `{` may be a composite: those change the SQL itself, so they take the long way.
+ */
+const isPlain = (v: unknown): v is string | number | boolean => {
+  if (typeof v === "number") return Number.isFinite(v);
+  if (typeof v === "boolean") return true;
+  return typeof v === "string" && !v.includes("*") && !v.trimStart().startsWith("{");
+};
+
+/**
+ * Plan a query once and answer a function that fills in its values. `build` is called here with a
+ * stand-in for each argument it reads, and the SQL that comes out is cut at those stand-ins, so a
+ * call is string concatenation and the statement goes to the driver: no parsing, no planning.
+ *
+ * The consequence is that the *shape* of the query must not depend on the arguments: `build` may
+ * use them as filter values and nothing else. A call whose values would change the SQL itself
+ * (`null`, a `*` wildcard, a composite) is not an error: it builds the query object and runs it
+ * the ordinary way.
+ */
+export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) => QueryInput) => {
+  const marker = `tsql${Math.random()
+    .toString(36)
+    .slice(2, 10)
+    .replace(/[^a-z0-9]/g, "z")}`;
+  const names: string[] = [];
+  const stand = new Proxy(
+    {},
+    {
+      get: (_t, key) => {
+        if (typeof key !== "string") return undefined;
+        let i = names.indexOf(key);
+        if (i < 0) i = names.push(key) - 1;
+        return `${marker}x${i}x`;
+      },
+    },
+  ) as A;
+
+  const input = build(stand);
+  if (isRpc(input) || ("action" in input && input.action !== undefined && input.action !== "select")) {
+    throw new TypeError("prepare: only a select on a table can be prepared");
+  }
+  const schema = useSchema(env, input.schema);
+  const prefer = preferencesOf(input);
+  const format: OutputFormat = input.single
+    ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
+    : { kind: "json", stripNulls: Boolean(input.stripNulls) };
+  const parsed = toParsed(input);
+  const qp: QueryParams = parsed
+    ? { params: [], bare: new Set<string>(), parsed }
+    : { params: toParams(input), bare: new Set<string>() };
+  const plan = planTable(env, "GET", schema, input.table, qp, prefer, format, undefined, undefined);
+
+  const statement = templateOf(plan.statement, marker, names);
+  const planned = plan.planned === undefined ? undefined : templateOf(plan.planned, marker, names);
+  const used = new Set([...statement.slots, ...(planned?.slots ?? [])]);
+  const unused = names.filter((_n, i) => !used.has(i));
+  if (unused.length) {
+    throw new TypeError(`prepare: ${unused.map((n) => `'${n}'`).join(", ")} never ends up as a value in the SQL`);
+  }
+
+  const compiled: PreparedPlan = {
+    names,
+    build: build as (args: PreparedArgs) => QueryInput,
+    plan,
+    statement,
+    planned,
+    method: "GET",
+    schema,
+    prefer,
+    format,
+    caller: { path: `/${input.table}` },
+  };
+  return (args: A): Prepared => ({ [PREPARED]: compiled, args });
+};
+
+const runPrepared = async (env: Env, call: Prepared, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
+  const c = call[PREPARED];
+  const values = c.names.map((n) => call.args[n]);
+  // a value that changes the SQL itself: build the object and run it like any other
+  if (!values.every(isPlain)) return run(env, c.build(call.args), ctx);
+  assertRole(env, ctx);
+  const literals = values.map((v) => literal(String(v)));
+  const plan: Plan = {
+    ...c.plan,
+    statement: fill(c.statement, literals),
+    planned: c.planned && fill(c.planned, literals),
+  };
+  const outcome = await execute(env, ctx, c.caller, c.method, c.schema, c.prefer, c.format, plan, false, undefined);
+  return answerOf(outcome);
 };
 
 /**
@@ -1019,7 +1204,8 @@ const failureOf = (env: Env, ctx: RequestContext, input: QueryInput, e: unknown)
  * Nothing is logged and nothing is dropped: `error` is the only channel, so the caller decides what
  * to do with it.
  */
-export const toFailedResult = (input: QueryInput, e: unknown): QueryFailed => {
+export const toFailedResult = (given: QueryInput | Prepared, e: unknown): QueryFailed => {
+  const input = inputOf(given);
   const error =
     e instanceof QueryError ? e : new QueryError(input, { kind: "internal", message: "Internal error" }, { cause: e });
   return { data: null, count: undefined, error };
@@ -1046,6 +1232,8 @@ export type ContextSource = RequestContext | (() => RequestContext | undefined |
  */
 export interface ContextQuery {
   <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /** Run a call of a prepared query, with this context. */
+  run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /**
    * {@link runTransaction} with the context read from the source. Naming a `role`, `claims` or
    * `settings` in `options` overrides the ambient context for the whole transaction, exactly as a
@@ -1060,10 +1248,10 @@ export interface ContextQuery {
  * middleware that did not run). It is an error and not a fall back to the anonymous role, because
  * silently dropping privileges is the kind of thing a query should refuse rather than guess.
  */
-export const noContextResult = (input: QueryInput): QueryFailed =>
+export const noContextResult = (given: QueryInput | Prepared): QueryFailed =>
   toFailedResult(
-    input,
-    new QueryError(input, {
+    given,
+    new QueryError(inputOf(given), {
       kind: "no_context",
       message: "No request context",
       details: "The context source of setContextQuery() returned nothing",
@@ -1142,6 +1330,8 @@ export interface Transaction {
    * is the only place a transaction can carry on after one.
    */
   query<T = unknown, C extends number | undefined = number | undefined>(input: QueryInput): Promise<QueryOk<T, C>>;
+  /** Run a call of a prepared query in this transaction. Like `query`, it rejects on failure. */
+  run<T, C extends number | undefined>(call: Prepared<T, C>): Promise<QueryOk<T, C>>;
   /**
    * A nested scope, on a `SAVEPOINT`: it rolls back on its own when it fails, leaving the
    * transaction around it usable. That is how one query is allowed to fail inside a scope -- and
@@ -1219,21 +1409,24 @@ const runScope = async <A>(
       "Wrap the queries allowed to fail in tx.transaction(), which runs them in a savepoint of their own",
     );
 
+  const exec = async <T = unknown, C extends number | undefined = number | undefined>(
+    input: QueryInput | Prepared<T, C>,
+  ): Promise<QueryOk<T, C>> => {
+    if (state.failed) throw refused();
+    const result = (await runQuery(env, input, ctx)) as QueryResult<T, C>;
+    // A failure the library raised to undo its own write (`not_single_row`, `too_many_affected`) did not abort
+    // anything by itself, so the scope records it before leaving: `error` must not come back
+    // from a transaction that kept the row, whatever the callback does next.
+    if (result.error) {
+      state.failed = result.error;
+      throw result.error;
+    }
+    return result;
+  };
+
   const tx: Transaction = {
-    query: async <T = unknown, C extends number | undefined = number | undefined>(
-      input: QueryInput,
-    ): Promise<QueryOk<T, C>> => {
-      if (state.failed) throw refused();
-      const result = (await runQuery(env, input, ctx)) as QueryResult<T, C>;
-      // A failure the library raised to undo its own write (`not_single_row`, `too_many_affected`) did not abort
-      // anything by itself, so the scope records it before leaving: `error` must not come back
-      // from a transaction that kept the row, whatever the callback does next.
-      if (result.error) {
-        state.failed = result.error;
-        throw result.error;
-      }
-      return result;
-    },
+    query: exec,
+    run: exec,
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {
       if (state.failed) return toFailedResult(TRANSACTION, refused()) as QueryResult<B, undefined>;

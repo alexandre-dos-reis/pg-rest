@@ -41,6 +41,8 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
     handle: rest.handle,
     schemaCache: rest.schemaCache,
     query: (input, ctx) => query.query(input, ctx),
+    run: (call, ctx) => query.run(call, ctx),
+    prepare: (build) => query.prepare(build),
     setContextQuery: (source) => query.setContextQuery(source),
     transaction: (fn, scope) => query.transaction(fn, scope),
     reloadSchema: async () => {

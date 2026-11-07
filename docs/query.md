@@ -21,6 +21,7 @@ drifts fails the build. The ones that are meant to be refused carry `@ts-expect-
 - [Calling a function](#calling-a-function)
 - [Who is asking](#who-is-asking)
   - [Binding it once](#binding-it-once)
+- [Prepared queries](#prepared-queries)
 - [Transactions](#transactions)
   - [What rolls a scope back](#what-rolls-a-scope-back)
   - [Letting one query fail: a nested scope](#letting-one-query-fail-a-nested-scope)
@@ -1091,6 +1092,43 @@ Use `store.run(ctx, …)`, not `store.enterWith(ctx)`: `run` is bounded by its c
 into whatever follows in the current async resource. An `async` middleware is fine — `run` hands back its callback's
 promise, and the context crosses every `await` inside it — as long as you `await` (or return) what `run` gives you,
 otherwise the response leaves before the queries finish.
+
+## Prepared queries
+
+A query that runs many times with different values need not be parsed and planned every time. `prepare()` does that
+once and gives back a function of the values; a call of it is run with `run()`:
+
+```ts
+const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+  table: "orders",
+  select: ["id", "total", { clients: ["name"] }],
+  where: { status: a.status, total: { $gte: a.min } },
+  order: ["id"],
+}));
+
+const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
+// data: the rows, typed by the select
+```
+
+The query is checked against the database when it is written, like any other, and `data` is typed by it. A call is
+string concatenation and the statement for the driver: no parsing, no planning. What remains is the database.
+
+`run()` is on the instance, on a [`setContextQuery`](#binding-it-once) function, and as `tx.run()` in a
+[transaction](#transactions), where it rejects on failure like `tx.query()`:
+
+```ts
+const inScope = await pgRest.transaction(async (tx) => (await tx.run(paidOver({ status: "new", min: 0 }))).data, ctx);
+```
+
+**An argument is a filter value, and nothing else.** `prepare()` calls your function once, with a stand-in for each
+argument, and cuts the SQL it gets at those stand-ins. So an argument cannot choose a column, an operator, a `limit`
+or what the query selects, and the function cannot branch on one (`a.status ? … : …` always sees a value). A query that
+does not follow that, one that names a table that does not exist, and anything but a select, make `prepare()` throw
+when the module loads rather than when the first request arrives.
+
+A call whose values would change the SQL itself is not an error: `null` (`IS NULL` instead of `=`), a string with a `*`
+(the wildcard of `like`) and one that opens a `{` (it may be a composite) build the query object and run it the
+ordinary way, with the same result, at the cost of the saving.
 
 ## Transactions
 
