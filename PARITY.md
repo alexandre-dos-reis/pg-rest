@@ -134,6 +134,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Domain types, enums, range/array types | 🟡 | Passed through as Postgres returns them; only common types tested |
 | Composite types: reading, writing, `->`/`->>` into their fields | ✅ | The fields are also in the schema cache (`SchemaCache.composites`) and in the generated types |
 | Comparing a whole composite value (`owner=eq.…`) | ➕ | PostgREST answers `0A000` (*input of anonymous composite types is not implemented*) for any such comparison. pg-rest reads a **JSON object** as a row of the column's own type, so `query({ where: { owner: { … } } })` works -- see [`docs/query.md`](docs/query.md#composite-types). A bare row literal still answers `0A000` |
+| `UPDATE … SET column = expression \| DEFAULT` | ➕ | A superset of PostgREST's `PATCH`, in `query()` only (`set: { total: { $add: [{ $col: "total" }, 1] } }`): over HTTP the body is still PostgREST's JSON. See [`docs/query.md`](docs/query.md#computed-values) |
 | Hot-reloading on DDL | ➖ | Needs a dedicated `LISTEN` connection (see the README); call `reloadSchema()` after migrations |
 
 ## Verification status

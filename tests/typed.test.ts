@@ -407,6 +407,72 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
     // @ts-expect-error a JSON path is still refused in a select
     void (() => pgRest.query({ table: "clients", select: ["tier:meta->>tier"] }));
+    // an update may set a column to an expression or to DEFAULT ...
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        set: { total: { $add: [{ $col: "total" }, 1] }, status: { $default: true } },
+      }));
+    // ... and the expression has to give the column's type
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        set: {
+          total: { $round: [{ $mul: [{ $col: "total" }, 1.1] }, 2] },
+          status: { $lower: { $concat: [{ $col: "status" }, "!"] } },
+          placed_at: { $now: true },
+        },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "clients",
+        action: "update",
+        set: { tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "vip"] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error a text operator does not give a number
+        set: { total: { $lower: { $col: "status" } } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error `$col` of a number column cannot be a text one
+        set: { total: { $add: [{ $col: "status" }, 1] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error a number is not text
+        set: { status: { $add: [1, 2] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "clients",
+        action: "update",
+        // @ts-expect-error an array takes `$arrayAppend`, not `$upper`
+        set: { tags: { $upper: { $col: "name" } } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error ... but only on the columns of the relation
+        set: { nope: { $add: [1, 2] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error an unknown key in set is still refused
+        set: { titel: "x" },
+      }));
     // @ts-expect-error order only takes real columns
     void (() => pgRest.query({ table: "clients", order: ["nope.desc"] }));
     // @ts-expect-error an aggregate view cannot be written to (insert: never)

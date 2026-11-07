@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { hasDb } from "./support/db";
-import { makeApi, type TestApi } from "./support/api";
+import { authed, makeApi, type TestApi } from "./support/api";
 
 const PAYLOADS = [
   "1; DROP TABLE api.clients; --",
@@ -157,6 +157,23 @@ describe.skipIf(!hasDb)("hostile input", () => {
       const key = await t.api.query({ table: "clients", where: { [p]: 1 } });
       expect(key.status).toBeGreaterThanOrEqual(400);
       expect(key.status).toBeLessThan(500);
+    }
+    await intact();
+  });
+
+  test("query(): hostile values and names in the expressions of set stay values or are refused", async () => {
+    const run = (set: object) =>
+      t.api.query({ table: "clients", action: "update", set, where: { id: 3 } } as never, authed());
+    for (const p of PAYLOADS) {
+      // a string is a literal, whatever it says
+      const r = await run({ name: { $concat: [{ $col: "name" }, p] } });
+      expect(r.error).toBeNull();
+      // a column, a type and a key are checked, never interpolated
+      expect((await run({ name: { $col: p } })).error?.status ?? 0).toBeLessThan(500);
+      expect((await run({ name: { $add: [{ $col: p }, 1] } })).error?.status ?? 0).toBeLessThan(500);
+      expect((await run({ name: { $cast: [1, p] } })).error?.status ?? 0).toBeLessThan(500);
+      expect((await run({ [p]: { $add: [1, 2] } })).error?.status ?? 0).toBeLessThan(500);
+      expect((await run({ name: { [p]: 1 } })).error?.status ?? 0).toBeLessThan(500);
     }
     await intact();
   });

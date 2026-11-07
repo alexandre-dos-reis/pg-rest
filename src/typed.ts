@@ -1,5 +1,15 @@
 import type { RequestContext } from "./core";
-import type { ContextSource, CountFrom, FtsValue, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
+import type {
+  ContextSource,
+  CountFrom,
+  DefaultValue,
+  Expression,
+  FtsValue,
+  QueryOk,
+  QueryResult,
+  Scalar,
+  TransactionOptions,
+} from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -468,7 +478,7 @@ type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
      */
     readonly rows?: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
     /** The columns to change, for an `"update"`. The rows are the ones `where` matches. */
-    readonly set?: Relations<Db, S>[T]["update"];
+    readonly set?: SetOf<Relations<Db, S>[T]["update"]>;
     /** For an `"upsert"`, the columns the conflict is resolved on. Defaults to the primary key. */
     readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
     /** Insert only these columns, ignoring any other key in `rows` (and so making a bulk insert uniform). */
@@ -489,7 +499,7 @@ type WriteRules<Db extends AnyDatabase, Q> = (Q extends { action: "insert" | "up
       readonly rows: WriteShape<Db, Q, "insert"> | ReadonlyArray<WriteShape<Db, Q, "insert">>;
     }
   : { readonly rows?: never; readonly onConflict?: never; readonly columns?: never; readonly missing?: never }) &
-  (Q extends { action: "update" } ? { readonly set: WriteShape<Db, Q, "update"> } : { readonly set?: never }) &
+  (Q extends { action: "update" } ? { readonly set: SetOf<WriteShape<Db, Q, "update">> } : { readonly set?: never }) &
   (Q extends { action: "insert" | "upsert" | "update" | "delete" } ? unknown : { readonly returning?: never });
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
@@ -532,6 +542,92 @@ export type NoExtraKeys<Q, Allowed> = {
   readonly [K in Exclude<keyof Q, KeysOfUnion<Allowed>>]: never;
 };
 
+/**
+ * What an update may set: the columns of the relation, each to its type or to an expression the
+ * database computes (`{ $add: [{ $col: "total" }, 10] }`, `{ $default: true }`).
+ */
+type SetOf<U> = {
+  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | DefaultValue;
+};
+
+/** The columns of `U` that hold a `T`, for `$col`. */
+type ColumnsOf<U, T> = {
+  readonly [K in keyof U & string]-?: [NonNullable<U[K]>] extends [T] ? K : never;
+}[keyof U & string];
+
+/**
+ * An expression for a column of type `V`: its operators are the ones that give such a value, and its
+ * `$col` names a column of the same kind. A column PostgreSQL types more finely than TypeScript does
+ * (`jsonb`, ranges) is `unknown` and takes any expression, as does `$cast`, which says its own type.
+ */
+type ExpressionFor<U, V> = unknown extends V
+  ? Expression
+  : [NonNullable<V>] extends [never]
+    ? Expression
+    : [NonNullable<V>] extends [number | bigint]
+      ? NumberExpression<U>
+      : [NonNullable<V>] extends [string]
+        ? StringExpression<U>
+        : [NonNullable<V>] extends [boolean]
+          ? BooleanExpression<U>
+          : [NonNullable<V>] extends [ReadonlyArray<infer E>]
+            ? ArrayExpression<U, E>
+            : Expression;
+
+type Cast = { readonly $cast: readonly [Expression, string] };
+type Value = { readonly $val: unknown };
+
+// Each `{ [K in Keys]: { [P in K]: … } }[Keys]` is one node per key: `{ $add: X[] } | { $sub: X[] } | …`.
+// It is written out where it is used, because TypeScript only allows a recursive type through the
+// properties of an object type, not through the argument of another alias.
+
+type NumberExpression<U> =
+  | number
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, number | bigint> }
+  | { readonly [K in "$neg" | "$abs"]: { readonly [P in K]: NumberExpression<U> } }["$neg" | "$abs"]
+  | { readonly $round: readonly [NumberExpression<U>] | readonly [NumberExpression<U>, number] }
+  | { readonly $length: StringExpression<U> }
+  | {
+      readonly [K in NumberList]: { readonly [P in K]: ReadonlyArray<NumberExpression<U>> };
+    }[NumberList];
+
+type NumberList = "$add" | "$sub" | "$mul" | "$div" | "$mod" | "$pow" | "$coalesce" | "$greatest" | "$least";
+// dates and timestamps are strings too: `placed_at + '1 day'`
+type StringList = "$concat" | "$add" | "$sub" | "$coalesce" | "$greatest" | "$least";
+type StringFn = "$lower" | "$upper" | "$trim";
+type Comparison = "$eq" | "$neq" | "$gt" | "$gte" | "$lt" | "$lte" | "$cs" | "$cd" | "$ov";
+
+type StringExpression<U> =
+  | string
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, string> }
+  | { readonly $now: true }
+  | { readonly [K in StringFn]: { readonly [P in K]: StringExpression<U> } }[StringFn]
+  | { readonly [K in StringList]: { readonly [P in K]: ReadonlyArray<StringExpression<U>> } }[StringList];
+
+type BooleanExpression<U> =
+  | boolean
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, boolean> }
+  | { readonly $not: BooleanExpression<U> }
+  | { readonly $and: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly $or: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly $coalesce: ReadonlyArray<BooleanExpression<U>> }
+  | { readonly [K in Comparison]: { readonly [P in K]: readonly [Expression, Expression] } }[Comparison];
+
+type ArrayExpression<U, E> =
+  | Value
+  | Cast
+  | { readonly $col: ColumnsOf<U, ReadonlyArray<E>> }
+  | { readonly $concat: ReadonlyArray<ArrayExpression<U, E>> }
+  | { readonly $coalesce: ReadonlyArray<ArrayExpression<U, E>> }
+  | { readonly $arrayAppend: readonly [ArrayExpression<U, E>, E | Value] }
+  | { readonly $arrayRemove: readonly [ArrayExpression<U, E>, E | Value] };
+
 /** The insert or update shape of the relation a query writes to. */
 type WriteShape<Db extends AnyDatabase, Q, Field extends "insert" | "update"> = Q extends { table: infer T }
   ? T extends Table<Db, SchemaIn<Db, Q>>
@@ -552,7 +648,7 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
         : R & NoExtraKeys<R, WriteShape<Db, Q, "insert">>;
     }
   : unknown) &
-  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, WriteShape<Db, Q, "update">> } : unknown);
+  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">>> } : unknown);
 
 /** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
 type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
