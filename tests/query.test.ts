@@ -47,14 +47,8 @@ describe("input -> query string", () => {
     expect(qs({ table: "orders", where: { status: { $not: { $in: ["paid", "shipped"] } } } })).toBe(
       "status=not.in.%28paid%2Cshipped%29",
     );
-    expect(qs({ table: "clients", where: { name: { $any: ["Ada", "Bob"] } } })).toBe(
-      "name=eq%28any%29.%7BAda%2CBob%7D",
-    );
     expect(qs({ table: "clients", where: { name: { $any: { $eq: ["Ada", "Bob"] } } } })).toBe(
       "name=eq%28any%29.%7BAda%2CBob%7D",
-    );
-    expect(qs({ table: "clients", where: { name: { $not: { $all: ["Ada"] } } } })).toBe(
-      "name=not.eq%28all%29.%7BAda%7D",
     );
     expect(qs({ table: "clients", where: { name: { $not: { $all: { $like: ["a*"] } } } } })).toBe(
       "name=not.like%28all%29.%7Ba*%7D",
@@ -63,6 +57,11 @@ describe("input -> query string", () => {
       "name=fts%28english%29.ada",
     );
     expect(qs({ table: "clients", where: { name: { $ilike: "*@EXAMPLE.com" } } })).toBe("name=ilike.*%40EXAMPLE.com");
+    // the same operator twice on one column needs $and: an object cannot repeat a key
+    expect(qs({ table: "clients", where: { $and: [{ name: { $like: "A*" } }, { name: { $like: "*z" } }] } })).toBe(
+      "and=%28name.like.A*%2Cname.like.*z%29",
+    );
+    expect(() => qs({ table: "clients", where: { name: { $any: ["Ada"] } } as never })).toThrow("wraps an operator");
     // a plain value under $not is an eq
     expect(qs({ table: "clients", where: { email: { $not: null } } })).toBe("email=not.is.null");
     expect(qs({ table: "orders", where: { status: { $not: "paid" } } })).toBe("status=not.eq.paid");

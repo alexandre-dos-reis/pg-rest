@@ -64,10 +64,10 @@ export type OperatorValue = FilterValue | ReadonlyArray<FilterValue>;
 export interface OperatorModifiers {
   /** Invert the operator (`not.eq.1`), or a plain value, which means `eq`: `{ $not: null }` is `not.is.null`. */
   readonly $not?: OperatorSpec | Scalar | CompositeValue | undefined;
-  /** Compare with some value of a list (`eq(any)`): `{ $any: ["a", "b"] }`, or `{ $any: { $like: ["a*"] } }` for another operator. */
-  readonly $any?: OperatorSpec | ReadonlyArray<FilterValue> | undefined;
-  /** Compare with every value of a list (`eq(all)`), written like `$any`. */
-  readonly $all?: OperatorSpec | ReadonlyArray<FilterValue> | undefined;
+  /** Compare with some value of a list (`like(any)`): `{ $any: { $like: ["a*", "b*"] } }`. */
+  readonly $any?: OperatorSpec | undefined;
+  /** Compare with every value of a list (`like(all)`), written like `$any`. */
+  readonly $all?: OperatorSpec | undefined;
 }
 
 /**
@@ -375,10 +375,13 @@ const leavesOf = (column: string, spec: OperatorSpec): Leaf[] => {
       return { ...inner, not: !inner.not };
     }
     if (key === "$any" || key === "$all") {
-      // a list alone is an `eq`
-      const inner = Array.isArray(value)
-        ? ({ op: "eq", value, not: false } as Leaf)
-        : single(column, key, value as OperatorSpec);
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw bad(
+          `'${key}' on '${column}' wraps an operator`,
+          `Write { ${key}: { $eq: [...] } }; $in is the same for eq`,
+        );
+      }
+      const inner = single(column, key, value as OperatorSpec);
       if (inner.not || inner.quantifier || inner.config) {
         throw bad(
           `'${key}' on '${column}' wraps a bare operator`,

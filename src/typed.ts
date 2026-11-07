@@ -327,14 +327,14 @@ interface QuantifiedOps<V> {
 
 /** The column against each value of a list, so on a column that holds one value: an array column has no `$any`. */
 interface Quantifiers<V> {
-  readonly $any?: NonNullable<V> extends ReadonlyArray<unknown> ? never : ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
-  readonly $all?: NonNullable<V> extends ReadonlyArray<unknown> ? never : ReadonlyArray<Elem<V>> | QuantifiedOps<V>;
+  readonly $any?: NonNullable<V> extends ReadonlyArray<unknown> ? never : QuantifiedOps<V>;
+  readonly $all?: NonNullable<V> extends ReadonlyArray<unknown> ? never : QuantifiedOps<V>;
 }
 
 /**
  * The operators of a column, each starting with `$`: `{ $gte: 100, $lt: 500 }` is `>= 100 AND < 500`.
  * `$not` inverts one of them (`{ $not: { $in: [1, 2] } }`, or `{ $not: null }` for a plain value), and `$any` / `$all` compare the column
- * with each value of a list (`{ $any: ["a", "b"] }`, or `{ $any: { $like: ["a*"] } }` for another operator).
+ * with each value of a list (`{ $any: { $like: ["a*", "b*"] } }`).
  */
 type Operators<V> = CoreOps<V> &
   Quantifiers<V> & { readonly $not?: PlainValue<V> | null | (CoreOps<V> & Quantifiers<V>) };
