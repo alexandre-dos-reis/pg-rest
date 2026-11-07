@@ -15,6 +15,9 @@ import {
 import { ApiError, DbQueryError, PgRestError, type QueryErrorKind, describeErrorKind, errorKind } from "./errors";
 import type { Operator } from "./parse/filter";
 import { FTS_ORDER, OPERATORS_ORDER } from "./parse/syntax";
+import { getRelation } from "./schema";
+import { compileSet } from "./sql/expression";
+import { ROOT_ALIAS } from "./sql/read";
 import type { Method, OutputFormat, Preferences } from "./parse/request";
 import { toApiError } from "./service";
 import type { JsonObject } from "./sql/write";
@@ -96,6 +99,59 @@ export interface Where {
   readonly [column: string]: Filter | ReadonlyArray<Where> | Where | undefined;
 }
 
+// ---------------------------------------------------------------------------
+// expressions (the `set` of an update)
+// ---------------------------------------------------------------------------
+
+type NaryKey =
+  | "$add"
+  | "$sub"
+  | "$mul"
+  | "$div"
+  | "$mod"
+  | "$pow"
+  | "$concat"
+  | "$and"
+  | "$or"
+  | "$coalesce"
+  | "$greatest"
+  | "$least";
+type BinaryKey = "$eq" | "$neq" | "$gt" | "$gte" | "$lt" | "$lte" | "$cs" | "$cd" | "$ov";
+
+/**
+ * A value computed by the database, in `set`. Every node is an object with exactly one `$` key; a
+ * number, boolean, string or `null` is a literal (a string is never a column: use `$col`).
+ *
+ * - `{ $col: "total" }` is a column of the row being updated, `{ $val: x }` any JSON value as a literal.
+ * - `{ $add: [a, b] }` and the other operators are PostgreSQL's (`+ - * / % ^ || = <> > >= < <= @> <@ &&`,
+ *   `AND`, `OR`, `NOT`), on the types they work on: `$concat` appends to an array, merges `jsonb` and joins text.
+ * - `{ $cast: [expression, "numeric"] }`, `{ $coalesce: [a, b] }`, `$greatest`, `$least`.
+ */
+export type Expression =
+  | Scalar
+  | { readonly $col: string }
+  | { readonly $val: unknown }
+  | { readonly $cast: readonly [Expression, string] }
+  | { readonly $not: Expression }
+  | { readonly $neg: Expression }
+  | { readonly [K in NaryKey]: { readonly [P in K]: ReadonlyArray<Expression> } }[NaryKey]
+  | { readonly [K in BinaryKey]: { readonly [P in K]: readonly [Expression, Expression] } }[BinaryKey];
+
+/** `{ $default: true }`: the column's `DEFAULT`, as a whole assignment. */
+export interface DefaultValue {
+  readonly $default: true;
+}
+
+/**
+ * The columns an update changes, and only those: the keys are the columns of the table. A plain value
+ * is PostgREST's own `PATCH` body; an {@link Expression} or {@link DefaultValue} computes it in the
+ * database. An object whose keys all start with `$` is an expression -- to store a `jsonb` value like
+ * that, wrap it in `{ $val: … }`. The expressions are only available through `query()`.
+ */
+export interface SetInput {
+  readonly [column: string]: unknown;
+}
+
 /** `"created"`, or the object form for a direction and null placement. */
 export type Order =
   | string
@@ -175,7 +231,7 @@ export interface InsertQuery extends Common {
 export interface UpdateQuery extends Common {
   readonly table: string;
   readonly action: "update";
-  readonly set: JsonObject;
+  readonly set: SetInput;
   readonly returning?: QueryReturning | undefined;
 }
 
@@ -630,8 +686,14 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
   const format: OutputFormat = input.single
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
-  const qp: QueryParams = { params: toParams(input), bare: new Set<string>() };
-  const body = bodyOf(input);
+  let qp: QueryParams = { params: toParams(input), bare: new Set<string>() };
+  let body = bodyOf(input);
+  if (!isRpc(input) && "action" in input && input.action === "update") {
+    // the expressions of `set` are an extension of PostgREST's PATCH: compiled here, the plain values stay the JSON body
+    const set = compileSet(input.set, getRelation(env.cache, schema, input.table), ROOT_ALIAS);
+    body = { kind: "json", value: set.plain };
+    qp = { ...qp, setClauses: set.clauses };
+  }
 
   const plan: Plan = isRpc(input)
     ? planRpc(env, method, schema, input.rpc, qp, prefer, format, undefined, body)

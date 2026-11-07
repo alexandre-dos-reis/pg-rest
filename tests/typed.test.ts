@@ -403,6 +403,27 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     void (() => pgRest.query({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
     // @ts-expect-error a JSON path is not a column the types know
     void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": "gold" } }));
+    // an update may set a column to an expression or to DEFAULT ...
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        set: { total: { $add: [{ $col: "total" }, 1] }, status: { $default: true } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error ... but only on the columns of the relation
+        set: { nope: { $add: [1, 2] } },
+      }));
+    void (() =>
+      pgRest.query({
+        table: "orders",
+        action: "update",
+        // @ts-expect-error an unknown key in set is still refused
+        set: { titel: "x" },
+      }));
     // @ts-expect-error order only takes real columns
     void (() => pgRest.query({ table: "clients", order: ["nope.desc"] }));
     // @ts-expect-error an aggregate view cannot be written to (insert: never)

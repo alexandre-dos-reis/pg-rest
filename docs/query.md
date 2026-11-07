@@ -286,68 +286,210 @@ const nulls = await pgRest.query({
 });
 ```
 
-Every operator PostgREST has, with what it does:
+Every operator PostgREST has, by what it works on. A `$` key is an operator; the table at the end lists them all.
+
+**Comparison** works on numbers, text, dates, enums and arrays:
 
 ```ts
-const operators = await pgRest.query({
-  table: "clients",
-  select: ["id"],
-  where: {
-    name: { $neq: "Ada" }, //              <>
-    id: { $gt: 1 }, //                     >
-    email: { $like: "*@example.com" }, //  LIKE, with * as the wildcard
-    created_at: { $gte: "2020-01-01" },
-    tags: { $cs: ["vip"] }, //             @> contains
-  },
-});
-
-// full text search, with its configuration; a non-tsvector column is wrapped in to_tsvector()
-const search = await pgRest.query({
-  table: "clients",
-  select: ["id"],
-  where: { name: { $fts: { query: "ada", config: "english" } } },
-});
-
-const patterns = await pgRest.query({
-  table: "clients",
-  select: ["id"],
-  where: { email: { $ilike: "*@EXAMPLE.com" }, name: { $match: "^A" } }, //  ILIKE and ~
-});
-
-const more = await pgRest.query({
+const comparison = await pgRest.query({
   table: "orders",
   select: ["id"],
   where: {
-    status: { $not: { $in: ["paid", "shipped"] } }, //  not.in
-    total: { $isdistinct: 0 }, //                       IS DISTINCT FROM
+    status: { $neq: "void" }, //            <>
+    total: { $gt: 10, $lte: 500 }, //       > and <=, ANDed
+    placed_at: { $gte: "2026-01-01" }, //   >=
+    client_id: { $in: [1, 2] }, //          IN (1, 2)
+  },
+});
+
+const ranged = await pgRest.query({
+  table: "orders",
+  select: ["id"],
+  where: { total: { $gte: 100, $lt: 500 } }, //   100 <= total < 500
+});
+```
+
+**Text** has the pattern operators. `*` is the wildcard of `$like` and `$ilike`; `$match` and `$imatch` take a POSIX
+regular expression:
+
+```ts
+const text = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: {
+    name: { $like: "A*" }, //                 LIKE 'A%'
+    email: { $ilike: "*@EXAMPLE.com" }, //    ILIKE '%@EXAMPLE.com'
+  },
+});
+
+const regex = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { name: { $match: "^A.*a$" }, email: { $imatch: "@example\\.com$" } }, //  ~ and ~*
+});
+```
+
+**NULL, booleans and `DISTINCT`**. Comparing with `null` is a NULL test, so `$eq: null` and `$neq: null` are `IS NULL` and
+`IS NOT NULL`; `$is` is for the three-valued logic of booleans:
+
+```ts
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const nulls = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: {
+    meta: null, //                           IS NULL
+    email: { $neq: null }, //                IS NOT NULL
+    tags: { $is: "not_null" }, //            IS NOT NULL, the long way
+  },
+});
+
+// $isdistinct is a null-safe <>: it never answers NULL
+const distinct = await pgRest.query({
+  table: "orders",
+  select: ["id"],
+  where: { total: { $isdistinct: 0 }, placed_at: { $isdistinct: null } },
+});
+
+// booleans: $is takes true, false, unknown and null
+const flags = await untyped.query({
+  table: "todos",
+  where: {
+    done: { $is: false }, //                 IS FALSE
+    archived: { $is: "unknown" }, //         IS UNKNOWN (a NULL boolean)
+    starred: { $not: { $is: true } }, //     NOT (starred IS TRUE): false and NULL, unlike $not: true
   },
 });
 ```
 
-| operator                         | SQL                                                              |
-| -------------------------------- | ---------------------------------------------------------------- |
-| `eq` `neq` `gt` `gte` `lt` `lte` | `=` `<>` `>` `>=` `<` `<=`                                       |
-| `like` `ilike`                   | `LIKE` / `ILIKE`, with `*` as the wildcard                       |
-| `match` `imatch`                 | `~` / `~*`                                                       |
-| `in`                             | `IN (…)`                                                         |
-| `is`                             | `IS` (`null`, `true`, `false`, `unknown`)                        |
-| `isdistinct`                     | `IS DISTINCT FROM`                                               |
-| `fts` `plfts` `phfts` `wfts`     | `@@` with `to_tsquery`, `plainto_`, `phraseto_`, `websearch_to_` |
-| `cs` `cd`                        | `@>` / `<@` (array and range containment)                        |
-| `ov`                             | `&&` (overlap)                                                   |
-| `sl` `sr` `nxl` `nxr` `adj`      | range `<<` `>>` `&<` `&>` `-\|-`                                 |
-
-`$any` and `$all` wrap an operator and compare a column with each value of a list (`LIKE ANY (…)`); for `eq`, `$in` says it
-already. They are not for array columns, where `$cs` and `$ov` do the job. `$not` wraps one operator (or a plain value,
-which means `eq`), and `$and`, `$or` and `$not` take nested groups:
+**Full-text search** wraps a column that is not a `tsvector` in `to_tsvector()`. The four operators differ in how they read the
+query; each takes a text, or `{ query, config }`:
 
 ```ts
+const search = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { name: { $fts: "ada & lovelace" } }, //                           to_tsquery
+});
+
+const searches = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: {
+    name: { $plfts: "ada lovelace" }, //                                    plainto_tsquery
+    email: { $phfts: "ada lovelace" }, //                                   phraseto_tsquery
+    meta: { $wfts: { query: "ada -babbage", config: "english" } }, //       websearch_to_tsquery, with a configuration
+  },
+});
+```
+
+**Arrays** have containment and overlap. To compare a whole array, say so with `$eq`: an array alone is not a condition:
+
+```ts
+const arrays = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: {
+    tags: { $cs: ["vip"] }, //               @>  contains every one of these
+  },
+});
+
+const more = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: {
+    tags: { $cd: ["vip", "early", "beta"] }, //   <@  is contained in these
+  },
+});
+
+const overlap = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { tags: { $ov: ["vip", "beta"] } }, //   &&  shares at least one
+});
+
+const whole = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { tags: { $eq: ["vip", "early"] } }, //  = the whole array, in order
+});
+```
+
+**`jsonb` and ranges**. Their generated type is `unknown`, so every operator is offered. `$cs` and `$cd` work on `jsonb`
+too, and the range operators on a range column:
+
+```ts
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const json = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { meta: { $cs: '{"tier":"gold"}' } }, //   @>  the jsonb contains this
+});
+
+const ranges = await untyped.query({
+  table: "events",
+  where: {
+    during: { $ov: "[2026-01-01,2026-02-01)" }, //    &&  overlaps
+    ends: { $sl: "[2026-03-01,2026-04-01)" }, //      <<  strictly left of
+    starts: { $sr: "[2025-01-01,2025-02-01)" }, //    >>  strictly right of
+    window: { $nxr: "[2026-01-01,2026-12-31)" }, //   &<  does not extend to the right of
+    slot: { $nxl: "[2026-01-01,2026-12-31)" }, //     &>  does not extend to the left of
+    shift: { $adj: "[2026-02-01,2026-03-01)" }, //    -|- adjacent to
+  },
+});
+```
+
+**A path into a column** (`->` and `->>`) filters on a field of a `json`/`jsonb`, composite or array column; every
+operator applies to the result. It is available on an instance created without a type argument:
+
+```ts
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const paths = await untyped.query({
+  table: "venues",
+  select: ["id"],
+  where: {
+    "meta->>tier": { $in: ["gold", "silver"] },
+    "owner->home->>city": { $ilike: "ly*" },
+    "owner->>name": { $not: null },
+  },
+});
+```
+
+**Modifiers**. `$not` inverts one operator, or a plain value; `$any` and `$all` wrap an operator and compare a column
+with each value of a list (`LIKE ANY (…)`). For `eq`, `$in` says it already; neither is for array columns, where `$cs`
+and `$ov` do the job:
+
+```ts
+const negated = await pgRest.query({
+  table: "orders",
+  select: ["id"],
+  where: {
+    status: { $not: { $in: ["paid", "shipped"] } }, //   NOT IN
+    client_id: { $not: 2 }, //                            <> 2 (a plain value is an eq)
+    placed_at: { $not: null }, //                         IS NOT NULL
+  },
+});
+
 const quantified = await pgRest.query({
   table: "clients",
   select: ["id"],
-  where: { name: { $any: { $like: ["A*", "B*"] } } }, //  LIKE ANY, for a column that holds one value
+  where: { name: { $any: { $like: ["A*", "B*"] } } }, //   LIKE ANY ('A%', 'B%')
 });
 
+const everyone = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { email: { $all: { $ilike: ["*@example.com", "ada*"] } } }, //   ILIKE ALL
+});
+```
+
+**Groups**. Conditions at the top level are ANDed. `$or` takes a list of groups, `$and` is for the same operator twice
+on one column, and `$not` inverts the AND of what is inside it:
+
+```ts
 const logic = await pgRest.query({
   table: "orders",
   select: ["id"],
@@ -359,10 +501,42 @@ const logic = await pgRest.query({
     ],
   },
 });
+
+// an object cannot repeat a key, so two $like on one column go through $and
+const both = await pgRest.query({
+  table: "clients",
+  select: ["id"],
+  where: { $and: [{ name: { $like: "A*" } }, { name: { $like: "*a" } }] },
+});
+
+const inverted = await pgRest.query({
+  table: "orders",
+  select: ["id"],
+  where: {
+    $not: { status: "paid", total: { $gte: 100 } }, //                     NOT (status = 'paid' AND total >= 100)
+    $or: [{ client_id: 1 }, { $not: { $or: [{ status: "new" }, { status: "void" }] } }], //   groups nest
+  },
+});
 ```
 
-Several conditions in one group are ANDed, so the third member above is a nested `and(…)`. Conditions at the top level
-are ANDed too. `$not: { … }` inverts the AND of the conditions inside it (`not.and(…)`).
+Several conditions in one group are ANDed, so the third member of the first `$or` is a nested `and(…)`.
+
+| operator                                   | SQL                                                              | on                                    |
+| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------- |
+| `$eq` `$neq`                               | `=` `<>` (`IS` / `IS NOT` with `null`)                           | every type                            |
+| `$gt` `$gte` `$lt` `$lte`                  | `>` `>=` `<` `<=`                                                | numbers, text, dates, arrays          |
+| `$like` `$ilike`                           | `LIKE` / `ILIKE`, with `*` as the wildcard                       | text                                  |
+| `$match` `$imatch`                         | `~` / `~*`                                                       | text                                  |
+| `$in`                                      | `IN (…)`                                                         | every type                            |
+| `$is`                                      | `IS` (`null`, `not_null`, `true`, `false`, `unknown`)            | every type, booleans above all        |
+| `$isdistinct`                              | `IS DISTINCT FROM`                                               | every type                            |
+| `$fts` `$plfts` `$phfts` `$wfts`           | `@@` with `to_tsquery`, `plainto_`, `phraseto_`, `websearch_to_` | text, `tsvector`                      |
+| `$cs` `$cd`                                | `@>` / `<@`                                                      | arrays, `jsonb`, ranges               |
+| `$ov`                                      | `&&`                                                             | arrays, ranges                        |
+| `$sl` `$sr` `$nxl` `$nxr` `$adj`           | range `<<` `>>` `&>` `&<` `-\|-`                                 | ranges                                |
+| `$not`                                     | `NOT` (one operator or a plain value)                            | wraps                                 |
+| `$any` `$all`                              | `op ANY (…)` / `op ALL (…)` over a list                          | a column holding one value            |
+| `$and` `$or` `$not`                        | `AND` / `OR` / `NOT` over groups                                 | `where`                               |
 
 The operators a column accepts follow its type: `$gt`/`$lt` need something ordered, `$like`/`$ilike`/`$match`/`$imatch` and
 the full-text ones need text, `$cs`/`$cd`/`$ov` need an array, and a column whose generated type is `unknown` (a range,
@@ -565,6 +739,179 @@ void pgRest.query({ table: "clients", action: "insert" });
 
 // @ts-expect-error and a read has no business with them
 void pgRest.query({ table: "clients", rows: { name: "x" } });
+```
+
+### Computed values
+
+`set` takes more than values. This part is pg-rest's own, a superset of PostgREST's `PATCH`, and it is only there in
+`query()`: over HTTP a `PATCH` body is PostgREST's, a JSON object. It follows PostgreSQL's `UPDATE … SET`, one column at
+a time: `column_name = { expression | DEFAULT }`.
+
+A plain value is still a plain value. An object whose keys all start with `$` is an expression the database computes,
+so every operator starts with `$`, like the filters:
+
+```ts
+const computed = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: {
+    status: "paid", //                                      a plain value, as before
+    total: { $add: [{ $col: "total" }, 10] }, //            total = total + 10
+    placed_at: { $default: true }, //                       = DEFAULT
+  },
+  where: { id: 1 },
+  select: ["id", "status", "total"],
+});
+```
+
+`{ $col: "name" }` is a column of the row being updated; a string, number, boolean or `null` is a literal, and a string is
+**never** a column. `{ $val: x }` is any JSON value as a literal. The keys of `set` are the columns of the table, and
+nothing else: PostgreSQL's `(a, b) = ROW(x, y)` is `a = x, b = y`.
+
+**Numbers**: `$add`, `$sub`, `$mul`, `$div`, `$mod` and `$pow` take any number of operands, left to right; `$neg` is a
+unary minus.
+
+```ts
+const arithmetic = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: {
+    total: { $add: [{ $col: "total" }, 10, { $neg: 2 }] }, //                    total + 10 + (-2)
+  },
+  where: { id: 1 },
+});
+
+const more = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: {
+    total: { $div: [{ $mul: [{ $col: "total" }, 3] }, 2] }, //                   (total * 3) / 2
+    client_id: { $mod: [{ $add: [{ $col: "client_id" }, 1] }, 5] }, //           (client_id + 1) % 5
+  },
+  where: { id: 2 },
+});
+
+const power = await pgRest.query({
+  table: "products",
+  action: "update",
+  set: { price: { $pow: [{ $col: "price" }, 2] } }, //                           price ^ 2
+  where: { id: 1 },
+});
+```
+
+**Text, arrays and `jsonb`**: `$concat` is `||`, and the type decides what it means: it joins text, appends to an array and
+merges `jsonb`. `$sub` on a `jsonb` removes a key. A bare string next to an array is read as an array literal, as in
+PostgreSQL, so an element is written `{ $val: ["x"] }`:
+
+```ts
+const text = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: { name: { $concat: ["Dr. ", { $col: "name" }, "!"] } }, //               'Dr. ' || name || '!'
+  where: { id: 1 },
+});
+
+const array = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: { tags: { $concat: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, { $val: ["vip"] }] } }, //   append, from NULL too
+  where: { id: 1 },
+});
+
+const json = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: {
+    meta: { $concat: [{ $coalesce: [{ $col: "meta" }, { $val: {} }] }, { $val: { seen: true } }] }, //   jsonb merge
+  },
+  where: { id: 1 },
+});
+
+const removed = await pgRest.query({
+  table: "clients",
+  action: "update",
+  set: { meta: { $sub: [{ $col: "meta" }, "seen"] } }, //                         meta - 'seen'
+  where: { id: 1 },
+});
+```
+
+**Functions**: `$coalesce`, `$greatest` and `$least` take a list; `$cast` takes an expression and a type, from the same
+allowlist as a `select` cast.
+
+```ts
+const functions = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: {
+    total: { $greatest: [{ $col: "total" }, 0] }, //                             never below 0
+    status: { $coalesce: [{ $cast: [{ $col: "client_id" }, "text"] }, "none"] }, //   COALESCE(client_id::text, 'none')
+  },
+  where: { id: 1 },
+});
+
+const capped = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: { total: { $least: [{ $mul: [{ $col: "total" }, 2] }, 1000] } }, //       at most 1000
+  where: { id: 1 },
+});
+```
+
+**Comparison and logic** make a boolean, for a boolean column: `$eq`, `$neq`, `$gt`, `$gte`, `$lt`, `$lte`, `$cs`, `$cd`,
+`$ov` take two operands; `$and` and `$or` any number; `$not` one.
+
+```ts
+const untyped = await createPgRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
+
+const booleans = await untyped.query({
+  table: "todos",
+  action: "update",
+  set: {
+    done: { $not: { $col: "done" } }, //                                                 done = NOT done
+    urgent: { $and: [{ $gt: [{ $col: "priority" }, 3] }, { $lte: [{ $col: "due", }, { $val: "2026-12-31" }] }] }, //   priority > 3 AND due <= '2026-12-31'
+    seen: { $or: [{ $col: "seen" }, { $eq: [{ $col: "owner" }, "ada"] }] }, //          seen OR owner = 'ada'
+    shared: { $ov: [{ $col: "tags" }, { $val: ["team"] }] }, //                          tags && '{team}'
+  },
+  where: { id: 1 },
+});
+```
+
+**`DEFAULT`** is a whole assignment, never part of an expression. Several columns are several keys, and a plain value
+and an expression can share one update:
+
+```ts
+const reset = await pgRest.query({
+  table: "orders",
+  action: "update",
+  set: {
+    status: { $default: true }, //                           status = DEFAULT
+    total: { $default: true }, //                            total = DEFAULT
+    placed_at: "2026-01-01", //                              a plain value, in the same statement
+  },
+  where: { id: 1 },
+});
+```
+
+| node                                                   | SQL                                                    |
+| ------------------------------------------------------ | ------------------------------------------------------ |
+| `1`, `"text"`, `true`, `null`                          | a literal. A string is **never** a column: use `$col`  |
+| `{ $col: "total" }`                                    | the column of the row being updated                    |
+| `{ $val: x }`                                          | any JSON value as a literal: an object, an array       |
+| `$add` `$sub` `$mul` `$div` `$mod` `$pow` `$concat`    | `+` `-` `*` `/` `%` `^` `\|\|`, two operands or more    |
+| `$neg`                                                 | unary `-`                                              |
+| `$eq` `$neq` `$gt` `$gte` `$lt` `$lte` `$cs` `$cd` `$ov` | `=` `<>` `>` `>=` `<` `<=` `@>` `<@` `&&`, two operands |
+| `$and` `$or` `$not`                                    | `AND` `OR` `NOT`                                       |
+| `$coalesce` `$greatest` `$least`                       | the functions of the same name                         |
+| `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a `select` cast        |
+| `{ $default: true }`                                   | `DEFAULT`, as a whole assignment                       |
+
+Nothing is raw SQL: a column is checked against the schema, a type against an allowlist, a value is escaped, and an
+unknown `$` key is refused, in an expression and as a key of `set`. An object with `$` keys that is meant as a `jsonb`
+value is written `{ $val: … }`.
+
+```ts
+// @ts-expect-error `nope` is not a column of orders
+void pgRest.query({ table: "orders", action: "update", set: { nope: { $add: [1, 2] } } });
 ```
 
 ## Calling a function
@@ -1084,7 +1431,7 @@ const csv = await pgRest.handle(
 | `maxAffected`     | refuse and roll back beyond this many affected rows                                                       |
 | `timezone`        | the time zone the statement runs in                                                                       |
 | `rows`            | the payload of an `insert` or `upsert`: one object or many                                                |
-| `set`             | the columns an `update` changes                                                                           |
+| `set`             | the columns an `update` changes: values, or `$` expressions and `$default`                              |
 | `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
 | `columns`         | insert only these, whatever else `rows` carries                                                           |
 | `missing`         | a column absent from `rows`: its `"default"` or `"null"`                                                  |

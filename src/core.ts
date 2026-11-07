@@ -92,6 +92,11 @@ export interface Caller {
 export interface QueryParams {
   readonly params: ReadonlyArray<readonly [string, string]>;
   readonly bare: ReadonlySet<string>;
+  /**
+   * `SET` clauses already compiled to SQL, for an update: the expressions of `query()`'s `set`
+   * (`sql/expression.ts`). Only `query()` fills it; a PATCH over HTTP is PostgREST's, a JSON body.
+   */
+  readonly setClauses?: ReadonlyArray<string> | undefined;
 }
 
 /** The bare keys of a query string: `?a&b=1` -> `{a}`. They are arguments, never filters. */
@@ -555,7 +560,13 @@ export const planTable = (
     const first = Array.isArray(body.value) ? body.value[0] : body.value;
     const obj: JsonObject =
       first !== null && typeof first === "object" && !Array.isArray(first) ? (first as JsonObject) : {};
-    const updateSql = buildUpdate({ rel, body: obj as JsonObject, filters: query.root.filters, returning });
+    const updateSql = buildUpdate({
+      rel,
+      body: obj as JsonObject,
+      clauses: qp.setClauses,
+      filters: query.root.filters,
+      returning,
+    });
     const { rows: outRows, shape } = rowsFor(returning);
     if (updateSql === null) {
       // Nothing to set: the request matches rows but changes none.
@@ -578,7 +589,7 @@ export const planTable = (
       ...common,
       kind: "update",
       returning,
-      params: [JSON.stringify(obj)],
+      params: Object.keys(obj).length ? [JSON.stringify(obj)] : [],
       shape,
       statement: buildStatement({
         source: updateSql,

@@ -1,5 +1,15 @@
 import type { RequestContext } from "./core";
-import type { ContextSource, CountFrom, FtsValue, QueryOk, QueryResult, Scalar, TransactionOptions } from "./query";
+import type {
+  ContextSource,
+  CountFrom,
+  DefaultValue,
+  Expression,
+  FtsValue,
+  QueryOk,
+  QueryResult,
+  Scalar,
+  TransactionOptions,
+} from "./query";
 import type { PgRestInstance } from "./index";
 
 /**
@@ -461,7 +471,7 @@ type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
      */
     readonly rows?: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
     /** The columns to change, for an `"update"`. The rows are the ones `where` matches. */
-    readonly set?: Relations<Db, S>[T]["update"];
+    readonly set?: SetOf<Relations<Db, S>[T]["update"]>;
     /** For an `"upsert"`, the columns the conflict is resolved on. Defaults to the primary key. */
     readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
     /** Insert only these columns, ignoring any other key in `rows` (and so making a bulk insert uniform). */
@@ -482,7 +492,7 @@ type WriteRules<Db extends AnyDatabase, Q> = (Q extends { action: "insert" | "up
       readonly rows: WriteShape<Db, Q, "insert"> | ReadonlyArray<WriteShape<Db, Q, "insert">>;
     }
   : { readonly rows?: never; readonly onConflict?: never; readonly columns?: never; readonly missing?: never }) &
-  (Q extends { action: "update" } ? { readonly set: WriteShape<Db, Q, "update"> } : { readonly set?: never }) &
+  (Q extends { action: "update" } ? { readonly set: SetOf<WriteShape<Db, Q, "update">> } : { readonly set?: never }) &
   (Q extends { action: "insert" | "upsert" | "update" | "delete" } ? unknown : { readonly returning?: never });
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
@@ -525,6 +535,14 @@ export type NoExtraKeys<Q, Allowed> = {
   readonly [K in Exclude<keyof Q, KeysOfUnion<Allowed>>]: never;
 };
 
+/**
+ * What an update may set: the columns of the relation, each to its type or to an expression the
+ * database computes (`{ $add: [{ $col: "total" }, 10] }`, `{ $default: true }`).
+ */
+type SetOf<U> = {
+  readonly [K in keyof U]?: U[K] | Expression | DefaultValue;
+};
+
 /** The insert or update shape of the relation a query writes to. */
 type WriteShape<Db extends AnyDatabase, Q, Field extends "insert" | "update"> = Q extends { table: infer T }
   ? T extends Table<Db, SchemaIn<Db, Q>>
@@ -545,7 +563,7 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
         : R & NoExtraKeys<R, WriteShape<Db, Q, "insert">>;
     }
   : unknown) &
-  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, WriteShape<Db, Q, "update">> } : unknown);
+  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">>> } : unknown);
 
 /** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
 type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =

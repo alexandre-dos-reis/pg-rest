@@ -143,6 +143,8 @@ export const upsertColumns = (rel: Relation, returning: Returning): string[] => 
 export interface UpdateOptions {
   readonly rel: Relation;
   readonly body: JsonObject;
+  /** `col = expr` clauses compiled by `query()` (`sql/expression.ts`); HTTP never sets them. */
+  readonly clauses?: ReadonlyArray<string> | undefined;
   readonly filters: ReadonlyArray<FilterNode>;
   readonly returning: Returning;
 }
@@ -152,13 +154,15 @@ export const buildUpdate = (o: UpdateOptions): string | null => {
   const { rel } = o;
   const cols = Object.keys(o.body);
   checkColumns(rel, cols);
-  if (cols.length === 0) return null;
+  const clauses = o.clauses ?? [];
+  if (cols.length === 0 && clauses.length === 0) return null;
   const table = quoteQualified(rel.schema, rel.name);
-  const set = cols.map((c) => `${quoteIdent(c)} = _u.${quoteIdent(c)}`).join(", ");
+  const set = [...cols.map((c) => `${quoteIdent(c)} = _u.${quoteIdent(c)}`), ...clauses].join(", ");
   const where = whereSql(o.filters, ROOT_ALIAS, rel);
+  // the JSON body is `$1`, and only a statement that reads it may mention it
+  const from = cols.length ? ` FROM (SELECT * FROM json_populate_record(null::${table}, ($1::text)::json)) AS _u` : "";
   return (
-    `UPDATE ${table} AS ${quoteIdent(ROOT_ALIAS)} SET ${set} ` +
-    `FROM (SELECT * FROM json_populate_record(null::${table}, ($1::text)::json)) AS _u` +
+    `UPDATE ${table} AS ${quoteIdent(ROOT_ALIAS)} SET ${set}${from}` +
     `${where.length ? ` WHERE ${where.join(" AND ")}` : ""} RETURNING ${returningSql(rel, o.returning)}`
   );
 };
