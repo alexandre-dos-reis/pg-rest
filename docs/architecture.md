@@ -9,7 +9,7 @@ reaches `@tsql/query`, and what is only an extension of PostgREST never reaches 
 ```
                       ┌─ handleRequest ─ URL, headers, body, content negotiation
                       │
-[key, value][] ──▶ parseQuery ──▶ ParsedQuery ──▶ planTable / planRpc ──▶ execute ──▶ Response
+[key, value][] ──▶ parseQuery ──▶ ParsedQuery ──▶ planTable / planRpc ──▶ execute ──▶ Outcome
                       │                              (SQL builders)      (one transaction)
                       └─ query() ─ an object, rendered into the same parameters
 ```
@@ -46,13 +46,15 @@ reaches `@tsql/query`, and what is only an extension of PostgREST never reaches 
    identity: `Env.session` is set, so this step posts its statements there instead of calling `adapter.transaction`,
    and issues only the half of the `set_config` that is per statement — the `search_path`, the `request.*` settings and
    the time zone. `READ ONLY` and the replay belong to the scope, which is the only thing holding the boundary.
-5. **Respond** (`core.buildResponse`). Status (`201`, `204`, `206`, `416`…), `Content-Range`, `Location`,
-   `Content-Type`, `Preference-Applied`, and the headers and status a function set through `response.headers` /
-   `response.status`.
+5. **Outcome** (`core.buildOutcome`). The status (`201`, `204`, `206`, `416`…) and the headers PostgREST's logic
+   decides: `Content-Range`, `Location`, `Preference-Applied`, and the headers and status a function set through
+   `response.headers` / `response.status`; plus the body. Nothing here is a `Response`.
+6. **Dress it for the transport.** `@tsql/rest` adds what is only HTTP (`Content-Type` from the negotiated format,
+   `Vary`), drops the body where HTTP says there is none (`HEAD`, `204`) and makes the `Response`.
 
 `query()` enters at step 2 with parameters it renders from the object, builds the same plan, runs the same `execute`,
-and reads the `Response` back into `{ data, count, status }`. The HTTP-only parts — content negotiation, `Range`,
-plans, `OPTIONS`, OpenAPI — stay on `handle()`.
+and reads the outcome into `{ data, count, status }`: the count is the total in its `Content-Range`. The HTTP-only
+parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tsql/rest`'s.
 
 `transaction()` (`packages/query/src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
 `tx.query` through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
@@ -62,14 +64,17 @@ plans, `OPTIONS`, OpenAPI — stay on `handle()`.
 | path | |
 | --- | --- |
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
-| `packages/rest/src/http.ts` | routing, content negotiation, and the HTTP-only settings (`handleRequest`) |
+| `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the headers and cookies SQL will read, and the `Response` made out of an outcome; the HTTP-only settings |
+| `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept`, the body (JSON, form, CSV) |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery` and the instance: `query`, `setContextQuery`, `transaction`, `generateTypes`, `schemaCache`, `reloadSchema`, `close` |
 | `packages/query/src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
+| `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes`, published as `@tsql/query/types`, loaded on demand |
-| `packages/core/src/core.ts` | planning, the transaction, response building: what both entry points run |
+| `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
+| `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
 | `packages/core/src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
 | `packages/core/src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement`, and `expression` (the computed `set`) |

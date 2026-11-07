@@ -12,14 +12,8 @@ import {
   transactionSetup,
   useSchema,
 } from "@tsql/core/core";
-import {
-  ApiError,
-  DbQueryError,
-  PgRestError,
-  type QueryErrorKind,
-  describeErrorKind,
-  errorKind,
-} from "@tsql/core/errors";
+import { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
+import { type QueryErrorKind, describeErrorKind, errorKind } from "./kinds";
 import type { Operator } from "@tsql/core/parse/filter";
 import { FTS_ORDER, OPERATORS_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
@@ -685,9 +679,13 @@ const preferencesOf = (input: QueryInput): Preferences => ({
   invalid: [],
 });
 
-/** The total in a `Content-Range` (`0-9/42`), when one was computed. */
-const totalOf = (range: string | null): number | undefined => {
-  const total = range?.split("/")[1];
+/** The total in the `Content-Range` of an outcome (`0-9/42`), when one was computed. */
+const totalOf = (headers: Readonly<Record<string, string>>): number | undefined => {
+  // header names are case-insensitive, and a function may have set its own spelling of this one
+  const values = Object.entries(headers)
+    .filter(([name]) => name.toLowerCase() === "content-range")
+    .map(([, value]) => value);
+  const total = values.length ? values.join(", ").split("/")[1] : undefined;
   return total === undefined || total === "*" ? undefined : Number(total);
 };
 
@@ -715,15 +713,14 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
     ? planRpc(env, method, schema, input.rpc, qp, prefer, format, undefined, body)
     : planTable(env, method, schema, input.table, qp, prefer, format, undefined, body);
 
-  // SQL reading request.method / request.path sees what the same call over HTTP would show.
+  // no HTTP, so none of the request.* settings: they are PostgREST's HTTP contract, and @tsql/rest's
   const caller: Caller = { path: isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}` };
-  const res = await execute(env, ctx, caller, method, schema, prefer, format, plan, false, undefined);
+  const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, false, undefined);
 
-  const text = await res.text();
   return {
-    data: text === "" ? null : (JSON.parse(text) as unknown),
-    count: totalOf(res.headers.get("content-range")),
-    status: res.status,
+    data: outcome.text === "" ? null : (JSON.parse(outcome.text) as unknown),
+    count: totalOf(outcome.headers),
+    status: outcome.status,
   };
 };
 

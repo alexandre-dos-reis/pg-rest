@@ -301,15 +301,18 @@ describe.skipIf(!hasDb)("query()", () => {
       expect((await t.api.query({ rpc: "nothing" }, authed())).data).toBeNull();
     });
 
-    test("the function sees the same request settings as over HTTP, minus the headers", async () => {
-      const r = await t.api.query<{ method: string; path: string; header: string | null }>({
+    test("the function sees no request.* settings: there is no request", async () => {
+      const r = await t.api.query<{ method: string | null; path: string | null; header: string | null }>({
         rpc: "req_info",
         single: true,
       });
       if (r.error) throw r.error;
-      expect(r.data.method).toBe("POST");
-      expect(r.data.path).toBe("/rpc/req_info");
+      expect(r.data.method).toBeNull();
+      expect(r.data.path).toBeNull();
       expect(r.data.header).toBeNull();
+      // the schema it runs in is still the one it asked for
+      const http = await t.get("/rpc/req_info");
+      expect(http.json().method).toBe("GET");
     });
   });
 

@@ -2,6 +2,7 @@ import {
   type Caller,
   type CoreConfig,
   type Env,
+  type Outcome,
   type Plan,
   type QueryParams,
   type RequestContext,
@@ -12,8 +13,11 @@ import {
   useSchema,
 } from "@tsql/core/core";
 import { PgRestError } from "@tsql/core/errors";
+import type { Method, OutputFormat } from "@tsql/core/parse/request";
+import { getRelation } from "@tsql/core/schema";
+import { mediaChoices } from "./media";
+import { buildOpenApi } from "./openapi";
 import {
-  type Method,
   parseAccept,
   parseBody,
   isSupportedMethod,
@@ -21,10 +25,7 @@ import {
   parsePrefer,
   parseRange,
   parseTarget,
-} from "@tsql/core/parse/request";
-import { getRelation } from "@tsql/core/schema";
-import { mediaChoices } from "./media";
-import { buildOpenApi } from "./openapi";
+} from "./request";
 
 /** What only the HTTP entry point reads, on top of what both entry points share. */
 export interface HttpConfig extends CoreConfig {
@@ -34,6 +35,8 @@ export interface HttpConfig extends CoreConfig {
   /** Answer `Accept: application/vnd.pgrst.plan` with the query plan. */
   readonly planEnabled: boolean;
   readonly openApi: boolean;
+  /** Expose `request.headers`, `request.cookies`, `request.method`, `request.path` to SQL. */
+  readonly requestSettings: boolean;
   readonly serverUrl?: string | undefined;
 }
 
@@ -42,6 +45,80 @@ export interface HttpEnv extends Env {
 }
 
 const JSON_CT = "application/json; charset=utf-8";
+
+/** The `Cookie` header as `request.cookies` reads it: a name -> value record. */
+const parseCookies = (header: string | null): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const k = part.slice(0, eq).trim();
+    if (!k) continue;
+    const v = part
+      .slice(eq + 1)
+      .trim()
+      .replace(/^"|"$/g, "");
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+};
+
+/**
+ * An {@link Outcome} dressed for HTTP: the headers that are only transport (`Vary`, `Content-Type`), the
+ * body dropped where HTTP says there is none, and the bytes of a `bytea` handler.
+ */
+const toResponse = (
+  outcome: Outcome,
+  method: Method,
+  format: OutputFormat,
+  plan: Plan,
+  wantsPlan: Extract<OutputFormat, { kind: "plan" }> | undefined,
+): Response => {
+  if (wantsPlan) {
+    const opts = wantsPlan.options.length ? `; options=${wantsPlan.options.join("|")}` : "";
+    return new Response(method === "HEAD" ? null : outcome.text, {
+      status: 200,
+      headers: {
+        "Content-Type": `application/vnd.pgrst.plan+${wantsPlan.format}; for="${wantsPlan.forType}"${opts}; charset=utf-8`,
+        Vary: "Accept, Prefer, Range",
+      },
+    });
+  }
+  const { status, text } = outcome;
+  const headers: Record<string, string> = { Vary: "Accept, Prefer, Range", ...outcome.headers };
+
+  let contentType = JSON_CT;
+  if (format.kind === "handler") {
+    contentType = format.choice.contentType;
+  } else if (format.kind === "csv") {
+    contentType = "text/csv; charset=utf-8";
+  } else if (format.kind === "geojson") {
+    contentType = "application/geo+json; charset=utf-8";
+  } else if (format.kind === "object") {
+    contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;
+  } else if (format.kind === "json" && format.stripNulls) {
+    contentType = "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8";
+  }
+
+  const noBody = status === 204 || status === 304 || text === "" || method === "HEAD";
+  if (
+    !(
+      status === 204 ||
+      status === 304 ||
+      (text === "" && method !== "HEAD" && !(format.kind === "handler" && plan.kind === "read"))
+    )
+  )
+    headers["Content-Type"] = contentType;
+  if (!noBody && format.kind === "handler" && format.choice.bytea) {
+    return new Response(Buffer.from(text, "hex"), { status, headers });
+  }
+  return new Response(noBody ? null : text, { status, headers });
+};
 
 /** The bare keys of a query string: `?a&b=1` -> `{a}`. They are arguments, never filters. */
 export const bareKeys = (search: string): Set<string> => {
@@ -134,6 +211,15 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
     plan = planRpc(env, method, schema, target.name, qp, prefer, format, range, body);
   }
 
-  const caller: Caller = { path: url.pathname, headers: request.headers, request };
-  return execute(env, ctx, caller, method, schema, prefer, format, plan, honoredTx, wantsPlan);
+  const headers: Record<string, string> = {};
+  request.headers.forEach((v, k) => {
+    headers[k] = v;
+  });
+  const caller: Caller = {
+    path: url.pathname,
+    request,
+    http: env.config.requestSettings ? { headers, cookies: parseCookies(request.headers.get("cookie")) } : undefined,
+  };
+  const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, honoredTx, wantsPlan);
+  return toResponse(outcome, method, format, plan, wantsPlan);
 };

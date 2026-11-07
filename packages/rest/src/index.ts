@@ -9,8 +9,8 @@ import { errorResponse, handleSafely } from "./serve";
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
 export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
 export type { EngineOptions } from "@tsql/core/engine";
-export { ApiError, DbQueryError, PgRestError, describeErrorKind, errorKind } from "@tsql/core/errors";
-export type { ErrorBody, QueryErrorKind } from "@tsql/core/errors";
+export { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
+export type { ErrorBody } from "@tsql/core/errors";
 export type {
   Column,
   CompositeAttribute,
@@ -48,6 +48,8 @@ export interface RestOptions extends EngineOptions {
   readonly planEnabled?: boolean;
   /** Serve the OpenAPI document at `/`. Default `true`. */
   readonly openApi?: boolean;
+  /** Expose `request.headers`, `request.cookies`, `request.method`, `request.path` to SQL. Default `true`. */
+  readonly requestSettings?: boolean;
   /** Public URL, used as `host` in the OpenAPI document. Defaults to the request origin. */
   readonly serverUrl?: string;
 }
@@ -80,6 +82,7 @@ export const createRest = async (options: RestOptions): Promise<RestInstance> =>
     allowTxOverride: options.allowTxOverride ?? false,
     planEnabled: options.planEnabled ?? false,
     openApi: options.openApi ?? true,
+    requestSettings: options.requestSettings ?? true,
     serverUrl: options.serverUrl,
   };
 

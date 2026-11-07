@@ -39,13 +39,15 @@ reference lives in `docs/`.
 | Path | What |
 | --- | --- |
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest`, `RestOptions`, the HTTP-only settings |
-| `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, OpenAPI root, plans (`HttpConfig`) |
+| `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, OpenAPI root, plans, cookies and headers for SQL, the `Response` (`HttpConfig`) |
+| `packages/rest/src/request.ts` | reading HTTP: method, path, `Prefer`, `Range`, `Accept`, the body |
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery`, `QueryInstance`, the public types |
 | `packages/query/src/query.ts` | `query(input)`: the object API, in-process, no `Request` (see below) |
+| `packages/query/src/kinds.ts` | `QueryErrorKind` and `errorKind(status, code)`: how a `QueryError` is classified |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
-| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute`, the transaction setup: shared by `handle` and `query` |
+| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns an `Outcome`: status, headers, body), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies are `rest`'s |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
 | `packages/core/src/parse/*` | URL/query parsing: `select`, filters, request headers, fields |
 | `packages/core/src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`, `expression`) |
@@ -133,7 +135,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
 - **Errors.** Throw `ApiError` (status, PostgREST-shaped body, headers). `body` is the wire format and must stay exactly
   PostgREST's; `Error.message` is a human summary (code, details, hint) and is free to change. `query()` returns a
   `QueryError` carrying the same body plus the input, a `summary` naming the call it came from, and a `kind`
-  (`QueryErrorKind` in `packages/core/src/errors.ts`: the switchable string union every code maps onto, via `errorKind(status, code)`),
+  (`QueryErrorKind` in `packages/query/src/kinds.ts`: the switchable string union every code maps onto, via `errorKind(status, code)`),
   as the `error` of its result -- it never throws. A new `PGRSTxxx` code needs an entry in `CODE_KINDS`, or it falls back
   to its SQLSTATE class and then its status; adding a *kind* is a breaking-ish widening, so prefer an existing one. Database errors become `DbQueryError` in the adapter and are mapped by
   SQLSTATE in `normalizeDbError`. If a new driver reports errors differently, fix it in the adapter or in `normalizeDbError`, not in the core.

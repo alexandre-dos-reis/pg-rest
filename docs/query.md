@@ -1161,7 +1161,7 @@ The promise that never rejects did not disappear; it moved from the query to the
 can mean anything now that several of them share a transaction. What `tx.query` throws is the same `QueryError`
 `query()` would have returned, so a `catch` can read it — and the section below is about why you rarely want to.
 
-What the context does _not_ cover is per-statement: the `search_path`, the `request.*` settings SQL reads and the
+What the context does _not_ cover is per-statement: the `search_path` and the
 `timezone` are issued with every query inside the scope, which is what lets two queries of one transaction name two
 schemas.
 
@@ -1409,7 +1409,7 @@ Every kind, and what it means:
 
 A later version may map a code onto a kind it did not have before, and new kinds are additive — which is why the
 `default` above matters, and why `code` remains the thing to test when you need the exact reason. The same mapping is
-exported for an `ApiError` you hold from `handle()`: `errorKind(status, code)`, and `describeErrorKind(kind)` for its
+exported for an `ApiError` you hold from elsewhere: `errorKind(status, code)`, and `describeErrorKind(kind)` for its
 wording.
 
 The codes behind them, and what you are likely to see:

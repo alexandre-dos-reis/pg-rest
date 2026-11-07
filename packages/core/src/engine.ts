@@ -22,8 +22,6 @@ export interface EngineOptions {
   readonly maxRows?: number;
   /** Appended to `search_path` after the selected schema. Default `["public"]`. */
   readonly extraSearchPath?: ReadonlyArray<string>;
-  /** Expose `request.headers`, `request.cookies`, `request.method`, `request.path` to SQL. Default `true`. */
-  readonly requestSettings?: boolean;
   /** A SQL function (`"auth.check_request"`) or callback to run before each request (PostgREST `db-pre-request`). */
   readonly preRequest?: CoreConfig["preRequest"];
 }
@@ -73,7 +71,6 @@ export const createEngine = async (options: EngineOptions): Promise<Engine> => {
     anonymousRole: options.anonymousRole === false ? undefined : (options.anonymousRole ?? "anon"),
     maxRows: options.maxRows,
     extraSearchPath: options.extraSearchPath ?? ["public"],
-    requestSettings: options.requestSettings ?? true,
     preRequest: options.preRequest,
   };
 

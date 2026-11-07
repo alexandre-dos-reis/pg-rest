@@ -39,8 +39,6 @@ export interface CoreConfig {
   readonly anonymousRole: string | undefined;
   readonly maxRows?: number | undefined;
   readonly extraSearchPath: ReadonlyArray<string>;
-  /** Expose `request.headers` / `request.cookies` / `request.method` / `request.path` to SQL. */
-  readonly requestSettings: boolean;
   /** SQL function (`"auth"."check"`) or callback run in the transaction before the request (db-pre-request). */
   readonly preRequest?: string | ((session: DbSession, info: PreRequestInfo) => Promise<void>) | undefined;
 }
@@ -57,15 +55,33 @@ export interface Env {
 }
 
 /**
- * Where a call came from. `handle()` passes the HTTP request; `query()` runs in-process and has no
- * headers, so SQL sees an empty `request.headers` / `request.cookies`.
+ * Where a call came from. `path` is what `preRequest` is told. The `request.*` settings of SQL
+ * (`request.method`, `request.path`, `request.headers`, `request.cookies`) are PostgREST's HTTP
+ * contract, so only `@tsql/rest` fills `http`; a call from `query()` has none and sets none of them.
  */
 export interface Caller {
-  /** What SQL reads as `request.path`. */
   readonly path: string;
-  readonly headers?: Headers | undefined;
   /** The HTTP request, when there is one. Passed through to `preRequest`. */
   readonly request?: Request | undefined;
+  /** What SQL reads as `request.headers` and `request.cookies`. Absent: the `request.*` settings are not set. */
+  readonly http?:
+    | {
+        readonly headers: Readonly<Record<string, string>>;
+        readonly cookies: Readonly<Record<string, string>>;
+      }
+    | undefined;
+}
+
+/**
+ * What a call comes to, before it is dressed for a transport: the status, the headers PostgREST's
+ * logic decides (`Content-Range`, `Location`, `Preference-Applied`, whatever a function put in
+ * `response.headers`), and the body. `@tsql/rest` makes a `Response` of it and adds what is only
+ * HTTP (`Content-Type`, `Vary`); `@tsql/query` reads the count and the rows out of it.
+ */
+export interface Outcome {
+  readonly status: number;
+  readonly headers: Record<string, string>;
+  readonly text: string;
 }
 
 /** A query string, read once: what `parseQuery` takes, plus the bare keys (`?a&b`) it must ignore. */
@@ -85,11 +101,6 @@ const formatOptions = (format: OutputFormat) => ({
   geojson: format.kind === "geojson",
   handler: format.kind === "handler" ? format.choice : undefined,
 });
-
-const JSON_CT = "application/json; charset=utf-8";
-
-const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": JSON_CT, ...headers } });
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -116,27 +127,6 @@ export const assertRole = (env: Env, ctx: RequestContext): void => {
   if (!ctx.role && env.config.anonymousRole === undefined) {
     throw new PgRestError(401, "PGRST302", "Anonymous access is disabled", null, null);
   }
-};
-
-const parseCookies = (header: string | null): Record<string, string> => {
-  const out: Record<string, string> = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq < 0) continue;
-    const k = part.slice(0, eq).trim();
-    if (!k) continue;
-    const v = part
-      .slice(eq + 1)
-      .trim()
-      .replace(/^"|"$/g, "");
-    try {
-      out[k] = decodeURIComponent(v);
-    } catch {
-      out[k] = v;
-    }
-  }
-  return out;
 };
 
 /** Who is asking, as the database reads it. In a scope this half is issued once, on entry. */
@@ -182,16 +172,12 @@ const ctxEntries = (
   part: "statement" | "both",
 ): Array<[string, string]> => {
   const where: Array<[string, string]> = [];
-  if (env.config.requestSettings) {
-    const headers: Record<string, string> = {};
-    caller.headers?.forEach((v, k) => {
-      headers[k] = v;
-    });
+  if (caller.http) {
     where.push(
       ["request.method", method],
       ["request.path", caller.path],
-      ["request.headers", JSON.stringify(headers)],
-      ["request.cookies", JSON.stringify(parseCookies(caller.headers?.get("cookie") ?? null))],
+      ["request.headers", JSON.stringify(caller.http.headers)],
+      ["request.cookies", JSON.stringify(caller.http.cookies)],
     );
   }
   const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
@@ -715,7 +701,7 @@ export const execute = async (
   plan: Plan,
   honoredTx: boolean,
   wantsPlan?: Extract<OutputFormat, { kind: "plan" }>,
-): Promise<Response> => {
+): Promise<Outcome> => {
   const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
   // Inside a scope the transaction is already open and already carries the identity: this call
@@ -842,33 +828,17 @@ export const execute = async (
     }
   }
 
-  if (wantsPlan) {
-    const opts = wantsPlan.options.length ? `; options=${wantsPlan.options.join("|")}` : "";
-    return new Response(method === "HEAD" ? null : result.body, {
-      status: 200,
-      headers: {
-        "Content-Type": `application/vnd.pgrst.plan+${wantsPlan.format}; for="${wantsPlan.forType}"${opts}; charset=utf-8`,
-        Vary: "Accept, Prefer, Range",
-      },
-    });
-  }
-  return buildResponse(env, method, prefer, format, plan, result, honoredTx);
+  // an EXPLAIN is its text, whatever the format it describes
+  if (wantsPlan) return { status: 200, headers: {}, text: result.body };
+  return buildOutcome(env, prefer, plan, result, honoredTx);
 };
 
 // ---------------------------------------------------------------------------
-// response
+// outcome
 // ---------------------------------------------------------------------------
 
-const buildResponse = (
-  env: Env,
-  method: Method,
-  prefer: Preferences,
-  format: OutputFormat,
-  plan: Plan,
-  r: RawResult,
-  honoredTx: boolean,
-): Response => {
-  const headers: Record<string, string> = { Vary: "Accept, Prefer, Range" };
+const buildOutcome = (env: Env, prefer: Preferences, plan: Plan, r: RawResult, honoredTx: boolean): Outcome => {
+  const headers: Record<string, string> = {};
   const applied = appliedHeader(prefer, honoredTx);
   if (applied) headers["Preference-Applied"] = applied;
 
@@ -889,7 +859,6 @@ const buildResponse = (
 
   let status = 200;
   let text = r.body;
-  let contentType = JSON_CT;
 
   if (
     plan.kind === "read" ||
@@ -954,34 +923,8 @@ const buildResponse = (
 
   if (plan.kind === "insert" && (plan.returning ?? "minimal") !== "representation") text = "";
 
-  if (format.kind === "handler") {
-    contentType = format.choice.contentType;
-  } else if (format.kind === "csv") {
-    contentType = "text/csv; charset=utf-8";
-  } else if (format.kind === "geojson") {
-    contentType = "application/geo+json; charset=utf-8";
-  } else if (format.kind === "object") {
-    contentType = `application/vnd.pgrst.object+json${format.stripNulls ? ";nulls=stripped" : ""}; charset=utf-8`;
-  } else if (format.kind === "json" && format.stripNulls) {
-    contentType = "application/vnd.pgrst.array+json;nulls=stripped; charset=utf-8";
-  }
-
   Object.assign(headers, r.responseHeaders);
   if (r.responseStatus !== undefined) status = r.responseStatus;
 
-  const noBody = status === 204 || status === 304 || text === "" || method === "HEAD";
-  if (
-    !(
-      status === 204 ||
-      status === 304 ||
-      (text === "" && method !== "HEAD" && !(format.kind === "handler" && plan.kind === "read"))
-    )
-  )
-    headers["Content-Type"] = contentType;
-  if (!noBody && format.kind === "handler" && format.choice.bytea) {
-    return new Response(Buffer.from(text, "hex"), { status, headers });
-  }
-  return new Response(noBody ? null : text, { status, headers });
+  return { status, headers, text };
 };
-
-export { json as jsonResponse };

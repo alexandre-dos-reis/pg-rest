@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { parseSelect } from "../packages/core/src/parse/select";
 import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../packages/core/src/parse/filter";
 import { parseField } from "../packages/core/src/parse/field";
-import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../packages/core/src/parse/request";
+import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../packages/rest/src/request";
 import { PgRestError } from "../packages/core/src/errors";
 
 const q = (qs: string) => parseQuery([...new URLSearchParams(qs)]);

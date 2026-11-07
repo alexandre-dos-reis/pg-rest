@@ -21,8 +21,10 @@ import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
 export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
-export { ApiError, DbQueryError, PgRestError, describeErrorKind, errorKind } from "@tsql/core/errors";
-export type { ErrorBody, QueryErrorKind } from "@tsql/core/errors";
+export { ApiError, DbQueryError, PgRestError } from "@tsql/core/errors";
+export type { ErrorBody } from "@tsql/core/errors";
+export { describeErrorKind, errorKind } from "./kinds";
+export type { QueryErrorKind } from "./kinds";
 export { QueryError } from "./query";
 export type {
   AnyDatabase,

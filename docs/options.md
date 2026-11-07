@@ -29,7 +29,6 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `anonymousRole` | the role for a call with no context. Default `"anon"`; `false` refuses anonymous calls with `401 PGRST302` |
 | `maxRows` | a cap on the rows a read returns (PostgREST's `db-max-rows`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
-| `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on |
 | `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path |
 
 **`createRest` only**: HTTP.
@@ -40,6 +39,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `basePath` | a URL prefix to strip, so the handler can be mounted anywhere (`/api/rest`) |
 | `allowTxOverride` | honour `Prefer: tx=rollback` (`db-tx-end`). Default off |
 | `planEnabled` | answer `Accept: application/vnd.pgrst.plan` with the query plan (`db-plan-enabled`). A plan reveals the shape of the database: keep it off in production. Default off |
+| `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on. `query()` sets none of them: there is no request |
 | `openApi` | serve the Swagger 2.0 document at `/`. Default on |
 | `serverUrl` | the public URL used as `host` in the OpenAPI document. Defaults to the request's origin |
 
