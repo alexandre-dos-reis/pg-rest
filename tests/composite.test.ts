@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { toParams } from "../packages/query/src/query";
+import {} from "../packages/query/src/query";
+import { toParams } from "./support/render";
 import type { QueryInput } from "./support/pgrest";
 
 /** The query string the object describes, as `handle()` would receive it. */

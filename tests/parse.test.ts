@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseSelect } from "../packages/core/src/parse/select";
-import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../packages/core/src/parse/filter";
+import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../packages/rest/src/parse/query-string";
 import { parseField } from "../packages/core/src/parse/field";
 import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../packages/rest/src/request";
 import { toApiError } from "../packages/rest/src/errors";

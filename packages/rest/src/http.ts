@@ -16,6 +16,7 @@ import { PgRestError } from "./errors";
 import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
+import { parseQuery } from "./parse/query-string";
 import { buildOpenApi } from "./openapi";
 import {
   parseAccept,
@@ -206,7 +207,15 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
   const body = await parseBody(request, method);
 
-  const qp: QueryParams = { params: [...url.searchParams], bare: bareKeys(url.search) };
+  const params = [...url.searchParams];
+  const qp: QueryParams = {
+    params,
+    bare: bareKeys(url.search),
+    parse: (options) =>
+      parseQuery(options?.skip ? params.filter(([k, v]) => !options.skip!(k, v)) : params, {
+        allowFilterKey: options?.allowFilterKey,
+      }),
+  };
   let plan: Plan;
   if (target.type === "table") {
     plan = planTable(env, method, schema, target.name, qp, prefer, engineFormat, range, body);

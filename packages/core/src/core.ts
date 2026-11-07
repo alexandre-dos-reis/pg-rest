@@ -1,6 +1,6 @@
 import type { DbAdapter, DbSession } from "./adapter";
 import { DbQueryError, EngineError } from "./errors";
-import { parseQuery, type ParsedQuery } from "./parse/filter";
+import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
 import { type Method, type OutputFormat, type Preferences } from "./parse/request";
 import { literal, quoteIdent } from "./quote";
@@ -84,20 +84,28 @@ export interface Outcome {
   readonly text: string;
 }
 
-/** A query string, read once: what `parseQuery` takes, plus the bare keys (`?a&b`) it must ignore. */
+/** What a request's query parameters turn into, once they are parsed: see {@link QueryParams.parse}. */
+export interface ParseOptions {
+  /** Leave out the parameters this says yes to (a bare `?a` a function reads as an argument). */
+  readonly skip?: ((key: string, value: string) => boolean) | undefined;
+  /** Parameters this says no to are not filters (on a GET, the ones that name function arguments). */
+  readonly allowFilterKey?: ((key: string) => boolean) | undefined;
+}
+
+/**
+ * The parameters of a request, plus the way to read them. The engine knows no syntax: `parse` gives
+ * it the {@link ParsedQuery} -- `@tsql/rest` parses the query string, `@tsql/query` builds it from its
+ * object. `params` and `bare` are only what a GET on a function reads its arguments from.
+ */
 export interface QueryParams {
   readonly params: ReadonlyArray<readonly [string, string]>;
   readonly bare: ReadonlySet<string>;
+  readonly parse: (options?: ParseOptions) => ParsedQuery;
   /**
    * `SET` clauses already compiled to SQL, for an update: the expressions of `query()`'s `set`
    * (`sql/expression.ts`). Only `query()` fills it; a PATCH over HTTP is PostgREST's, a JSON body.
    */
   readonly setClauses?: ReadonlyArray<string> | undefined;
-  /**
-   * The same parameters, already parsed. `query()` builds them straight from its object, so the
-   * engine does not parse text it has just rendered; `params` still says what they mean.
-   */
-  readonly parsed?: ParsedQuery | undefined;
 }
 
 /** Statement options that depend on the output format. */
@@ -324,7 +332,7 @@ export const planTable = (
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
   const rel = getRelation(env.cache, schema, name);
-  const query = qp.parsed ?? parseQuery(qp.params);
+  const query = qp.parse();
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
   const singular = format.kind === "object";
 
@@ -624,15 +632,11 @@ export const planRpc = (
   const call = buildRpc(env.cache, fn, provided, rawBody);
 
   const fnArgNames = new Set(fn.args.map((a) => a.name));
-  const query =
-    qp.parsed ??
-    parseQuery(
-      qp.params.filter(([k, v]) => !(v === "" && bare.has(k))),
-      {
-        // On GET, parameters that name function arguments are not filters.
-        allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
-      },
-    );
+  const query = qp.parse({
+    skip: (k, v) => v === "" && bare.has(k),
+    // On GET, parameters that name function arguments are not filters.
+    allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
+  });
   const argsJson = rawBody ? JSON.stringify(body!.value) : JSON.stringify(argValues);
   const params = call.usesBody
     ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson]

@@ -15,16 +15,22 @@ import {
 } from "@tsql/core/core";
 import { DbQueryError, EngineError } from "@tsql/core/errors";
 import { type ErrorKind, describeErrorKind, describeFailure } from "./kinds";
-import type {
-  Filter as ParsedFilter,
-  FilterNode,
-  Logic,
-  NodeParams,
-  Operator,
-  OrderTerm,
-  ParsedQuery,
+import type { FieldRef } from "@tsql/core/parse/field";
+import { parseField } from "@tsql/core/parse/field";
+import {
+  type Filter as ParsedFilter,
+  type FilterNode,
+  type Logic,
+  type NodeParams,
+  type Operator,
+  type OrderTerm,
+  type ParsedQuery,
+  emptyParams,
+  parseCount,
+  parseOrderTerms,
+  walkEmbeds,
 } from "@tsql/core/parse/filter";
-import type { SelectItem } from "@tsql/core/parse/select";
+import { type SelectItem, parseSelect } from "@tsql/core/parse/select";
 import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
 import { literal } from "@tsql/core/quote";
@@ -392,7 +398,7 @@ const OPS: ReadonlySet<string> = new Set<FilterOp>(OPERATORS_ORDER);
 const KEYWORDS: ReadonlySet<string> = new Set(["null", "true", "false", "unknown"]);
 
 /** The query itself is wrong: `invalid_query`, however deep in the input it was found. */
-const bad = (message: string, hint?: string): EngineError =>
+export const bad = (message: string, hint?: string): EngineError =>
   new EngineError("invalid_input", message, null, hint ?? null);
 
 /**
@@ -401,7 +407,7 @@ const bad = (message: string, hint?: string): EngineError =>
  * only a *delimited* context (a list or a logic tree, where `,` `)` and `.` separate)
  * needs quoting. `tests/compare` pins both.
  */
-const lit = (v: FilterValue | undefined, delimited: boolean): string => {
+export const lit = (v: FilterValue | undefined, delimited: boolean): string => {
   if (v === undefined || v === null) return "null";
   // a composite value travels as JSON, which `valueSql` turns into a row of the column's type
   if (typeof v === "object") return lit(JSON.stringify(v), delimited);
@@ -412,13 +418,13 @@ const lit = (v: FilterValue | undefined, delimited: boolean): string => {
 };
 
 /** Array values are a list for `in` and a PostgreSQL array literal for the containment operators. */
-const listOf = (op: FilterOp, values: ReadonlyArray<FilterValue>): string => {
+export const listOf = (op: FilterOp, values: ReadonlyArray<FilterValue>): string => {
   const items = values.map((v) => lit(v, true)).join(",");
   return op === "in" ? `(${items})` : `{${items}}`;
 };
 
 /** One condition on a column, once its modifiers are resolved: `[not.]op[(modifier)].value`. */
-interface Leaf {
+export interface Leaf {
   readonly op: FilterOp;
   readonly value: OperatorValue | undefined;
   readonly not: boolean;
@@ -492,7 +498,7 @@ const leavesOf = (column: string, spec: OperatorSpec): Leaf[] => {
   });
 };
 
-const toLeaves = (column: string, f: Filter): Leaf[] => {
+export const toLeaves = (column: string, f: Filter): Leaf[] => {
   if (f === null || typeof f !== "object") return [{ op: "eq", value: f, not: false }];
   if (Array.isArray(f)) {
     throw bad(
@@ -510,33 +516,13 @@ const toLeaves = (column: string, f: Filter): Leaf[] => {
   return [{ op: "eq", value: f as CompositeValue, not: false }];
 };
 
-/** The right-hand side of one leaf: `[not.]op[(modifier)].value`. */
-const renderLeaf = (leaf: Leaf, delimited: boolean): string => {
-  // `col = NULL` is never true in SQL, so comparing with null is a NULL test
-  if (leaf.value === null && (leaf.op === "eq" || leaf.op === "neq")) {
-    return `${leaf.not !== (leaf.op === "neq") ? "not." : ""}is.null`;
-  }
-  if (leaf.quantifier && leaf.config)
-    throw bad("A filter cannot have both a quantifier and a text-search configuration");
-  const modifier = leaf.quantifier ?? leaf.config;
-  const op = `${leaf.not ? "not." : ""}${leaf.op}${modifier ? `(${modifier})` : ""}`;
-  const value = Array.isArray(leaf.value)
-    ? listOf(leaf.op, leaf.value as ReadonlyArray<FilterValue>)
-    : lit(leaf.value as FilterValue | undefined, delimited);
-  return `${op}.${value}`;
-};
-
-/** The conditions on one column, as many as it has operators. */
-const renderFilters = (column: string, f: Filter, delimited: boolean): string[] =>
-  toLeaves(column, f).map((leaf) => renderLeaf(leaf, delimited));
-
 /** The logic-tree keys, by the name the query string gives them. */
-const GROUPS: Readonly<Record<string, string>> = { $and: "and", $or: "or", $not: "not.and" };
+export const GROUPS: Readonly<Record<string, string>> = { $and: "and", $or: "or", $not: "not.and" };
 
-const isGroupKey = (key: string): boolean => key in GROUPS;
+export const isGroupKey = (key: string): boolean => key in GROUPS;
 
 /** The members of a group: a list for `$and`/`$or`, one `Where` for `$not`. */
-const groupMembers = (key: string, value: unknown): ReadonlyArray<Where> => {
+export const groupMembers = (key: string, value: unknown): ReadonlyArray<Where> => {
   if (key === "$not") {
     if (value === null || typeof value !== "object" || Array.isArray(value))
       throw bad("'$not' takes one group of conditions");
@@ -546,161 +532,54 @@ const groupMembers = (key: string, value: unknown): ReadonlyArray<Where> => {
   return value as ReadonlyArray<Where>;
 };
 
-/** `name(member,member)`: a `$not` group is the AND of its conditions, inverted. */
-const renderGroupTree = (key: string, value: unknown): string => {
-  const members = groupMembers(key, value);
-  const inner = key === "$not" ? renderConditions(members[0]!) : members.map(renderGroup);
-  if (key === "$not" && inner.length === 0) throw bad("A $not group cannot be empty");
-  return `(${inner.join(",")})`;
-};
-
 /** A key that is neither a column nor a group. */
-const checkKey = (key: string): void => {
+export const checkKey = (key: string): void => {
   if (isSpecKey(key) && !isGroupKey(key)) {
     throw bad(`Unknown key '${key}' in where`, "Only $and, $or and $not are reserved; a column is named without a $");
   }
 };
 
-/** Every condition of a `Where`, rendered as a logic tree would carry them (`total.gte.100`). */
-const renderConditions = (w: Where): string[] =>
-  Object.entries(w).flatMap(([key, value]) => {
-    if (value === undefined) return [];
-    checkKey(key);
-    if (isGroupKey(key)) return [`${GROUPS[key]}${renderGroupTree(key, value)}`];
-    return renderFilters(key, value as Filter, true).map((f) => `${key}.${f}`);
-  });
-
-/** One member of an `$and`/`$or` list. Several conditions in the same object are ANDed. */
-const renderGroup = (w: Where): string => {
-  const parts = renderConditions(w);
-  if (parts.length === 0) throw bad("An $and/$or group cannot be empty");
-  return parts.length === 1 ? parts[0]! : `and(${parts.join(",")})`;
-};
-
-const renderOrder = (o: Order): string => {
-  if (typeof o === "string") return o;
-  const nulls = o.nulls === "first" ? ".nullsfirst" : o.nulls === "last" ? ".nullslast" : "";
-  return `${o.column}${o.desc ? ".desc" : ".asc"}${nulls}`;
-};
-
-type Params = Array<[string, string]>;
-
-/** `where`, `order`, `limit` and `offset` of one node, prefixed with its dotted path. */
-const pushNode = (node: NodeFields, path: ReadonlyArray<string>, out: Params): void => {
-  const at = path.length ? `${path.join(".")}.` : "";
-  for (const [key, value] of Object.entries(node.where ?? {})) {
-    if (value === undefined) continue;
-    checkKey(key);
-    if (isGroupKey(key)) {
-      out.push([`${at}${GROUPS[key]}`, renderGroupTree(key, value)]);
-    } else {
-      // a dotted key filters an embedded resource, and keeps its own path
-      for (const f of renderFilters(key, value as Filter, false)) out.push([`${at}${key}`, f]);
-    }
-  }
-  if (node.order?.length) out.push([`${at}order`, node.order.map(renderOrder).join(",")]);
-  if (node.limit !== undefined) out.push([`${at}limit`, String(node.limit)]);
-  if (node.offset !== undefined) out.push([`${at}offset`, String(node.offset)]);
-};
-
-const isEmbed = (v: Select | Embed): v is Embed => !Array.isArray(v);
-
-/** The `select` parameter. Embedded resources also push their own filters and paging into `out`. */
-const renderSelect = (items: Select, path: ReadonlyArray<string>, out: Params): string => {
-  const parts = items.map((item) => {
-    if (typeof item === "string") return item;
-    return Object.entries(item)
-      .map(([relation, spec]) => {
-        const embed: Embed = isEmbed(spec) ? spec : { select: spec };
-        // filters address an embed by its alias when it has one, like the query string
-        const name = embed.as ?? relation;
-        const mods = `${embed.hint ? `!${embed.hint}` : ""}${embed.inner ? "!inner" : ""}`;
-        const head = `${embed.spread ? "..." : ""}${embed.as ? `${embed.as}:` : ""}${relation}${mods}`;
-        const inner = renderSelect(embed.select ?? ["*"], [...path, name], out);
-        pushNode(embed, [...path, name], out);
-        return `${head}(${inner})`;
-      })
-      .join(",");
-  });
-  return parts.join(",");
-};
-
-/** Everything the query string would carry, built from the object instead of parsed from a URL. */
-export const toParams = (input: QueryInput): Params => {
-  const out: Params = [];
-  // embedded resources push their own parameters while the select string is built, so collect
-  // them aside and keep `select` first, where a reader expects it
-  const embedded: Params = [];
-  if (input.select) out.push(["select", renderSelect(input.select, [], embedded)]);
-  out.push(...embedded);
-  pushNode(input, [], out);
-  if ("action" in input && (input.action === "insert" || input.action === "upsert")) {
-    if (input.onConflict?.length) out.push(["on_conflict", input.onConflict.join(",")]);
-    if (input.columns?.length) out.push(["columns", input.columns.join(",")]);
-  }
-  return out;
-};
+export const isEmbed = (v: Select | Embed): v is Embed => !Array.isArray(v);
 
 // ---------------------------------------------------------------------------
-// straight to the parsed form
+// input -> the engine's parsed form
 // ---------------------------------------------------------------------------
 
-// `toParams` renders the object as a query string and the engine parses it again. For the shapes
-// below that round trip is pure cost, so `toParsed` builds what the parser would have returned.
-// It covers plain column names and the common forms; anything else -- a JSON path, a cast, an
-// aggregate, a dotted key, a value the grammar might refuse -- returns `undefined` and takes the
-// round trip, which stays the one place that defines (and reports errors for) the syntax.
-// `tests/query-direct.test.ts` pins that both give the same `ParsedQuery`.
+// `@tsql/rest` hands the engine what it parsed from a query string. `query` has no string to parse: it
+// builds the same `ParsedQuery` from its object, so none of PostgREST's grammar is in this package and
+// the only text it reads is a column string (`"name->>first"`, `"total::text"`, `"count()"`).
+// `tests/support/render.ts` renders an input the old way, as a query string, and
+// `tests/query-direct.test.ts` pins that the string, parsed by `@tsql/rest`, gives the same thing.
 
-const PLAIN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const PLAIN_ORDER = /^([A-Za-z_][A-Za-z0-9_]*)(?:\.(asc|desc))?(?:\.(nullsfirst|nullslast))?$/;
-const PLAIN_ALIAS = /^([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*)$/;
 const QUANTIFIABLE_OPS: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
 const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);
-/** Names a query string gives a meaning of their own: as a column they must go the long way. */
-const RESERVED_KEYS: ReadonlySet<string> = new Set([
-  "select",
-  "on_conflict",
-  "columns",
-  "limit",
-  "offset",
-  "order",
-  "and",
-  "or",
-]);
+const CONFIG_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Thrown to leave the direct path; `toParsed` turns it into `undefined`. */
-const BAIL = Symbol("bail");
-const bail = (): never => {
-  throw BAIL;
-};
-
-const plainField = (name: string) => ({ name, json: [] });
-
-const filterOf = (column: string, leaf: Leaf): ParsedFilter => {
-  const field = plainField(column);
+/** One leaf as the parsed filter the engine plans. */
+const filterOf = (field: FieldRef, leaf: Leaf): ParsedFilter => {
+  // `col = NULL` is never true in SQL, so comparing with null is a NULL test
   if (leaf.value === null && (leaf.op === "eq" || leaf.op === "neq")) {
-    return {
-      kind: "filter",
-      field,
-      negate: leaf.not !== (leaf.op === "neq"),
-      op: "is",
-      value: "null",
-    };
+    return { kind: "filter", field, negate: leaf.not !== (leaf.op === "neq"), op: "is", value: "null" };
   }
-  if (leaf.quantifier && leaf.config) return bail();
-  if (leaf.quantifier && !QUANTIFIABLE_OPS.has(leaf.op)) return bail();
-  if (leaf.config && !(FTS_OPS.has(leaf.op) && PLAIN.test(leaf.config))) return bail();
+  if (leaf.quantifier && leaf.config) {
+    throw bad("A filter cannot have both a quantifier and a text-search configuration");
+  }
+  if (leaf.quantifier && !QUANTIFIABLE_OPS.has(leaf.op)) {
+    throw bad(`'$${leaf.op}' cannot be wrapped in $${leaf.quantifier}`);
+  }
+  if (leaf.config && !(FTS_OPS.has(leaf.op) && CONFIG_NAME.test(leaf.config))) {
+    throw bad(`'${leaf.config}' is not a text search configuration`);
+  }
   let value: string | string[];
   if (Array.isArray(leaf.value)) {
     const items = leaf.value as ReadonlyArray<FilterValue>;
     value = leaf.op === "in" ? items.map((v) => lit(v, false)) : listOf(leaf.op, items);
   } else {
-    if (leaf.op === "in") return bail();
+    if (leaf.op === "in") throw bad("'$in' takes a list", "Write { $in: [1, 2, 3] }");
     value = lit(leaf.value as FilterValue | undefined, false);
     if (leaf.op === "is") {
       value = value.toLowerCase();
-      if (!IS_VALUES.has(value)) return bail();
+      if (!IS_VALUES.has(value)) throw bad("'$is' takes null, not_null, true, false or unknown");
     }
   }
   return {
@@ -716,120 +595,132 @@ const filterOf = (column: string, leaf: Leaf): ParsedFilter => {
 
 /** The conditions on one column, as many as it has operators. */
 const filtersOf = (column: string, f: Filter): ParsedFilter[] =>
-  toLeaves(column, f).map((leaf) => filterOf(column, leaf));
+  toLeaves(column, f).map((leaf) => filterOf(parseField(column), leaf));
 
+/** `$and`, `$or` or `$not` as a logic node: a `$not` group is the AND of its conditions, inverted. */
 const groupOf = (key: string, value: unknown): Logic => {
   const members = groupMembers(key, value);
   if (key === "$not") {
-    const children = conditionsOf(members[0]!, false);
-    return children.length ? { kind: "logic", op: "and", negate: true, children } : bail();
+    const children = conditionsOf(members[0]!);
+    if (children.length === 0) throw bad("A $not group cannot be empty");
+    return { kind: "logic", op: "and", negate: true, children };
   }
-  if (members.length === 0) return bail();
-  return {
-    kind: "logic",
-    op: key === "$and" ? "and" : "or",
-    negate: false,
-    children: members.map(memberOf),
-  };
+  if (members.length === 0) throw bad(`'${key}' needs at least one group`);
+  return { kind: "logic", op: key === "$and" ? "and" : "or", negate: false, children: members.map(memberOf) };
 };
 
 /** One member of an `$and`/`$or` list: several conditions in the same object are ANDed. */
 const memberOf = (w: Where): FilterNode => {
-  const parts = conditionsOf(w, false);
-  if (parts.length === 0) return bail();
+  const parts = conditionsOf(w);
+  if (parts.length === 0) throw bad("An $and/$or group cannot be empty");
   return parts.length === 1 ? parts[0]! : { kind: "logic", op: "and", negate: false, children: parts };
 };
 
-/** Every condition of a `Where`; `top` is a node's own filters, whose column names must not be reserved. */
-const conditionsOf = (w: Where, top: boolean, embeds?: ReadonlySet<string>): FilterNode[] =>
+/** Every condition of a `Where` inside a group, where a key is a column and never a path to an embed. */
+const conditionsOf = (w: Where): FilterNode[] =>
   Object.entries(w).flatMap(([key, value]): FilterNode[] => {
     if (value === undefined) return [];
     checkKey(key);
-    if (isGroupKey(key)) return [groupOf(key, value)];
-    if (!PLAIN.test(key) || (top && (RESERVED_KEYS.has(key) || embeds?.has(key)))) return bail();
-    return filtersOf(key, value as Filter);
+    return isGroupKey(key) ? [groupOf(key, value)] : filtersOf(key, value as Filter);
   });
 
-const orderOf = (o: Order): OrderTerm => {
-  if (typeof o === "string") {
-    const m = PLAIN_ORDER.exec(o);
-    if (!m) return bail();
-    const nulls = m[3];
-    return {
-      field: plainField(m[1]!),
-      dir: m[2] === "desc" ? "desc" : "asc",
-      ...(nulls
-        ? {
-            nulls: nulls === "nullsfirst" ? ("first" as const) : ("last" as const),
-          }
-        : {}),
-    };
-  }
-  if (!PLAIN.test(o.column)) return bail();
-  return {
-    field: plainField(o.column),
-    dir: o.desc ? "desc" : "asc",
-    ...(o.nulls ? { nulls: o.nulls } : {}),
-  };
+const orderOf = (o: Order): OrderTerm[] => {
+  if (typeof o === "string") return parseOrderTerms(o);
+  return [{ field: parseField(o.column), dir: o.desc ? "desc" : "asc", ...(o.nulls ? { nulls: o.nulls } : {}) }];
 };
 
-/** What one node of the query asks for; `embeds` are the names a column of it must not take. */
-const nodeOf = (node: NodeFields, embeds: ReadonlySet<string>): NodeParams => {
-  const filters = conditionsOf(node.where ?? {}, true, embeds);
-  const out: NodeParams = {
-    filters,
-    order: (node.order ?? []).map(orderOf),
-    presence: [],
-  };
+/** What is known while a query is built: the embeds the select names, and the nodes that got something. */
+interface Built {
+  readonly known: Map<string, string>;
+  readonly nodes: Map<string, NodeParams>;
+  readonly root: NodeParams;
+}
+
+/** The parameters of the node at `path`: the root, or an embed the select names. */
+const nodeAt = (built: Built, path: ReadonlyArray<string>): NodeParams => {
+  if (path.length === 0) return built.root;
+  const joined = path.join(".");
+  const canonical = built.known.get(joined);
+  if (!canonical) {
+    throw new EngineError(
+      "not_embedded",
+      `'${joined}' is not an embedded resource in this request`,
+      null,
+      `Verify that '${joined}' is included in the 'select' query parameter.`,
+    );
+  }
+  let node = built.nodes.get(canonical);
+  if (!node) built.nodes.set(canonical, (node = emptyParams()));
+  return node;
+};
+
+/** `where`, `order`, `limit` and `offset` of one node, which sits at `path` in the select. */
+const addNode = (built: Built, node: NodeFields, path: ReadonlyArray<string>): void => {
+  for (const [key, value] of Object.entries(node.where ?? {})) {
+    if (value === undefined) continue;
+    checkKey(key);
+    if (isGroupKey(key)) {
+      nodeAt(built, path).filters.push(groupOf(key, value));
+      continue;
+    }
+    // a dotted key filters an embedded resource, and keeps its own path
+    const parts = [...path, ...key.split(".")];
+    const column = parts.pop()!;
+    const parent = nodeAt(built, parts);
+    const isEmbedItself = built.known.has([...parts, column].join("."));
+    for (const leaf of toLeaves(key, value as Filter)) {
+      const f = filterOf(parseField(column), leaf);
+      if (!isEmbedItself) {
+        parent.filters.push(f);
+      } else if (f.op === "is" && f.value === "null") {
+        // `{ clients: null }`: the parent rows that have no such embedded row
+        parent.presence.push({
+          embed: built.known
+            .get([...parts, column].join("."))!
+            .split(".")
+            .pop()!,
+          present: f.negate,
+        });
+      } else {
+        throw new EngineError(
+          "invalid_embed_filter",
+          "Embedded resource filter only accepts is.null or not.is.null",
+          null,
+          null,
+        );
+      }
+    }
+  }
+  const terms = (node.order ?? []).flatMap(orderOf);
+  if (terms.length) nodeAt(built, path).order.push(...terms);
+  // a count that is not an integer is ignored, the way a `limit=1.5` is
   if (node.limit !== undefined) {
-    if (!Number.isSafeInteger(node.limit)) return bail();
-    out.limit = node.limit;
+    const n = parseCount("limit", String(node.limit));
+    if (n !== undefined) nodeAt(built, path).limit = n;
   }
   if (node.offset !== undefined) {
-    if (!Number.isSafeInteger(node.offset) || node.offset < 0) return bail();
-    out.offset = node.offset;
+    const n = parseCount("offset", String(node.offset));
+    if (n !== undefined) nodeAt(built, path).offset = n;
   }
-  return out;
 };
 
-const hasContent = (p: NodeParams): boolean =>
-  p.filters.length > 0 || p.order.length > 0 || p.limit !== undefined || p.offset !== undefined;
-
-const selectOf = (items: Select, path: ReadonlyArray<string>, embedded: Map<string, NodeParams>): SelectItem[] => {
+/** The select items, and the embeds among them with the path each sits at: they carry their own filters. */
+const selectOf = (
+  items: Select,
+  path: ReadonlyArray<string>,
+  embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }>,
+): SelectItem[] => {
   const out: SelectItem[] = [];
   for (const item of items) {
     if (typeof item === "string") {
-      if (item === "*") out.push({ kind: "star" });
-      else if (PLAIN.test(item)) out.push({ kind: "field", field: plainField(item) });
-      else {
-        const aliased = PLAIN_ALIAS.exec(item);
-        if (!aliased) bail();
-        out.push({ kind: "field", field: plainField(aliased![2]!), alias: aliased![1]! });
-      }
+      out.push(...parseSelect(item));
       continue;
     }
     for (const [relation, spec] of Object.entries(item)) {
       const embed: Embed = isEmbed(spec) ? spec : { select: spec };
-      const name = embed.as ?? relation;
-      if (![relation, name].every((n) => PLAIN.test(n))) bail();
-      if (embed.hint !== undefined && (!PLAIN.test(embed.hint) || embed.hint === "inner" || embed.hint === "left"))
-        bail();
-      if (embed.spread && embed.as) bail();
-      const here = [...path, name];
-      const children = new Set<string>();
-      for (const sub of embed.select ?? []) {
-        if (typeof sub !== "string")
-          for (const [r, s] of Object.entries(sub)) children.add((isEmbed(s) ? s.as : undefined) ?? r).add(r);
-      }
-      const items = selectOf(embed.select ?? ["*"], here, embedded);
-      const params = nodeOf(embed, children);
-      if (hasContent(params)) {
-        // the same embed named twice is one node
-        const key = here.join(".");
-        const seen = embedded.get(key);
-        if (seen) bail();
-        embedded.set(key, params);
-      }
+      if (embed.spread && embed.as) throw bad(`'${relation}' is spread, so it cannot be renamed`);
+      const here = [...path, embed.as ?? relation];
+      embeds.push({ node: embed, path: here });
       out.push({
         kind: "embed",
         target: relation,
@@ -837,49 +728,34 @@ const selectOf = (items: Select, path: ReadonlyArray<string>, embedded: Map<stri
         ...(embed.hint ? { hint: embed.hint } : {}),
         join: embed.inner ? "inner" : "left",
         spread: Boolean(embed.spread),
-        items,
+        items: selectOf(embed.select ?? ["*"], here, embeds),
       });
     }
   }
   return out;
 };
 
-const namesOf = (items: Select | undefined): Set<string> => {
-  const names = new Set<string>();
-  for (const item of items ?? []) {
-    if (typeof item === "string") continue;
-    for (const [relation, spec] of Object.entries(item))
-      names.add((isEmbed(spec) ? spec.as : undefined) ?? relation).add(relation);
-  }
-  return names;
-};
-
-/** `input` as the engine's parsed form, or `undefined` when it has to go through the query string. */
-export const toParsed = (input: QueryInput): ParsedQuery | undefined => {
-  try {
-    const embeds = new Map<string, NodeParams>();
-    const items = input.select?.length ? selectOf(input.select, [], embeds) : [{ kind: "star" as const }];
-    const root = nodeOf(input, namesOf(input.select));
-    const insert = "action" in input && (input.action === "insert" || input.action === "upsert");
-    const onConflict = insert ? input.onConflict : undefined;
-    const columns = insert ? input.columns : undefined;
-    const plain = (names: ReadonlyArray<string> | undefined): string[] | undefined => {
-      if (!names?.length) return undefined;
-      return names.every((n) => PLAIN.test(n)) ? [...names] : bail();
-    };
-    const conflict = plain(onConflict);
-    const cols = plain(columns);
-    return {
-      select: items,
-      root,
-      embeds,
-      ...(conflict ? { onConflict: conflict } : {}),
-      ...(cols ? { columns: cols } : {}),
-    };
-  } catch (e) {
-    // a refusal here is the long way's to word, so it runs and says the same thing it always did
-    return undefined;
-  }
+/** `input` as the engine's parsed form: what a query string with the same meaning parses to. */
+export const toParsed = (input: QueryInput): ParsedQuery => {
+  const embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }> = [];
+  const select: SelectItem[] = input.select?.length ? selectOf(input.select, [], embeds) : [{ kind: "star" }];
+  const known = new Map<string, string>();
+  walkEmbeds(select, [], known);
+  const built: Built = { known, nodes: new Map(), root: emptyParams() };
+  addNode(built, input, []);
+  for (const { node, path } of embeds) addNode(built, node, path);
+  const insert = "action" in input && (input.action === "insert" || input.action === "upsert");
+  const names = (list: ReadonlyArray<string> | undefined) =>
+    insert && list?.length ? list.filter(Boolean) : undefined;
+  const onConflict = names((input as InsertQuery).onConflict);
+  const columns = names((input as InsertQuery).columns);
+  return {
+    select,
+    root: built.root,
+    embeds: built.nodes,
+    ...(onConflict?.length ? { onConflict: [...onConflict] } : {}),
+    ...(columns?.length ? { columns: [...columns] } : {}),
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -967,8 +843,8 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
   const format: OutputFormat = input.single
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
-  let qp: QueryParams = { params: [], bare: new Set<string>(), parsed: toParsed(input) };
-  if (!qp.parsed) qp = { ...qp, params: toParams(input) };
+  const parsed = toParsed(input);
+  let qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed };
   let body = bodyOf(input);
   if (!isRpc(input) && "action" in input && input.action === "update") {
     // the expressions of `set` are compiled here, the plain values stay the JSON body
@@ -1142,9 +1018,7 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);
-  const qp: QueryParams = parsed
-    ? { params: [], bare: new Set<string>(), parsed }
-    : { params: toParams(input), bare: new Set<string>() };
+  const qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed };
   const plan = planTable(env, "GET", schema, input.table, qp, prefer, format, undefined, undefined);
 
   const statement = templateOf(plan.statement, marker, names);

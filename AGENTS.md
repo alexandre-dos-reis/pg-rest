@@ -21,7 +21,7 @@ reference lives in `docs/`.
 
 - Two entry points over **one** pipeline (in `@tsql/core`): `handle(Request) => Response` and
   `query(object) => { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
-  The object is turned into the query parameters `parseQuery` takes, so parsing, planning, SQL, `set_config` and error
+  The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tsql/query`), so planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
   that pipeline: a feature added to one entry point must come from the shared code, and `tests/query.test.ts` pins that the
   two answer identically, error bodies included.
@@ -51,7 +51,8 @@ reference lives in `docs/`.
 | `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
 | `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns an `Outcome`: status, headers, body), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies are `rest`'s |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
-| `packages/core/src/parse/*` | URL/query parsing: `select`, filters, request headers, fields |
+| `packages/core/src/parse/*` | the engine's input (`ParsedQuery`) and the hand-written readers of columns, select items, order terms; no grammar |
+| `packages/rest/src/parse/*` | PostgREST's query-string grammar (`parsec.ts`, `grammar.ts`) and `parseQuery` |
 | `packages/core/src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`, `expression`) |
 | `packages/core/src/schema.ts` | schema introspection and cache |
 | `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
