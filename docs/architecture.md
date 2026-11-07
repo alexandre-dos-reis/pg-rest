@@ -14,11 +14,52 @@ reaches `@tsql/query`, and what is only an extension of PostgREST never reaches 
                       └─ query() ─ an object, rendered into the same parameters
 ```
 
+- [How each package consumes the core](#how-each-package-consumes-the-core)
 - [A request, step by step](#a-request-step-by-step)
 - [Where things live](#where-things-live)
 - [The schema cache](#the-schema-cache)
 - [Errors](#errors)
 - [Invariants worth knowing](#invariants-worth-knowing)
+
+## How each package consumes the core
+
+The core is a library of steps with no front door of its own: it knows nothing of `Request`, `Response`, cookies or a
+status code, and it holds no PostgREST error code. Each package imports the steps it needs (`@tsql/core/*`, resolved to
+`packages/core/src` and bundled by `tsdown`), feeds them in its own terms, and turns what comes out back into its own.
+`rest` and `query` never import each other.
+
+```
+        @tsql/rest                         packages/core                         @tsql/query
+ ┌─────────────────────┐        ┌──────────────────────────────┐        ┌─────────────────────┐
+ │ Request             │        │                              │        │ a query object      │
+ │  └ http.ts, request │        │  parse/*   ParsedQuery       │        │  └ query.ts         │
+ │     (route, Accept, │──────▶ │  planTable / planRpc (sql/*) │ ◀──────│     (rendered into  │
+ │      Prefer, Range, │ params │  execute  ─▶ Outcome         │ params │      the same       │
+ │      body, cookies) │ Caller │  schema cache, adapters      │ Caller │      parameters)    │
+ │                     │ format │                              │ format │                     │
+ │ Response  ◀─ toResponse ◀──── Outcome {status, headers, text} ────▶ { data, count, error } │
+ │ ApiError  ◀─ toApiError ◀──── EngineError(reason), DbQueryError ───▶ QueryError(kind)     │
+ └─────────────────────┘        └──────────────────────────────┘        └─────────────────────┘
+```
+
+What each side hands the core, and what it takes back:
+
+| | `@tsql/rest` | `@tsql/query` |
+| --- | --- | --- |
+| **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
+| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` and `rest`'s own readers | an object, rendered into the same `[key, value][]` by `query.ts` |
+| **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
+| **Caller** | `{ path, request, http: { headers, cookies } }`: the `request.*` settings are set when `http` is given (`requestSettings`) | `{ path }` only: there is no request, so no `request.*` setting |
+| **Planning and execution** | `planTable` / `planRpc`, then `execute` | the same calls, on the same code |
+| **What comes back** | an `Outcome` (`status`, `headers`, `text`); `toResponse` adds `Content-Type`, `Vary`, `HEAD`, `bytea` and makes the `Response` | the same `Outcome`: the `text` is `JSON.parse`d into `data`, the count is the total in its `Content-Range`; the status and headers are not read further |
+| **Failures** | `EngineError.reason` and SQLSTATE become a PostgREST status and `PGRSTxxx` code in `toApiError` (`rest/src/errors.ts`) | `EngineError.reason` and SQLSTATE become a `kind` in `describeFailure` (`query/src/kinds.ts`) |
+| **Beyond one call** | content negotiation, `Range`, plans, `OPTIONS`, the OpenAPI document, custom media types | `transaction()` and `setContextQuery()`; the typed layer; at build time `introspect` and the generators (`types.ts`) |
+
+Three consequences worth remembering. A change to parsing, planning, SQL or `execute` is a change to both packages,
+and the comparison against PostgREST (`tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
+A new way for the engine to refuse something is a new `Reason`, which has to be mapped by both packages (the compiler
+checks it). And a feature that exists for one transport only is not in the core: the core's `Caller` and
+`OutputFormat` have no field for it.
 
 ## A request, step by step
 
@@ -53,7 +94,7 @@ reaches `@tsql/query`, and what is only an extension of PostgREST never reaches 
    `Vary`), drops the body where HTTP says there is none (`HEAD`, `204`) and makes the `Response`.
 
 `query()` enters at step 2 with parameters it renders from the object, builds the same plan, runs the same `execute`,
-and reads the outcome into `{ data, count, status }`: the count is the total in its `Content-Range`. The HTTP-only
+and reads the outcome into `{ data, count, error }`: the count is the total in its `Content-Range`. The HTTP-only
 parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tsql/rest`'s.
 
 `transaction()` (`packages/query/src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
