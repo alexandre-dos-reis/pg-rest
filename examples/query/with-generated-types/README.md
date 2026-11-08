@@ -106,7 +106,7 @@ export type DatabasePgRest = {
 
 ## In your editor
 
-The table restricts the columns, and not only when the compiler runs: inside `select` on `tags`, the completion offers
+The table restricts the columns, and not only when the compiler runs: inside `columns` on `tags`, the completion offers
 `id`, `todo_id`, `label` and `*` -- the three columns of that table, and nothing from `todos`. Same inside `where`, and
 the relationships you may embed are the ones a foreign key actually leads to.
 

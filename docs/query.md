@@ -148,6 +148,10 @@ unchanged.
 
 ### Columns
 
+A read names the columns it wants in `columns` (so does `rpc`, and so does an [embed](#embedded-resources) in its long
+form). A write names what it answers with in `returning` instead -- see [Writing](#writing) -- because an insert's own
+`columns` is something else: the columns it inserts.
+
 ```ts
 // all of them
 const all = await pgRest.select({ table: "clients" });
@@ -982,7 +986,7 @@ void pgRest.rpc({ rpc: "nope" });
 // @ts-expect-error `a` is an integer
 void pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } });
 
-// @ts-expect-error a scalar function has no columns to select
+// @ts-expect-error a scalar function has no columns to ask for
 void pgRest.rpc({ rpc: "greet", columns: ["anything"] });
 ```
 
@@ -1083,7 +1087,7 @@ const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
 }));
 
 const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
-// data: the rows, typed by the select
+// data: the rows, typed by the columns
 ```
 
 The query is checked against the database when it is written, like any other, and `data` is typed by it. A call is
@@ -1093,6 +1097,13 @@ string concatenation and the statement for the driver: no parsing, no planning. 
 [transaction](#transactions), where it rejects on failure like the scope's operations:
 
 ```ts
+// the same kind of prepared query as above
+const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+  table: "orders",
+  columns: ["id", "total"],
+  where: { status: a.status, total: { $gte: a.min } },
+}));
+
 const inScope = await pgRest.transaction(async (tx) => (await tx.run(paidOver({ status: "new", min: 0 }))).data, ctx);
 ```
 
@@ -1423,7 +1434,7 @@ accepted on its column, with a value checked no further than its shape.
 // @ts-expect-error a cast
 void pgRest.select({ table: "orders", columns: ["total::text"] });
 
-// @ts-expect-error a JSON path, in a select
+// @ts-expect-error a JSON path, in `columns`
 void pgRest.select({ table: "clients", columns: ["tier:meta->>tier"] });
 
 // a JSON path in a filter is fine: it names a column, and the column is checked

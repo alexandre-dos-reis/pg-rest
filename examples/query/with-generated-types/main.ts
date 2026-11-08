@@ -1,5 +1,5 @@
 // Step 2: use them. Every property below is checked against db.generated.ts, and the result is inferred
-// from the select -- hover `todos` in your editor, or read the comments.
+// from the columns -- hover `todos` in your editor, or read the comments.
 //   node main.ts
 import { close, pgRest } from "./client.ts";
 
@@ -18,7 +18,7 @@ if (error) throw error;
 console.log(`open todos (${count} in total):`, todos);
 for (const todo of todos) console.log(`  ${todo.title} (${todo.priority}) ${todo.tags.map((t) => t.label).join(", ")}`);
 
-// The table is what restricts the columns -- including in your editor. Inside `select` here, the
+// The table is what restricts the columns -- including in your editor. Inside `columns` here, the
 // completion offers id, todo_id, label and * : the three columns of `tags`, and nothing from `todos`.
 const { data: labels } = await pgRest.select({
   table: "tags",
@@ -35,7 +35,7 @@ const { data: urgent } = await pgRest.select({
 console.log("high priority:", urgent);
 
 const { data: created, error: createFailed } = await pgRest.insert({
-  table: "todos", //                           "select" (the default) | "insert" | "upsert" | "update" | "delete"
+  table: "todos", //                           the table to insert into
   rows: { title: "Generated types", priority: "high" }, //  the insert shape: `title` is required, `id` is generated and absent
   returning: ["id", "priority"], //                 what a write gives back, when it gives anything
 });

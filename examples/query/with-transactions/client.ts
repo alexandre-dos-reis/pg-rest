@@ -1,5 +1,5 @@
 // The instance the application imports, created once and typed by db.generated.ts: `table` and `rpc`
-// are the ones that exist, and `data` is inferred from the `select` -- inside a transaction too.
+// are the ones that exist, and `data` is inferred from the `columns` -- inside a transaction too.
 import { createQuery } from "@tsql/query";
 import { pgRestOptions } from "./db.ts";
 import { schema, type DatabasePgRest } from "./db.generated.ts";

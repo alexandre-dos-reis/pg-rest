@@ -128,7 +128,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
 ## Conventions and gotchas
 
 - **One union member per table** in `packages/query/src/typed.ts`. TypeScript narrows the contextual type of a nested property (the items
-  of `select`, the keys of `where`) only when the discriminant picks exactly one member, so each operation (`TypedSelect`, `TypedInsert`,
+  of `columns`, the keys of `where`) only when the discriminant picks exactly one member, so each operation (`TypedSelect`, `TypedInsert`,
   `TypedUpsert`, `TypedUpdate`, `TypedDelete`) is its own union with one member per table, and `TypedRpc` one per function;
   the payload an operation needs (`rows`, `set`) is required by its own member and absent from the others. Put two members
   with the same `table` into one union, and the editor silently starts offering every table's columns while the compiler

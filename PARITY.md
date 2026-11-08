@@ -32,7 +32,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| `select` columns, `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist. A path on anything other than `json`/`jsonb` -- a composite type, an array, a scalar, or a column whose type is unknown -- goes through `to_jsonb()` first, as PostgREST does; a path ending on an index is named after the last key before it |
+| `select` columns (`columns` in `@tsql/query`), `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist. A path on anything other than `json`/`jsonb` -- a composite type, an array, a scalar, or a column whose type is unknown -- goes through `to_jsonb()` first, as PostgREST does; a path ending on an index is named after the last key before it |
 | Horizontal filtering: `eq neq gt gte lt lte like ilike match imatch in is isdistinct cs cd ov sl sr nxl nxr adj` | ✅ | |
 | `not.` negation, `and()` / `or()` (nested) | ✅ | |
 | `any` / `all` quantifiers | ✅ | |
@@ -88,7 +88,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `DELETE` with filters | ✅ | |
 | `limit`/`offset`/`order` on `PATCH`/`DELETE` | ✅ | Ignored, as in PostgREST v16 (`PUT` with limit/offset → `PGRST114`) |
 | `Prefer: max-affected` (`PGRST124`) | ✅ | |
-| Write response `select`, embeds and filters | ✅ | |
+| Write response `select`, embeds and filters | ✅ | `returning: [...]` in `@tsql/query` |
 | Write through updatable views | ✅ | |
 | `Prefer: params=single-object` | ➖ | Removed from PostgREST v16 itself |
 
