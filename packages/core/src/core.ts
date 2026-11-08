@@ -93,6 +93,11 @@ export interface QueryParams {
    * (`sql/expression.ts`). Only `query()` fills it; a PATCH over HTTP is PostgREST's, a JSON body.
    */
   readonly setClauses?: ReadonlyArray<string> | undefined;
+  /**
+   * The same parameters, already parsed. `query()` builds them straight from its object, so the
+   * engine does not parse text it has just rendered; `params` still says what they mean.
+   */
+  readonly parsed?: ParsedQuery | undefined;
 }
 
 /** Statement options that depend on the output format. */
@@ -319,7 +324,7 @@ export const planTable = (
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
   const rel = getRelation(env.cache, schema, name);
-  const query = parseQuery(qp.params);
+  const query = qp.parsed ?? parseQuery(qp.params);
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
   const singular = format.kind === "object";
 
@@ -619,13 +624,15 @@ export const planRpc = (
   const call = buildRpc(env.cache, fn, provided, rawBody);
 
   const fnArgNames = new Set(fn.args.map((a) => a.name));
-  const query = parseQuery(
-    qp.params.filter(([k, v]) => !(v === "" && bare.has(k))),
-    {
-      // On GET, parameters that name function arguments are not filters.
-      allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
-    },
-  );
+  const query =
+    qp.parsed ??
+    parseQuery(
+      qp.params.filter(([k, v]) => !(v === "" && bare.has(k))),
+      {
+        // On GET, parameters that name function arguments are not filters.
+        allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
+      },
+    );
   const argsJson = rawBody ? JSON.stringify(body!.value) : JSON.stringify(argValues);
   const params = call.usesBody
     ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson]

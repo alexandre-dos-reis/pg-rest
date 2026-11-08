@@ -14,8 +14,17 @@ import {
 } from "@tsql/core/core";
 import { DbQueryError, EngineError } from "@tsql/core/errors";
 import { type ErrorKind, describeErrorKind, describeFailure } from "./kinds";
-import type { Operator } from "@tsql/core/parse/filter";
-import { FTS_ORDER, OPERATORS_ORDER } from "@tsql/core/parse/syntax";
+import type {
+  Filter as ParsedFilter,
+  FilterNode,
+  Logic,
+  NodeParams,
+  Operator,
+  OrderTerm,
+  ParsedQuery,
+} from "@tsql/core/parse/filter";
+import type { SelectItem } from "@tsql/core/parse/select";
+import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
 import { compileSet } from "@tsql/core/sql/expression";
 import { ROOT_ALIAS } from "@tsql/core/sql/read";
@@ -631,6 +640,247 @@ export const toParams = (input: QueryInput): Params => {
 };
 
 // ---------------------------------------------------------------------------
+// straight to the parsed form
+// ---------------------------------------------------------------------------
+
+// `toParams` renders the object as a query string and the engine parses it again. For the shapes
+// below that round trip is pure cost, so `toParsed` builds what the parser would have returned.
+// It covers plain column names and the common forms; anything else -- a JSON path, a cast, an
+// aggregate, a dotted key, a value the grammar might refuse -- returns `undefined` and takes the
+// round trip, which stays the one place that defines (and reports errors for) the syntax.
+// `tests/query-direct.test.ts` pins that both give the same `ParsedQuery`.
+
+const PLAIN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const PLAIN_ORDER = /^([A-Za-z_][A-Za-z0-9_]*)(?:\.(asc|desc))?(?:\.(nullsfirst|nullslast))?$/;
+const PLAIN_ALIAS = /^([A-Za-z_][A-Za-z0-9_]*):([A-Za-z_][A-Za-z0-9_]*)$/;
+const QUANTIFIABLE_OPS: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
+const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);
+/** Names a query string gives a meaning of their own: as a column they must go the long way. */
+const RESERVED_KEYS: ReadonlySet<string> = new Set([
+  "select",
+  "on_conflict",
+  "columns",
+  "limit",
+  "offset",
+  "order",
+  "and",
+  "or",
+]);
+
+/** Thrown to leave the direct path; `toParsed` turns it into `undefined`. */
+const BAIL = Symbol("bail");
+const bail = (): never => {
+  throw BAIL;
+};
+
+const plainField = (name: string) => ({ name, json: [] });
+
+const filterOf = (column: string, leaf: Leaf): ParsedFilter => {
+  const field = plainField(column);
+  if (leaf.value === null && (leaf.op === "eq" || leaf.op === "neq")) {
+    return {
+      kind: "filter",
+      field,
+      negate: leaf.not !== (leaf.op === "neq"),
+      op: "is",
+      value: "null",
+    };
+  }
+  if (leaf.quantifier && leaf.config) return bail();
+  if (leaf.quantifier && !QUANTIFIABLE_OPS.has(leaf.op)) return bail();
+  if (leaf.config && !(FTS_OPS.has(leaf.op) && PLAIN.test(leaf.config))) return bail();
+  let value: string | string[];
+  if (Array.isArray(leaf.value)) {
+    const items = leaf.value as ReadonlyArray<FilterValue>;
+    value = leaf.op === "in" ? items.map((v) => lit(v, false)) : listOf(leaf.op, items);
+  } else {
+    if (leaf.op === "in") return bail();
+    value = lit(leaf.value as FilterValue | undefined, false);
+    if (leaf.op === "is") {
+      value = value.toLowerCase();
+      if (!IS_VALUES.has(value)) return bail();
+    }
+  }
+  return {
+    kind: "filter",
+    field,
+    negate: leaf.not,
+    op: leaf.op as Operator,
+    ...(leaf.quantifier ? { quantifier: leaf.quantifier } : {}),
+    ...(leaf.config ? { lang: leaf.config } : {}),
+    value,
+  };
+};
+
+/** The conditions on one column, as many as it has operators. */
+const filtersOf = (column: string, f: Filter): ParsedFilter[] =>
+  toLeaves(column, f).map((leaf) => filterOf(column, leaf));
+
+const groupOf = (key: string, value: unknown): Logic => {
+  const members = groupMembers(key, value);
+  if (key === "$not") {
+    const children = conditionsOf(members[0]!, false);
+    return children.length ? { kind: "logic", op: "and", negate: true, children } : bail();
+  }
+  if (members.length === 0) return bail();
+  return {
+    kind: "logic",
+    op: key === "$and" ? "and" : "or",
+    negate: false,
+    children: members.map(memberOf),
+  };
+};
+
+/** One member of an `$and`/`$or` list: several conditions in the same object are ANDed. */
+const memberOf = (w: Where): FilterNode => {
+  const parts = conditionsOf(w, false);
+  if (parts.length === 0) return bail();
+  return parts.length === 1 ? parts[0]! : { kind: "logic", op: "and", negate: false, children: parts };
+};
+
+/** Every condition of a `Where`; `top` is a node's own filters, whose column names must not be reserved. */
+const conditionsOf = (w: Where, top: boolean, embeds?: ReadonlySet<string>): FilterNode[] =>
+  Object.entries(w).flatMap(([key, value]): FilterNode[] => {
+    if (value === undefined) return [];
+    checkKey(key);
+    if (isGroupKey(key)) return [groupOf(key, value)];
+    if (!PLAIN.test(key) || (top && (RESERVED_KEYS.has(key) || embeds?.has(key)))) return bail();
+    return filtersOf(key, value as Filter);
+  });
+
+const orderOf = (o: Order): OrderTerm => {
+  if (typeof o === "string") {
+    const m = PLAIN_ORDER.exec(o);
+    if (!m) return bail();
+    const nulls = m[3];
+    return {
+      field: plainField(m[1]!),
+      dir: m[2] === "desc" ? "desc" : "asc",
+      ...(nulls
+        ? {
+            nulls: nulls === "nullsfirst" ? ("first" as const) : ("last" as const),
+          }
+        : {}),
+    };
+  }
+  if (!PLAIN.test(o.column)) return bail();
+  return {
+    field: plainField(o.column),
+    dir: o.desc ? "desc" : "asc",
+    ...(o.nulls ? { nulls: o.nulls } : {}),
+  };
+};
+
+/** What one node of the query asks for; `embeds` are the names a column of it must not take. */
+const nodeOf = (node: NodeFields, embeds: ReadonlySet<string>): NodeParams => {
+  const filters = conditionsOf(node.where ?? {}, true, embeds);
+  const out: NodeParams = {
+    filters,
+    order: (node.order ?? []).map(orderOf),
+    presence: [],
+  };
+  if (node.limit !== undefined) {
+    if (!Number.isSafeInteger(node.limit)) return bail();
+    out.limit = node.limit;
+  }
+  if (node.offset !== undefined) {
+    if (!Number.isSafeInteger(node.offset) || node.offset < 0) return bail();
+    out.offset = node.offset;
+  }
+  return out;
+};
+
+const hasContent = (p: NodeParams): boolean =>
+  p.filters.length > 0 || p.order.length > 0 || p.limit !== undefined || p.offset !== undefined;
+
+const selectOf = (items: Select, path: ReadonlyArray<string>, embedded: Map<string, NodeParams>): SelectItem[] => {
+  const out: SelectItem[] = [];
+  for (const item of items) {
+    if (typeof item === "string") {
+      if (item === "*") out.push({ kind: "star" });
+      else if (PLAIN.test(item)) out.push({ kind: "field", field: plainField(item) });
+      else {
+        const aliased = PLAIN_ALIAS.exec(item);
+        if (!aliased) bail();
+        out.push({ kind: "field", field: plainField(aliased![2]!), alias: aliased![1]! });
+      }
+      continue;
+    }
+    for (const [relation, spec] of Object.entries(item)) {
+      const embed: Embed = isEmbed(spec) ? spec : { select: spec };
+      const name = embed.as ?? relation;
+      if (![relation, name].every((n) => PLAIN.test(n))) bail();
+      if (embed.hint !== undefined && (!PLAIN.test(embed.hint) || embed.hint === "inner" || embed.hint === "left"))
+        bail();
+      if (embed.spread && embed.as) bail();
+      const here = [...path, name];
+      const children = new Set<string>();
+      for (const sub of embed.select ?? []) {
+        if (typeof sub !== "string")
+          for (const [r, s] of Object.entries(sub)) children.add((isEmbed(s) ? s.as : undefined) ?? r).add(r);
+      }
+      const items = selectOf(embed.select ?? ["*"], here, embedded);
+      const params = nodeOf(embed, children);
+      if (hasContent(params)) {
+        // the same embed named twice is one node
+        const key = here.join(".");
+        const seen = embedded.get(key);
+        if (seen) bail();
+        embedded.set(key, params);
+      }
+      out.push({
+        kind: "embed",
+        target: relation,
+        ...(embed.as ? { alias: embed.as } : {}),
+        ...(embed.hint ? { hint: embed.hint } : {}),
+        join: embed.inner ? "inner" : "left",
+        spread: Boolean(embed.spread),
+        items,
+      });
+    }
+  }
+  return out;
+};
+
+const namesOf = (items: Select | undefined): Set<string> => {
+  const names = new Set<string>();
+  for (const item of items ?? []) {
+    if (typeof item === "string") continue;
+    for (const [relation, spec] of Object.entries(item))
+      names.add((isEmbed(spec) ? spec.as : undefined) ?? relation).add(relation);
+  }
+  return names;
+};
+
+/** `input` as the engine's parsed form, or `undefined` when it has to go through the query string. */
+export const toParsed = (input: QueryInput): ParsedQuery | undefined => {
+  try {
+    const embeds = new Map<string, NodeParams>();
+    const items = input.select?.length ? selectOf(input.select, [], embeds) : [{ kind: "star" as const }];
+    const root = nodeOf(input, namesOf(input.select));
+    const insert = "action" in input && (input.action === "insert" || input.action === "upsert");
+    const onConflict = insert ? input.onConflict : undefined;
+    const columns = insert ? input.columns : undefined;
+    const plain = (names: ReadonlyArray<string> | undefined): string[] | undefined => {
+      if (!names?.length) return undefined;
+      return names.every((n) => PLAIN.test(n)) ? [...names] : bail();
+    };
+    const conflict = plain(onConflict);
+    const cols = plain(columns);
+    return {
+      select: items,
+      root,
+      embeds,
+      ...(conflict ? { onConflict: conflict } : {}),
+      ...(cols ? { columns: cols } : {}),
+    };
+  } catch (e) {
+    // a refusal here is the long way's to word, so it runs and says the same thing it always did
+    return undefined;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // running
 // ---------------------------------------------------------------------------
 
@@ -713,7 +963,8 @@ const run = async (env: Env, input: QueryInput, ctx: RequestContext): Promise<Om
   const format: OutputFormat = input.single
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
-  let qp: QueryParams = { params: toParams(input), bare: new Set<string>() };
+  let qp: QueryParams = { params: [], bare: new Set<string>(), parsed: toParsed(input) };
+  if (!qp.parsed) qp = { ...qp, params: toParams(input) };
   let body = bodyOf(input);
   if (!isRpc(input) && "action" in input && input.action === "update") {
     // the expressions of `set` are compiled here, the plain values stay the JSON body
