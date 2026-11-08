@@ -8,7 +8,7 @@ reference lives in `docs/`.
 ## What this is
 
 - **Three packages under `packages/`.** `@tsql/rest` (`createRest` -> `handle(Request) => Response`) and `@tsql/query`
-  (`createQuery` -> `query()`, `transaction()`, `setContextQuery()`, `generateTypes()`) are published. `@tsql/core` is
+  (`createQuery` -> `select()`/`insert()`/`upsert()`/`update()`/`delete()`/`rpc()`, `transaction()`, `setContextQuery()`, `generateTypes()`) are published. `@tsql/core` is
   **private**: parsing, planning, SQL, the schema cache, errors and the adapters, bundled by tsdown into each published
   package (it is a `devDependency` on purpose -- tsdown only externalises `dependencies`). The import direction is
   one way: `rest` and `query` import `@tsql/core/*`, never each other, and `core` imports neither. Never add a
@@ -20,7 +20,7 @@ reference lives in `docs/`.
   `createPgRest` that composes the two on one database.
 
 - Two entry points over **one** pipeline (in `@tsql/core`): `handle(Request) => Response` and
-  `query(object) => { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
+  `select(object)`, `insert(object)`... `=> { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
   The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tsql/query`), so planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
   that pipeline: a feature added to one entry point must come from the shared code, and `tests/query.test.ts` pins that the
@@ -45,12 +45,12 @@ reference lives in `docs/`.
 | `packages/rest/src/render.ts` | the SQL of CSV, GeoJSON and media type handlers; the engine only knows `SqlOutputFormat` (`json`, `object`, or `rendered` by SQL it is given) |
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery`, `QueryInstance`, the public types |
-| `packages/query/src/query.ts` | `query(input)`: the object API, in-process, no `Request` (see below) |
+| `packages/query/src/query.ts` | the six operations over one `runQuery(input)`: the object API, in-process, no `Request` (see below) |
 | `packages/query/src/kinds.ts` | `ErrorKind` and `describeFailure`: how an `EngineError` (by `reason`) or a `DbQueryError` (by SQLSTATE) becomes the `kind` of a `QueryError` |
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → PostgREST status and `PGRSTxxx` code table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions, `toApiError` |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
-| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns a `SqlResult`: body, rows, total), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `SqlCall` (`settings`, `before`) |
+| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns a `SqlResult`: body, rows, total), the transaction setup: shared by `handle` and the operations. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `SqlCall` (`settings`, `before`) |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
 | `packages/core/src/parse/*` | the engine's input (`ParsedQuery`) and the hand-written readers of columns, select items, order terms; no grammar |
 | `packages/rest/src/parse/*` | PostgREST's query-string grammar (`parsec.ts`, `grammar.ts`) and `parseQuery` |
@@ -128,10 +128,11 @@ Releases carry provenance, so they are attested to the workflow that built them.
 ## Conventions and gotchas
 
 - **One union member per table** in `packages/query/src/typed.ts`. TypeScript narrows the contextual type of a nested property (the items
-  of `select`, the keys of `where`) only when the discriminant picks exactly one member, so reads and writes share one
-  member per table -- each action's payload is required, and refused on the others, by `WriteRules` rather than by the
-  shape -- and *every* member declares `table`, function calls included (`table?: never`). Split them again, or add a
-  member without `table`, and the editor silently starts offering every table's columns while the compiler stays right.
+  of `select`, the keys of `where`) only when the discriminant picks exactly one member, so each operation (`TypedSelect`, `TypedInsert`,
+  `TypedUpsert`, `TypedUpdate`, `TypedDelete`) is its own union with one member per table, and `TypedRpc` one per function;
+  the payload an operation needs (`rows`, `set`) is required by its own member and absent from the others. Put two members
+  with the same `table` into one union, and the editor silently starts offering every table's columns while the compiler
+  stays right.
   `tests/completions.test.ts` asks the compiler and pins it.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
   check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.

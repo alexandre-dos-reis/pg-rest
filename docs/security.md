@@ -5,7 +5,7 @@ Two things carry the weight: Postgres decides what a caller may do, and request 
 ## The caller is a role and some claims
 
 ```ts
-await pgRest.query({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: user.id } });
+await pgRest.select({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: user.id } });
 ```
 
 Inside the request's transaction, pg-rest issues one statement that sets them with `set_config(…, true)`
@@ -16,7 +16,7 @@ Inside the request's transaction, pg-rest issues one statement that sets them wi
 | `role` | `ctx.role`, or `anonymousRole` when there is none |
 | `request.jwt.claims` | `ctx.claims`, with `role` merged in — what RLS policies read |
 | `search_path` | the selected schema, then `extraSearchPath` |
-| `request.method`, `request.path`, `request.headers`, `request.cookies` | the request (`requestSettings`, on by default). Set by `@tsql/rest` only: an in-process `query()` has no request and sets none of them |
+| `request.method`, `request.path`, `request.headers`, `request.cookies` | the request (`requestSettings`, on by default). Set by `@tsql/rest` only: an in-process operation has no request and sets none of them |
 | anything in `ctx.settings` | your own, names must contain a dot (`app.tenant_id`) |
 
 So a policy is written exactly as it would be behind PostgREST:
@@ -30,7 +30,7 @@ CREATE POLICY own ON api.notes
 Three consequences worth stating plainly:
 
 - **The database is the enforcement point.** `SET LOCAL role` means `GRANT` and RLS apply to every statement, including
-  the ones an in-process `query()` runs. A privilege error comes back as `42501` → 401 (anonymous) or 403.
+  the ones an in-process operation runs. A privilege error comes back as `42501` → 401 (anonymous) or 403.
 - **No type knows what a role may do.** The generated types describe the schema, not the caller: an insert as `anon`
   compiles and Postgres refuses it. One schema serves every role, the role is usually resolved from a cookie, and RLS is
   a predicate over rows. → [`types.md`](types.md#what-it-will-not-describe-the-caller)
@@ -39,11 +39,11 @@ Three consequences worth stating plainly:
 
 ## Request values never become SQL
 
-Values arrive as parameters — always text; the JSON body of a write and the arguments of a function with an explicit `$n::text` cast, and `query()`'s filter values as bound parameters of the type they are compared with — or, over HTTP, as escaped literals. Identifiers are
+Values arrive as parameters — always text; the JSON body of a write and the arguments of a function with an explicit `$n::text` cast, and the operations' filter values as bound parameters of the type they are compared with — or, over HTTP, as escaped literals. Identifiers are
 quoted through one module, cast targets must match a strict type allowlist, and a GUC name must be dotted.
 `tests/security.test.ts` throws SQL injection payloads at filters, identifiers, casts, write payloads, `on_conflict`,
 `columns`, RPC arguments, headers and cookies, and asserts the data is still there afterwards — through `handle()` and
-through `query()`, where the object builder quotes values itself.
+through the operations, where the object builder quotes values itself.
 
 A read runs in a `READ ONLY` transaction, so a `GET` cannot write even through a volatile function.
 

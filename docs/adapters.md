@@ -64,4 +64,4 @@ CREATE POLICY own ON api.notes
 ```
 
 Over HTTP, `request.method`, `request.path`, `request.headers` and `request.cookies` are there too (`requestSettings`, on by
-default); an in-process `query()` has no request and sets none of them. See [`security.md`](security.md).
+default); an in-process operation has no request and sets none of them. See [`security.md`](security.md).

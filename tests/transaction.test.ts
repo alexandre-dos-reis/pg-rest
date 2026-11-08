@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { QueryError, type RequestContext } from "./support/pgrest";
+import { QueryError, type RequestContext, type Transaction } from "./support/pgrest";
 
 /**
  * `transaction()`: one scope, one transaction. What is pinned here is the boundary -- what lands,
@@ -21,7 +21,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
   });
 
   const names = async (): Promise<string[]> => {
-    const r = await t!.api.query<Array<{ name: string }>>({ table: "clients", select: ["name"] });
+    const r = await t!.api.select<Array<{ name: string }>>({ table: "clients", select: ["name"] });
     if (r.error) throw r.error;
     return r.data.map((c) => c.name);
   };
@@ -30,15 +30,13 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(async (tx) => {
       // nothing is narrowed: `tx.query` left on failure, so this result is the success
-      const client = await tx.query<{ id: number }>({
+      const client = await tx.insert<{ id: number }>({
         table: "clients",
-        action: "insert",
         rows: { name: "Ada" },
         single: true,
       });
-      const order = await tx.query<Array<{ id: number }>>({
+      const order = await tx.insert<Array<{ id: number }>>({
         table: "orders",
-        action: "insert",
         rows: { client_id: client.data.id, total: 10 },
       });
       return { client: client.data.id, orders: order.data.length };
@@ -55,8 +53,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const before = await names();
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Gone", email: "dup@x.com" } });
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "dup@x.com" } });
+      await tx.insert({ table: "clients", rows: { name: "Gone", email: "dup@x.com" } });
+      await tx.insert({ table: "clients", rows: { name: "Dup", email: "dup@x.com" } });
       return "unreachable";
     }, authed());
 
@@ -73,7 +71,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     let seen: string | undefined;
     const r = await t.api.transaction(async (tx) => {
       try {
-        await tx.query({ table: "clients", where: { name: "nobody" }, single: true });
+        await tx.select({ table: "clients", where: { name: "nobody" }, single: true });
       } catch (e) {
         seen = e instanceof QueryError ? e.kind : "something else";
         throw e; //                                leaving is still the caller's decision
@@ -89,7 +87,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const before = await names();
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Gone" } });
+      await tx.insert({ table: "clients", rows: { name: "Gone" } });
       throw new Error("no");
     }, authed());
 
@@ -104,7 +102,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const before = await names();
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Gone" } });
+      await tx.insert({ table: "clients", rows: { name: "Gone" } });
       tx.rollback();
     }, authed());
 
@@ -120,9 +118,9 @@ describe.skipIf(!hasDb)("transaction()", () => {
     // transaction, so the write before it would commit if the scope did not refuse to. Reaching
     // this needs a deliberate catch, which is the only way past `tx.query` leaving.
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Gone" } });
+      await tx.insert({ table: "clients", rows: { name: "Gone" } });
       try {
-        await tx.query({ table: "clients", where: { name: "nobody" }, single: true });
+        await tx.select({ table: "clients", where: { name: "nobody" }, single: true });
       } catch {
         return "committed anyway?";
       }
@@ -138,14 +136,14 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const seen: string[] = [];
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "a", email: "dup@x.com" } });
+      await tx.insert({ table: "clients", rows: { name: "a", email: "dup@x.com" } });
       try {
-        await tx.query({ table: "clients", action: "insert", rows: { name: "b", email: "dup@x.com" } });
+        await tx.insert({ table: "clients", rows: { name: "b", email: "dup@x.com" } });
       } catch (e) {
         seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
       try {
-        await tx.query({ table: "clients", select: ["id"] });
+        await tx.select({ table: "clients", select: ["id"] });
       } catch (e) {
         seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
@@ -161,22 +159,22 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const seen: Array<unknown> = [];
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Ada", email: "ada@x.com" } });
+      await tx.insert({ table: "clients", rows: { name: "Ada", email: "ada@x.com" } });
 
       // the nested scope catches what the query throws, rolls back to its savepoint, and answers
       // a result -- which is why nothing here has to try/catch
       const dup = await tx.transaction((inner) =>
-        inner.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "ada@x.com" } }),
+        inner.insert({ table: "clients", rows: { name: "Dup", email: "ada@x.com" } }),
       );
       seen.push(dup.error?.sqlState);
 
       const kept = await tx.transaction(async (inner) => {
-        await inner.query({ table: "clients", action: "insert", rows: { name: "Bob", email: "bob@x.com" } });
+        await inner.insert({ table: "clients", rows: { name: "Bob", email: "bob@x.com" } });
         return "kept";
       });
       seen.push(kept.data);
 
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Cleo" } });
+      await tx.insert({ table: "clients", rows: { name: "Cleo" } });
       return "done";
     }, authed());
 
@@ -193,9 +191,9 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     let nestedCode: string | undefined;
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Kept" } });
+      await tx.insert({ table: "clients", rows: { name: "Kept" } });
       const inner = await tx.transaction(async (nested) => {
-        await nested.query({ table: "clients", action: "insert", rows: { name: "Dropped" } });
+        await nested.insert({ table: "clients", rows: { name: "Dropped" } });
         nested.rollback();
       });
       nestedCode = inner.error?.kind;
@@ -213,8 +211,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(
       async (tx) => {
-        const a = await tx.query<{ role: string; claims: Record<string, string>; tenant: string }>({ rpc: "whoami" });
-        const b = await tx.query<{ role: string }>({ rpc: "whoami" });
+        const a = await tx.rpc<{ role: string; claims: Record<string, string>; tenant: string }>({ rpc: "whoami" });
+        const b = await tx.rpc<{ role: string }>({ rpc: "whoami" });
         return [a.data, b.data.role] as const;
       },
       { role: "authenticated", claims: { sub: "u-9" }, settings: { "app.tenant": "acme" } },
@@ -232,8 +230,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
   test("RLS reads the claims the scope set", async () => {
     t = await makeApi();
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ table: "notes", action: "insert", rows: { body: "mine" } });
-      const theirs = await tx.query<Array<{ owner: string }>>({ table: "notes", select: ["owner"] });
+      await tx.insert({ table: "notes", rows: { body: "mine" } });
+      const theirs = await tx.select<Array<{ owner: string }>>({ table: "notes", select: ["owner"] });
       return theirs.data.map((n) => n.owner);
     }, authed("u-7"));
 
@@ -244,8 +242,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
   test("two schemas in one scope: every query sets its own search_path", async () => {
     t = await makeApi();
     const r = await t.api.transaction(async (tx) => {
-      await tx.query({ schema: "v2", table: "things", action: "insert", rows: { label: "x" } });
-      await tx.query({ table: "clients", action: "insert", rows: { name: "Both" } });
+      await tx.insert({ schema: "v2", table: "things", rows: { label: "x" } });
+      await tx.insert({ table: "clients", rows: { name: "Both" } });
       return "both";
     }, authed());
 
@@ -257,7 +255,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
   test("a count asked for inside a scope is the number, not a maybe", async () => {
     t = await makeApi();
     const r = await t.api.transaction(async (tx) => {
-      const { count } = await tx.query<Array<unknown>, number>({
+      const { count } = await tx.select<Array<unknown>, number>({
         table: "clients",
         select: ["id"],
         count: "exact",
@@ -274,8 +272,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(
       async (tx) => {
-        await tx.query<Array<unknown>>({ table: "clients", select: ["id"] });
-        await tx.query({ table: "clients", action: "insert", rows: { name: "No" } });
+        await tx.select<Array<unknown>>({ table: "clients", select: ["id"] });
+        await tx.insert({ table: "clients", rows: { name: "No" } });
         return "unreachable";
       },
       { ...authed(), readOnly: true },
@@ -300,7 +298,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
 
     const iso = async (options: Record<string, unknown>) => {
       const r = await t!.api.transaction(
-        async (tx) => (await tx.query<{ level: string; readOnly: string }>({ rpc: "iso" })).data,
+        async (tx) => (await tx.rpc<{ level: string; readOnly: string }>({ rpc: "iso" })).data,
         { ...authed(), ...options },
       );
       if (r.error) throw r.error;
@@ -330,10 +328,10 @@ describe.skipIf(!hasDb)("transaction()", () => {
     const scope = (name: string) =>
       t!.api.transaction(
         async (tx) => {
-          await tx.query<Array<unknown>>({ table: "clients", select: ["id"] });
+          await tx.select<Array<unknown>>({ table: "clients", select: ["id"] });
           if (++read === 2) bothRead!();
           await everyoneRead;
-          await tx.query({ table: "clients", action: "insert", rows: { name } });
+          await tx.insert({ table: "clients", rows: { name } });
           return name;
         },
         { ...authed(), isolationLevel: "serializable" },
@@ -364,9 +362,9 @@ describe.skipIf(!hasDb)("transaction()", () => {
     await t.api.reloadSchema();
 
     let runs = 0;
-    const fn = async (tx: { query: (i: any) => Promise<unknown> }) => {
+    const fn = async (tx: Pick<Transaction, "rpc">) => {
       runs++;
-      await tx.query({ rpc: "flaky" });
+      await tx.rpc({ rpc: "flaky" });
       return runs;
     };
 
@@ -401,8 +399,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const store = new AsyncLocalStorage<RequestContext>();
     const bound = t.api.setContextQuery(() => store.getStore());
-    const whoami = async (tx: { query: <T>(i: any) => Promise<{ data: T }> }) =>
-      (await tx.query<{ role: string; claims: { sub: string } }>({ rpc: "whoami" })).data;
+    const whoami = async (tx: Pick<Transaction, "rpc">) =>
+      (await tx.rpc<{ role: string; claims: { sub: string } }>({ rpc: "whoami" })).data;
 
     const inside = await store.run(authed("u-1"), () => bound.transaction(async (tx) => (await whoami(tx)).claims.sub));
     expect(inside.data).toBe("u-1");

@@ -3,10 +3,12 @@ import { type EngineOptions, createStaticEngine } from "@tsql/core/engine";
 import {
   type ContextQuery,
   type ContextSource,
+  type Operations,
   type PreRequest,
   type QueryConfig,
   type QueryInput,
   type QueryResult,
+  type SelectInput,
   type Prepared,
   type PreparedArgs,
   type Transaction,
@@ -14,6 +16,7 @@ import {
   failedTransaction,
   noContextResult,
   noContextTransaction,
+  operationsOf,
   prepareQuery,
   resolveContextSource,
   runQuery,
@@ -36,9 +39,15 @@ export type {
   AnySignature,
   QueryData,
   TypedContextQuery,
-  TypedTransaction,
+  TypedDelete,
+  TypedInsert,
+  TypedOperations,
   TypedQueryInstance,
-  TypedQuery,
+  TypedRpc,
+  TypedSelect,
+  TypedTransaction,
+  TypedUpdate,
+  TypedUpsert,
 } from "./typed";
 export type {
   CompositeValue,
@@ -46,6 +55,7 @@ export type {
   ContextSource,
   CountFrom,
   CountOf,
+  DeleteInput,
   DeleteQuery,
   Embed,
   DefaultValue,
@@ -55,11 +65,13 @@ export type {
   FilterValue,
   FtsOp,
   FtsValue,
+  InsertInput,
   InsertQuery,
   IsolationLevel,
   OperatorModifiers,
   OperatorSpec,
   OperatorValue,
+  Operations,
   Order,
   Prepared,
   PreparedArgs,
@@ -68,15 +80,20 @@ export type {
   QueryOk,
   QueryResult,
   QueryReturning,
+  RpcInput,
   RpcQuery,
   SetInput,
   Scalar,
   Select,
+  SelectInput,
   SelectQuery,
+  Settled,
   Transaction,
   TransactionOptions,
   TransactionRetry,
+  UpdateInput,
   UpdateQuery,
+  UpsertInput,
   Where,
 } from "./query";
 export type { SchemaDescriptor } from "@tsql/core/schema";
@@ -97,19 +114,20 @@ export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
   readonly schema: SchemaDescriptor;
 }
 
-export interface QueryInstance {
-  /**
-   * Run a query described by an object, in-process: no `Request`, no URL, no HTTP status.
-   *
-   * A failure is part of the result, not an exception: `const { data, error } = await
-   * pgRest.query({ table: "todos" })`. Exactly one of the two is set, so `if (error)` leaves
-   * `data` non-null, and `error` is a {@link QueryError}: a `kind` to switch on, the `message`, `details`
-   * and `hint`, the `sqlState` of a database error, and the input that produced it.
-   *
-   * It never rejects: an error the library did not foresee comes back as an `internal` `error` carrying the
-   * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
-   */
-  query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+/**
+ * The six operations -- `select`, `insert`, `upsert`, `update`, `delete` and `rpc` -- each taking an
+ * object that describes the call, in-process: no `Request`, no URL, no HTTP status.
+ *
+ * A failure is part of the result, not an exception: `const { data, error } = await
+ * pgRest.select({ table: "todos" })`. Exactly one of the two is set, so `if (error)` leaves
+ * `data` non-null, and `error` is a {@link QueryError}: a `kind` to switch on, the `message`, `details`
+ * and `hint`, the `sqlState` of a database error, and the input that produced it.
+ *
+ * An operation never rejects: an error the library did not foresee comes back as an `internal` `error`
+ * carrying the original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
+ * Its optional second argument is who is asking: `{ role, claims, settings }`.
+ */
+export interface QueryInstance extends Operations<"result", [ctx?: RequestContext]> {
   /** Run a call of a prepared query (see {@link QueryInstance.prepare}), with this context. */
   run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /**
@@ -134,9 +152,9 @@ export interface QueryInstance {
    * `null`, a `*` wildcard, a composite -- is not an error: it builds the query object and runs it
    * the ordinary way.
    */
-  prepare<A extends PreparedArgs, T = unknown>(build: (args: A) => QueryInput): (args: A) => Prepared<T>;
+  prepare<A extends PreparedArgs, T = unknown>(build: (args: A) => SelectInput): (args: A) => Prepared<T>;
   /**
-   * {@link QueryInstance.query} with the context decided once: `source` is either a fixed
+   * The operations with the context decided once: `source` is either a fixed
    * {@link RequestContext} or a function called at every call, so an `AsyncLocalStorage` entered by
    * your middleware answers "who is asking" without threading `ctx` through every layer.
    *
@@ -144,7 +162,7 @@ export interface QueryInstance {
    * const store = new AsyncLocalStorage<RequestContext>();
    * const db = pgRest.setContextQuery(() => store.getStore());
    * // in a middleware: store.run({ role: "authenticated", claims: { sub: userId } }, next)
-   * const { data, error } = await db({ table: "todos" });
+   * const { data, error } = await db.select({ table: "todos" });
    * ```
    *
    * pg-rest holds no store of its own -- that keeps it dependency-free and runtime-neutral, and
@@ -153,7 +171,7 @@ export interface QueryInstance {
    * A context passed to the call wins over `source`, which is how an administrative query steps
    * out of the ambient context without leaving its scope. A `source` that returns nothing (the
    * store was never entered) is a `no_context` `error`, not a silent fall back to the anonymous
-   * role. Like `query`, it never rejects.
+   * role. Like the instance's operations, it never rejects.
    */
   setContextQuery(source: ContextSource): ContextQuery;
   /**
@@ -163,18 +181,18 @@ export interface QueryInstance {
    *
    * ```ts ignore
    * const { data, error } = await pgRest.transaction(async (tx) => {
-   *   const order = await tx.query({ table: "orders", action: "insert", rows: { client_id: 1 }, single: true });
-   *   await tx.query({ table: "order_items", action: "insert", rows: itemsFor(order.data.id) });
+   *   const order = await tx.insert({ table: "orders", rows: { client_id: 1 }, single: true });
+   *   await tx.insert({ table: "order_items", rows: itemsFor(order.data.id) });
    *   return order.data;
    * }, { role: "authenticated", claims: { sub: user.id } });
    * ```
    *
-   * `tx.query` differs from {@link QueryInstance.query} in two ways, both of them consequences of
-   * sharing a transaction. It takes **no context**: the role and the claims are transaction-local
+   * A transaction's operations differ from {@link QueryInstance}'s in two ways, both of them consequences of
+   * sharing a transaction. They take **no context**: the role and the claims are transaction-local
    * and issued once at the head of the transaction, so a per-call context would change the role for
-   * every statement that follows instead of scoping anything. And it **rejects** on failure instead
+   * every statement that follows instead of scoping anything. And they **reject** on failure instead
    * of answering an `error`, because a query that failed is a transaction that will not commit --
-   * which makes its result the success, with `data` and `count` needing no narrowing.
+   * which makes their result the success, with `data` and `count` needing no narrowing.
    *
    * The scope is where the promise that does not reject lives: this answers a {@link QueryResult}
    * around whatever the callback returned -- `data` is that value, there is no `count` -- and the
@@ -189,7 +207,7 @@ export interface QueryInstance {
 export interface CreateQuery {
   (options: QueryOptions): QueryInstance;
   /**
-   * With a database type from `generateTypes` (`@tsql/query/types`), `query` is typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
+   * With a database type from `generateTypes` (`@tsql/query/types`), the operations are typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
    * name real columns and relationships, and `data` is inferred from the `select`.
    */
   <Db extends AnyDatabase>(options: QueryOptions): TypedQueryInstance<Db>;
@@ -200,7 +218,10 @@ const create = (options: QueryOptions): QueryInstance => {
   const { adapter, config: shared } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
   const config: QueryConfig = { ...shared, preRequest: options.preRequest };
 
-  const query = async <T = unknown>(input: QueryInput | Prepared<T>, ctx?: RequestContext): Promise<QueryResult<T>> => {
+  const execute = async <T = unknown>(
+    input: QueryInput | Prepared<T>,
+    ctx?: RequestContext,
+  ): Promise<QueryResult<T>> => {
     try {
       return (await runQuery({ db: adapter, config, cache }, input, ctx ?? {})) as QueryResult<T>;
     } catch (e) {
@@ -237,7 +258,7 @@ const create = (options: QueryOptions): QueryInstance => {
         }
         if (!context) return noContextResult(input) as QueryResult<T>;
       }
-      return query<T>(input, context);
+      return execute<T>(input, context);
     };
 
     // A scope reads the source **once**, on entry: the transaction has one `set_config`, so a
@@ -260,15 +281,19 @@ const create = (options: QueryOptions): QueryInstance => {
       return transaction<A>(fn, { ...context, ...(scope ?? {}) });
     };
 
-    return Object.assign(call, { transaction: bound, run: call as ContextQuery["run"] });
+    return {
+      ...(operationsOf(call) as unknown as Operations<"result", [ctx?: RequestContext]>),
+      run: call as ContextQuery["run"],
+      transaction: bound,
+    };
   };
 
-  const prepare = <A extends PreparedArgs, T = unknown>(build: (args: A) => QueryInput): ((args: A) => Prepared<T>) =>
+  const prepare = <A extends PreparedArgs, T = unknown>(build: (args: A) => SelectInput): ((args: A) => Prepared<T>) =>
     prepareQuery({ db: adapter, config, cache }, build) as (args: A) => Prepared<T>;
 
   return {
-    query,
-    run: query as QueryInstance["run"],
+    ...(operationsOf(execute) as unknown as Operations<"result", [ctx?: RequestContext]>),
+    run: execute as QueryInstance["run"],
     prepare,
     setContextQuery,
     transaction,
@@ -279,7 +304,7 @@ const create = (options: QueryOptions): QueryInstance => {
 /**
  * Create the in-process query API over a Postgres database.
  *
- * `createQuery<Db>(options)` returns the same instance with `query` typed by a
+ * `createQuery<Db>(options)` returns the same instance with its operations typed by a
  * generated database type; the cast is the whole of that difference, since types never reach
  * runtime and the two instances are one object.
  */

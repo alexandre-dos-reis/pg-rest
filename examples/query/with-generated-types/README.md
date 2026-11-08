@@ -54,7 +54,7 @@ export const pgRest = await createQuery<DatabasePgRest>(options);
 ```ts
 const pgRest = await createQuery<DatabasePgRest>(options);
 
-const { data: todos, error } = await pgRest.query({
+const { data: todos, error } = await pgRest.select({
   table: "todos", //                                  only a relation of the exposed schema
   select: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
   where: { done: false }, //                          its own columns, with the right value type
@@ -117,16 +117,16 @@ the relationships you may embed are the ones a foreign key actually leads to.
 
 ```ts
 // @ts-expect-error "urgent" is not one of the enum's labels
-void pgRest.query({ table: "todos", where: { priority: "urgent" } });
+void pgRest.select({ table: "todos", where: { priority: "urgent" } });
 
 // @ts-expect-error `id` is generated: it cannot be written
-void pgRest.query({ table: "todos", action: "insert", rows: { id: 42, title: "nope" } });
+void pgRest.insert({ table: "todos", rows: { id: 42, title: "nope" } });
 
 // @ts-expect-error `floor` is an int -- the fields of a composite type are checked like any other value
-void pgRest.query({ table: "todos", where: { at: { floor: "2" } } });
+void pgRest.select({ table: "todos", where: { at: { floor: "2" } } });
 
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
-void pgRest.query({ table: "todos", select: ["id"], limitt: 10 });
+void pgRest.select({ table: "todos", select: ["id"], limitt: 10 });
 ```
 
 Not everything can be described: casts (`total::text`), JSON paths (`meta->>tier`) and aggregates (`total.sum()`) change

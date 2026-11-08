@@ -50,7 +50,7 @@ app.get("/dashboard", async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const ctx = session ? { role: "authenticated", claims: { sub: session.user.id } } : undefined;
 
-  const { data: todos, error } = await pgRest.query(
+  const { data: todos, error } = await pgRest.select(
     {
       table: "todos",
       select: ["id", "title", "done", { tags: ["label"] }],

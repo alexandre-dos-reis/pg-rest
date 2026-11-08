@@ -34,6 +34,6 @@ PostgREST itself uses the least memory of all (about 40–47 MB).
 
 ## In-process is cheaper than a loopback
 
-`query()` skips the socket, the HTTP parse and the response parse, but it is the *same* SQL: the win is the envelope, not
+The in-process operations skip the socket, the HTTP parse and the response parse, but it is the *same* SQL: the win is the envelope, not
 the database. If you are reaching for it to make a slow query fast, look at the plan instead — `planEnabled` and
 `Accept: application/vnd.pgrst.plan` give you Postgres's own.

@@ -67,13 +67,13 @@ try {
   assert.equal((await call("/clients?select=id&email=eq.fine@x")).body.length, 0);
 
   // query(): the same plumbing, without an HTTP request
-  const rows = await api.query({ table: "clients", select: ["name"], order: ["id"], limit: 1 });
+  const rows = await api.select({ table: "clients", select: ["name"], order: ["id"], limit: 1 });
   assert.deepEqual(rows.data, [{ name: "Ada" }]);
   assert.deepEqual(
-    (await api.query({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
+    (await api.select({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
     [{ body: "hi" }],
   );
-  const failed: any = await api.query({ table: "cients" });
+  const failed: any = await api.select({ table: "cients" });
   assert.equal(failed.data, null);
   assert.equal(failed.error.kind, "undefined_object");
   assert.equal(failed.error.input.table, "cients");

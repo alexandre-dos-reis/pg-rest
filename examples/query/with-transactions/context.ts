@@ -10,7 +10,7 @@ import { pgRest } from "./client.ts";
 const store = new AsyncLocalStorage<RequestContext>();
 
 /**
- * The bound query, and the bound scope. `pgQuery(input)` reads the store at every call; the scope
+ * The bound query, and the bound scope. `pgQuery.select(input)` reads the store at every call; the scope
  * reads it **once, on entry**, because a transaction has one `set_config` -- a store answering
  * differently halfway through could not be honoured anyway.
  */

@@ -3,8 +3,11 @@
 import {
   createQuery,
   type AnyDatabase,
+  type QueryInput,
   type QueryInstance,
   type QueryOptions,
+  type QueryResult,
+  type RequestContext,
   type TypedQueryInstance,
 } from "../../packages/query/src/index";
 import { introspect, toDescriptor } from "../../packages/core/src/schema";
@@ -19,6 +22,22 @@ import {
 
 export * from "../../packages/query/src/index";
 export { ApiError, DbQueryError, PgRestError, createRest, type RestInstance, type RestOptions };
+
+/**
+ * Run an input whose operation is only known at run time (a table-driven test): the one place a test
+ * dispatches on `action` itself, the way the six methods do.
+ */
+export const exec = <T = unknown>(
+  api: QueryInstance,
+  input: QueryInput,
+  ctx?: RequestContext,
+): Promise<QueryResult<T>> => {
+  const op = "rpc" in input ? "rpc" : (input.action ?? "select");
+  return (api as unknown as Record<string, (i: QueryInput, c?: RequestContext) => Promise<QueryResult<T>>>)[op]!(
+    input,
+    ctx,
+  );
+};
 
 export type PgRestOptions = RestOptions;
 export type PgRestInstance = RestInstance & QueryInstance;
@@ -43,7 +62,12 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
   return {
     handle: rest.handle,
     schemaCache: rest.schemaCache,
-    query: (input, ctx) => query.query(input, ctx),
+    select: (input, ctx) => query.select(input, ctx),
+    insert: (input, ctx) => query.insert(input, ctx),
+    upsert: (input, ctx) => query.upsert(input, ctx),
+    update: (input, ctx) => query.update(input, ctx),
+    delete: (input, ctx) => query.delete(input, ctx),
+    rpc: (input, ctx) => query.rpc(input, ctx),
     run: (call, ctx) => query.run(call, ctx),
     prepare: (build) => query.prepare(build),
     setContextQuery: (source) => query.setContextQuery(source),

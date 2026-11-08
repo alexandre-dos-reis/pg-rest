@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createQuery, type QueryInput, type QueryInstance } from "../packages/query/src/index";
+import { createQuery, type QueryInput, type QueryInstance, type SelectInput } from "../packages/query/src/index";
+import { exec } from "./support/pgrest";
 import { introspect, toDescriptor } from "../packages/core/src/schema";
 import { createTestDb, hasDb, type TestDb } from "./support/db";
 
@@ -31,7 +32,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     return sent[sent.length - 1]!;
   };
 
-  const paid = (a: { status: string; min: number }): QueryInput => ({
+  const paid = (a: { status: string; min: number }): SelectInput => ({
     table: "orders",
     select: ["id", "total", { clients: { select: ["name"], inner: true } }],
     where: { status: a.status, total: { $gte: a.min } },
@@ -47,7 +48,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
       { status: "it's \\ quoted", min: 1 },
       { status: "", min: -1 },
     ]) {
-      const by = { prepared: () => q.run(find(args), authed), direct: () => q.query(paid(args), authed) };
+      const by = { prepared: () => q.run(find(args), authed), direct: () => q.select(paid(args), authed) };
       const [a, b] = [await statementOf(by.prepared), await statementOf(by.direct)];
       expect(a).toEqual(b);
       expect(await by.prepared()).toEqual(await by.direct());
@@ -66,13 +67,13 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     const eq = q.prepare((a: { email: string | null }) => ({ table: "clients", where: { email: a.email as never } }));
     // `*` is a wildcard for like, which the stand-in did not know about
     expect((await q.run(like({ name: "a*" }), authed)).data).toEqual(
-      (await q.query({ table: "clients", where: { name: { $ilike: "a*" } }, order: ["id"] }, authed)).data,
+      (await q.select({ table: "clients", where: { name: { $ilike: "a*" } }, order: ["id"] }, authed)).data,
     );
     expect(((await q.run(like({ name: "*a" }), authed)).data as unknown[]).length).toBe(1); // only Ada ends in a
     // null is IS NULL, not `= 'null'`
     const nullEmail = await q.run(eq({ email: null }), authed);
     expect(nullEmail.error).toBeNull();
-    expect(nullEmail.data).toEqual((await q.query({ table: "clients", where: { email: null } }, authed)).data);
+    expect(nullEmail.data).toEqual((await q.select({ table: "clients", where: { email: null } }, authed)).data);
     // a missing argument is null too
     expect((await q.run(eq({} as never), authed)).error).toBeNull();
   });
@@ -138,7 +139,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     });
     const args = { a: "new", b: "paid", id: 3 };
     expect(await statementOf(() => q.run(find(args), authed))).toEqual(
-      await statementOf(() => q.query(direct(args), authed)),
+      await statementOf(() => q.select(direct(args), authed)),
     );
     expect((await q.run(find(args), authed)).data).toEqual([{ id: 2 }, { id: 3 }]);
     const inList = q.prepare((a: { x: number; y: number }) => ({
@@ -164,9 +165,11 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     ).toThrow("never ends up");
     // only selects
     expect(() =>
-      q.prepare((a: { s: string }) => ({ table: "orders", action: "delete" as const, where: { status: a.s } })),
+      q.prepare(
+        (a: { s: string }) => ({ table: "orders", action: "delete" as const, where: { status: a.s } }) as never,
+      ),
     ).toThrow("only a select");
-    expect(() => q.prepare((a: { s: string }) => ({ rpc: "orders_by_status", args: { s: a.s } }))).toThrow(
+    expect(() => q.prepare((a: { s: string }) => ({ rpc: "orders_by_status", args: { s: a.s } }) as never)).toThrow(
       "only a select",
     );
     // a table that is not there
@@ -183,7 +186,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
       return performance.now() - t;
     };
     const prepared = await time(() => q.run(find({ status: "paid", min: 100 }), authed));
-    const direct = await time(() => q.query(paid({ status: "paid", min: 100 }), authed));
+    const direct = await time(() => q.select(paid({ status: "paid", min: 100 }), authed));
     // not a benchmark -- the database dominates -- but it must not be slower than doing the work again
     expect(prepared).toBeLessThan(direct * 1.25);
   });
@@ -209,7 +212,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
 
   const lastOf = async (input: QueryInput) => {
     sent = [];
-    const r = await q.query(input, authed);
+    const r = await exec(q, input, authed);
     expect(r.error).toBeNull();
     return { ...sent[sent.length - 1]!, result: r };
   };

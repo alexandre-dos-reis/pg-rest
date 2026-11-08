@@ -11,12 +11,12 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
 
   /** The rows an update returns. */
   const update = async (table: string, set: object, id: number, select: string[]) => {
-    const r = await t.api.query({ table, action: "update", set, where: { id }, select } as never, authed());
+    const r = await t.api.update({ table, set, where: { id }, select } as never, authed());
     if (r.error) throw new Error(r.error.summary);
     return r.data;
   };
   const failure = async (set: object) => {
-    const r = await t.api.query({ table: "orders", action: "update", set, where: { id: 4 } } as never, authed());
+    const r = await t.api.update({ table: "orders", set, where: { id: 4 } } as never, authed());
     return r.error;
   };
 

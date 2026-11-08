@@ -1,12 +1,12 @@
 # Types generated from the database
 
 `generateModule()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands its types to
-`query()` so the queries check themselves. The module also carries the **schema descriptor** `createQuery` runs on, so
+the operations so the queries check themselves. The module also carries the **schema descriptor** `createQuery` runs on, so
 the types and what the library does come from one read of `pg_catalog`, with no second source of truth to drift — and
 a running server never reads the catalog at all.
 
 The checking is the compiler's and nothing else: the descriptor is trusted as generated, and no query is validated
-against it at runtime, which keeps `query()` fast.
+against it at runtime, which keeps the operations fast.
 
 - [Generating](#generating)
 - [What the file contains](#what-the-file-contains)
@@ -153,12 +153,11 @@ string from outside and cannot be typed.
 
 The table restricts the columns in the completion list too, not only when the compiler runs: inside `select` on `tags`,
 you are offered that table's columns and nothing from `todos`. Each property carries its documentation, and hovering
-`query` explains the whole shape.
+`select` explains the whole shape.
 
 That is not free, and it is easy to undo by accident: TypeScript narrows the contextual type of a nested property only
-when the discriminant picks **exactly one** member of the union, so the query type keeps one member per table — reads
-and writes merged, each action's payload required by `WriteRules` — and every member declares `table`, function calls
-included (`table?: never`). `tests/completions.test.ts` asks the compiler and pins the answer.
+when the discriminant picks **exactly one** member of the union, so each operation's type (`TypedSelect`, `TypedInsert`, `TypedUpdate`…) keeps one member per table, and
+`TypedRpc` one per function; an operation's payload (`rows`, `set`) is required by its own type, and absent from the others. `tests/completions.test.ts` asks the compiler and pins the answer.
 
 Hovering a property you have already written shows its *inferred* type and no documentation: the parameter is the
 inferred query, so there is no declared property for the editor to point at. That is the price of inferring `data` from

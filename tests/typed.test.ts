@@ -37,7 +37,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("the select decides the shape of data", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "orders",
         select: ["id", "total", { clients: ["name"] }],
         where: { status: "paid" },
@@ -51,7 +51,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("aliases rename the key, and a to-many embed is an array", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "clients",
         select: ["name", "who:email", { orders: { select: ["total"], order: ["total.desc"], limit: 1 } }],
         where: { id: 1 },
@@ -63,7 +63,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("nested embeds, many-to-many, and an inner join that cannot be null", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "clients",
         select: ["name", { orders: { select: ["id", { order_items: ["qty"] }, { products: ["name"] }] } }],
         where: { id: 1 },
@@ -82,7 +82,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
     // `!inner` drops the parent rows without a match, so the embed is no longer nullable
     const inner = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "orders",
         select: ["id", { clients: { select: ["name"], inner: true } }],
         where: { id: 1 },
@@ -94,7 +94,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("an embedded resource can also be filtered by its dotted path", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "clients",
         select: ["name", { orders: ["total"] }],
         where: { "orders.status": "paid" },
@@ -109,7 +109,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     ]);
     // the operator forms work there too
     const tuple = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "clients",
         select: ["name", { orders: ["total"] }],
         where: { "orders.total": { $gte: 200 } },
@@ -121,7 +121,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("an embed can be renamed, and the type follows the alias", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "orders",
         select: ["id", { clients: { as: "who", select: ["name"] } }],
         where: { id: 1 },
@@ -133,7 +133,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("a spread embed joins the parent row, and a to-many spread arrives in arrays", async () => {
     const one = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "orders",
         select: ["id", { clients: { select: ["name"], spread: true } }],
         where: { id: 1 },
@@ -143,7 +143,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(one.data).toEqual([{ id: 1, name: "Ada" }]);
 
     const many = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "clients",
         select: ["name", { orders: { select: ["t:total", "status"], spread: true } }],
         where: { id: 1 },
@@ -154,18 +154,18 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   });
 
   test("single gives one row, and no select gives the whole row", async () => {
-    const one = ok(await pgRest.query({ table: "clients", select: ["id"], where: { id: 1 }, single: true }));
+    const one = ok(await pgRest.select({ table: "clients", select: ["id"], where: { id: 1 }, single: true }));
     assertType<Equal<typeof one.data, { id: number }>>();
     expect(one.data).toEqual({ id: 1 });
 
-    const whole = ok(await pgRest.query({ table: "profiles", where: { client_id: 1 } }));
+    const whole = ok(await pgRest.select({ table: "profiles", where: { client_id: 1 } }));
     assertType<Equal<typeof whole.data, Array<{ client_id: number; bio: string | null }>>>();
     expect(whole.data).toEqual([{ client_id: 1, bio: "First programmer" }]);
   });
 
   test("enums are unions, both in the row and in a filter", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "moods",
         select: ["mood", "seen"],
         where: { mood: "happy" },
@@ -179,7 +179,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
 
   test("a composite column is its fields, and a value written or compared may leave them out", async () => {
     const { data } = ok(
-      await pgRest.query({
+      await pgRest.select({
         table: "venues",
         select: ["label", "owner", "branches"],
         where: { owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music", "large"] } },
@@ -200,14 +200,13 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data.owner?.home?.city).toBe("Paris");
 
     // a partial value is legal: the fields left out are compared against, or written as, NULL
-    const partial = ok(await pgRest.query({ table: "venues", select: ["id"], where: { owner: { name: "Ada" } } }));
+    const partial = ok(await pgRest.select({ table: "venues", select: ["id"], where: { owner: { name: "Ada" } } }));
     expect(partial.data).toEqual([]);
 
     const written = ok(
-      await pgRest.query(
+      await pgRest.insert(
         {
           table: "venues",
-          action: "insert",
           rows: { label: "Typed hall", owner: { name: "Barbara", home: { city: "Brussels" } } },
           select: ["owner"],
           single: true,
@@ -216,32 +215,28 @@ describe.skipIf(!hasDb)("a typed instance", () => {
       ),
     );
     expect(written.data.owner).toEqual({ name: "Barbara", home: { city: "Brussels", zip: null }, tags: null });
-    await pgRest.query({ table: "venues", action: "delete", where: { label: "Typed hall" } }, authed);
+    await pgRest.delete({ table: "venues", where: { label: "Typed hall" } }, authed);
 
     // a function taking one, and one returning one
-    const city = ok(await pgRest.query({ rpc: "city_of", args: { who: { home: { city: "Delft" } } } }));
+    const city = ok(await pgRest.rpc({ rpc: "city_of", args: { who: { home: { city: "Delft" } } } }));
     assertType<Equal<typeof city.data, string>>();
     expect(city.data).toBe("Delft");
-    const made = ok(await pgRest.query({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } }));
+    const made = ok(await pgRest.rpc({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } }));
     assertType<Equal<typeof made.data, Address>>();
     expect(made.data).toEqual({ city: "Lyon", zip: "69001" });
   });
 
   test("writes take the insert and update shapes", async () => {
     const inserted = ok(
-      await pgRest.query(
-        { table: "clients", action: "insert", rows: { name: "Typed" }, select: ["id", "name"] },
-        authed,
-      ),
+      await pgRest.insert({ table: "clients", rows: { name: "Typed" }, select: ["id", "name"] }, authed),
     );
     assertType<Equal<typeof inserted.data, Array<{ id: number; name: string }>>>();
     expect(inserted.data[0]!.name).toBe("Typed");
 
     const quiet = ok(
-      await pgRest.query(
+      await pgRest.update(
         {
           table: "clients",
-          action: "update",
           set: { name: "Quiet" },
           where: { id: inserted.data[0]!.id },
           returning: "minimal",
@@ -253,32 +248,29 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(quiet.data).toBeNull();
 
     const deleted = ok(
-      await pgRest.query(
-        { table: "clients", action: "delete", where: { id: inserted.data[0]!.id }, select: ["id"] },
-        authed,
-      ),
+      await pgRest.delete({ table: "clients", where: { id: inserted.data[0]!.id }, select: ["id"] }, authed),
     );
     assertType<Equal<typeof deleted.data, Array<{ id: number }>>>();
     expect(deleted.data).toHaveLength(1);
   });
 
   test("rpc: the arguments and the result come from the function", async () => {
-    const sum = ok(await pgRest.query({ rpc: "add", args: { a: 2, b: 3 } }));
+    const sum = ok(await pgRest.rpc({ rpc: "add", args: { a: 2, b: 3 } }));
     assertType<Equal<typeof sum.data, number>>();
     expect(sum.data).toBe(5);
 
-    const greeting = ok(await pgRest.query({ rpc: "greet" }));
+    const greeting = ok(await pgRest.rpc({ rpc: "greet" }));
     assertType<Equal<typeof greeting.data, string>>();
     expect(greeting.data).toBe("hello world");
 
-    const mood = ok(await pgRest.query({ rpc: "cheer_up", args: { m: "sad" } }));
+    const mood = ok(await pgRest.rpc({ rpc: "cheer_up", args: { m: "sad" } }));
     assertType<Equal<typeof mood.data, "sad" | "ok" | "happy">>();
     expect(mood.data).toBe("ok");
   });
 
   test("a set-returning function answers with rows, narrowed by its select", async () => {
     const { data, count } = ok(
-      await pgRest.query({
+      await pgRest.rpc({
         rpc: "orders_by_status",
         args: { s: "paid" },
         select: ["total"],
@@ -291,38 +283,38 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data).toEqual([{ total: 250 }, { total: 99.99 }]);
 
     // void is null, and a function returning a table row gives that row
-    const nothing = ok(await pgRest.query({ rpc: "nothing" }, authed));
+    const nothing = ok(await pgRest.rpc({ rpc: "nothing" }, authed));
     assertType<Equal<typeof nothing.data, null>>();
-    const first = ok(await pgRest.query({ rpc: "first_client", select: ["name"] }));
+    const first = ok(await pgRest.rpc({ rpc: "first_client", select: ["name"] }));
     assertType<Equal<typeof first.data, { name: string }>>();
     expect(first.data).toEqual({ name: "Ada" });
   });
 
   test("the count asked for decides the type of count", async () => {
     // no count asked for: nothing to read, and the type says so
-    const none = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"] }));
+    const none = ok(await pgRest.select({ table: "orders", select: ["id"], order: ["id"] }));
     assertType<Equal<typeof none.count, undefined>>();
     expect(none.count).toBeUndefined();
 
     // "exact" always answers with a number, paged or not
-    const exact = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], limit: 1, count: "exact" }));
+    const exact = ok(await pgRest.select({ table: "orders", select: ["id"], order: ["id"], limit: 1, count: "exact" }));
     assertType<Equal<typeof exact.count, number>>();
     expect(exact.count).toBe(4);
-    const unpaged = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "exact" }));
+    const unpaged = ok(await pgRest.select({ table: "orders", select: ["id"], order: ["id"], count: "exact" }));
     assertType<Equal<typeof unpaged.count, number>>();
     expect(unpaged.count).toBe(4);
 
     // "estimated" falls back to the page's own length, so it is a number too
-    const estimated = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "estimated" }));
+    const estimated = ok(await pgRest.select({ table: "orders", select: ["id"], order: ["id"], count: "estimated" }));
     assertType<Equal<typeof estimated.count, number>>();
     expect(typeof estimated.count).toBe("number");
 
     // "planned" reads an EXPLAIN, which may give nothing usable
-    const planned = ok(await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "planned" }));
+    const planned = ok(await pgRest.select({ table: "orders", select: ["id"], order: ["id"], count: "planned" }));
     assertType<Equal<typeof planned.count, number | undefined>>();
 
     // all four of those are the narrowed half: before `if (error)`, the failed half has no count
-    const either = await pgRest.query({ table: "orders", select: ["id"], order: ["id"], count: "exact" });
+    const either = await pgRest.select({ table: "orders", select: ["id"], order: ["id"], count: "exact" });
     assertType<Equal<typeof either.count, number | undefined>>();
     if (either.error) {
       assertType<Equal<typeof either.count, undefined>>();
@@ -333,13 +325,13 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   });
 
   test("another schema has to name itself", async () => {
-    const { data } = ok(await pgRest.query({ schema: "v2", table: "things", select: ["label"], order: ["id"] }));
+    const { data } = ok(await pgRest.select({ schema: "v2", table: "things", select: ["label"], order: ["id"] }));
     assertType<Equal<typeof data, Array<{ label: string }>>>();
     expect(data).toEqual([{ label: "one" }, { label: "two" }]);
   });
 
   test("the error is part of the result, and narrowing it keeps the inference", async () => {
-    const { data, error } = await pgRest.query({ table: "clients", select: ["name"], where: { id: 1 } });
+    const { data, error } = await pgRest.select({ table: "clients", select: ["name"], where: { id: 1 } });
     // before the check, `data` carries the failed half's null
     assertType<Equal<typeof data, Array<{ name: string }> | null>>();
     if (error) throw error;
@@ -347,7 +339,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data).toEqual([{ name: "Ada" }]);
 
     // 0 rows with `single` is `not_single_row`, and the failed half is what comes back
-    const failed = await pgRest.query({ table: "clients", select: ["name"], where: { id: 999 }, single: true });
+    const failed = await pgRest.select({ table: "clients", select: ["name"], where: { id: 999 }, single: true });
     if (!failed.error) throw new Error("expected a failure");
     assertType<Equal<typeof failed.data, null>>();
     assertType<Equal<typeof failed.count, undefined>>();
@@ -367,58 +359,56 @@ describe.skipIf(!hasDb)("a typed instance", () => {
    */
   test("the types do not know the role: that stays the database's job", async () => {
     // this compiles: `clients` is a writable table, and nothing in the type mentions `anon`
-    const denied = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } });
+    const denied = await pgRest.insert({ table: "clients", rows: { name: "x" } });
     expect(denied.error?.kind).toBe("unauthenticated");
     expect(denied.error?.sqlState).toBe("42501"); // insufficient_privilege, straight from Postgres
     // the same call as a role that was granted the write succeeds
-    const allowed = await pgRest.query({ table: "clients", action: "insert", rows: { name: "x" } }, authed);
+    const allowed = await pgRest.insert({ table: "clients", rows: { name: "x" } }, authed);
     expect(allowed.error).toBeNull();
     // and RLS keeps filtering rows the types know nothing about
     const as = (sub: string) => ({ role: "authenticated", claims: { sub } });
-    ok(await pgRest.query({ table: "notes", action: "insert", rows: { body: "alice only" } }, as("alice")));
-    expect(ok(await pgRest.query({ table: "notes", select: ["body"] }, as("alice"))).data).toEqual([
+    ok(await pgRest.insert({ table: "notes", rows: { body: "alice only" } }, as("alice")));
+    expect(ok(await pgRest.select({ table: "notes", select: ["body"] }, as("alice"))).data).toEqual([
       { body: "alice only" },
     ]);
-    expect(ok(await pgRest.query({ table: "notes", select: ["body"] }, as("bob"))).data).toEqual([]);
+    expect(ok(await pgRest.select({ table: "notes", select: ["body"] }, as("bob"))).data).toEqual([]);
   });
 
   test("what the types refuse", () => {
     // @ts-expect-error the table does not exist
-    void (() => pgRest.query({ table: "cients", select: ["id"] }));
+    void (() => pgRest.select({ table: "cients", select: ["id"] }));
     // @ts-expect-error the column does not exist
-    void (() => pgRest.query({ table: "clients", select: ["nope"] }));
+    void (() => pgRest.select({ table: "clients", select: ["nope"] }));
     // @ts-expect-error there is no such relationship (the error lists the ones there are)
-    void (() => pgRest.query({ table: "clients", select: [{ nope: ["id"] }] }));
+    void (() => pgRest.select({ table: "clients", select: [{ nope: ["id"] }] }));
     // @ts-expect-error clients and products have no junction table between them
-    void (() => pgRest.query({ table: "clients", select: [{ products: ["name"] }] }));
+    void (() => pgRest.select({ table: "clients", select: [{ products: ["name"] }] }));
     // @ts-expect-error the embedded column does not exist
-    void (() => pgRest.query({ table: "clients", select: [{ orders: ["nope"] }] }));
+    void (() => pgRest.select({ table: "clients", select: [{ orders: ["nope"] }] }));
     // a JSON path in a filter is accepted on a real column ...
-    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } }));
+    void (() => pgRest.select({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } }));
     // @ts-expect-error ... and only on a real column
-    void (() => pgRest.query({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } }));
+    void (() => pgRest.select({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } }));
     // @ts-expect-error a filter value has to match the column
-    void (() => pgRest.query({ table: "clients", where: { id: "one" } }));
+    void (() => pgRest.select({ table: "clients", where: { id: "one" } }));
     // @ts-expect-error an enum only takes its labels
-    void (() => pgRest.query({ table: "moods", where: { mood: "elated" } }));
+    void (() => pgRest.select({ table: "moods", where: { mood: "elated" } }));
     // @ts-expect-error an unknown key inside `where` would reach the database as a 42703
-    void (() => pgRest.query({ table: "clients", select: ["id"], where: { titel: "Ada" } }));
+    void (() => pgRest.select({ table: "clients", select: ["id"], where: { titel: "Ada" } }));
     // @ts-expect-error `as` and `spread` cannot both be written: `...alias:table(*)` does not parse
-    void (() => pgRest.query({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
+    void (() => pgRest.select({ table: "orders", select: [{ clients: { spread: true, as: "who" } }] }));
     // @ts-expect-error a JSON path is still refused in a select
-    void (() => pgRest.query({ table: "clients", select: ["tier:meta->>tier"] }));
+    void (() => pgRest.select({ table: "clients", select: ["tier:meta->>tier"] }));
     // an update may set a column to an expression or to DEFAULT ...
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         set: { total: { $add: [{ $col: "total" }, 1] }, status: { $default: true } },
       }));
     // ... and the expression has to give the column's type
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         set: {
           total: { $round: [{ $mul: [{ $col: "total" }, 1.1] }, 2] },
           status: { $lower: { $concat: [{ $col: "status" }, "!"] } },
@@ -426,105 +416,98 @@ describe.skipIf(!hasDb)("a typed instance", () => {
         },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "clients",
-        action: "update",
         set: { tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "vip"] } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         // @ts-expect-error a text operator does not give a number
         set: { total: { $lower: { $col: "status" } } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         // @ts-expect-error `$col` of a number column cannot be a text one
         set: { total: { $add: [{ $col: "status" }, 1] } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         // @ts-expect-error a number is not text
         set: { status: { $add: [1, 2] } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "clients",
-        action: "update",
         // @ts-expect-error an array takes `$arrayAppend`, not `$upper`
         set: { tags: { $upper: { $col: "name" } } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         // @ts-expect-error ... but only on the columns of the relation
         set: { nope: { $add: [1, 2] } },
       }));
     void (() =>
-      pgRest.query({
+      pgRest.update({
         table: "orders",
-        action: "update",
         // @ts-expect-error an unknown key in set is still refused
         set: { titel: "x" },
       }));
     // @ts-expect-error order only takes real columns
-    void (() => pgRest.query({ table: "clients", order: ["nope.desc"] }));
+    void (() => pgRest.select({ table: "clients", order: ["nope.desc"] }));
     // @ts-expect-error an aggregate view cannot be written to (insert: never)
-    void (() => pgRest.query({ table: "client_totals", action: "insert", rows: { client_id: 1 } }));
+    void (() => pgRest.insert({ table: "client_totals", rows: { client_id: 1 } }));
     // @ts-expect-error `name` has no default and is NOT NULL
-    void (() => pgRest.query({ table: "clients", action: "insert", rows: {} }));
+    void (() => pgRest.insert({ table: "clients", rows: {} }));
     // @ts-expect-error a table of another schema needs `schema`
-    void (() => pgRest.query({ table: "things", select: ["label"] }));
+    void (() => pgRest.select({ table: "things", select: ["label"] }));
     // @ts-expect-error the function does not exist
-    void (() => pgRest.query({ rpc: "nope" }));
+    void (() => pgRest.rpc({ rpc: "nope" }));
     // @ts-expect-error the argument is an integer
-    void (() => pgRest.query({ rpc: "add", args: { a: "two", b: 3 } }));
+    void (() => pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } }));
     // @ts-expect-error a scalar function has no columns to select
-    void (() => pgRest.query({ rpc: "hello", select: ["anything"] }));
+    void (() => pgRest.rpc({ rpc: "hello", select: ["anything"] }));
     // @ts-expect-error a field that is in no query is dropped in silence at runtime, so it is refused here
-    void (() => pgRest.query({ table: "clients", select: ["id"], limitt: 10 }));
+    void (() => pgRest.select({ table: "clients", select: ["id"], limitt: 10 }));
     // @ts-expect-error the payload is checked the same way: no such column
-    void (() => pgRest.query({ table: "clients", action: "insert", rows: { name: "x", nope: 1 } }));
+    void (() => pgRest.insert({ table: "clients", rows: { name: "x", nope: 1 } }));
     // @ts-expect-error ... in a bulk insert too
-    void (() => pgRest.query({ table: "clients", action: "insert", rows: [{ name: "x" }, { name: "y", nope: 1 }] }));
+    void (() => pgRest.insert({ table: "clients", rows: [{ name: "x" }, { name: "y", nope: 1 }] }));
     // @ts-expect-error ... and in an update
-    void (() => pgRest.query({ table: "clients", action: "update", set: { nope: 1 } }));
+    void (() => pgRest.update({ table: "clients", set: { nope: 1 } }));
     // reads and writes share one member per table, so what the shape no longer says is checked
     // by WriteRules: each action's payload is required, and refused on the others
     // @ts-expect-error an insert needs its rows
-    void (() => pgRest.query({ table: "clients", action: "insert" }));
+    void (() => pgRest.insert({ table: "clients" }));
     // @ts-expect-error an update needs its set
-    void (() => pgRest.query({ table: "clients", action: "update" }));
+    void (() => pgRest.update({ table: "clients" }));
     // @ts-expect-error a read has no rows
-    void (() => pgRest.query({ table: "clients", rows: { name: "x" } }));
+    void (() => pgRest.select({ table: "clients", rows: { name: "x" } }));
     // @ts-expect-error an insert has no set
-    void (() => pgRest.query({ table: "clients", action: "insert", rows: { name: "x" }, set: { name: "y" } }));
+    void (() => pgRest.insert({ table: "clients", rows: { name: "x" }, set: { name: "y" } }));
     // @ts-expect-error on_conflict belongs to an upsert
-    void (() => pgRest.query({ table: "clients", onConflict: ["id"] }));
+    void (() => pgRest.select({ table: "clients", onConflict: ["id"] }));
     // @ts-expect-error there is nothing to return from a read
-    void (() => pgRest.query({ table: "clients", select: ["id"], returning: "minimal" }));
+    void (() => pgRest.select({ table: "clients", select: ["id"], returning: "minimal" }));
     // @ts-expect-error a query names a table or a function, not both
-    void (() => pgRest.query({ table: "clients", rpc: "add" }));
+    void (() => pgRest.rpc({ table: "clients", rpc: "add" }));
     // @ts-expect-error a field of a composite type is checked like any other value
-    void (() => pgRest.query({ table: "venues", where: { owner: { name: 42 } } }));
+    void (() => pgRest.select({ table: "venues", where: { owner: { name: 42 } } }));
     // @ts-expect-error ... and a field the composite type does not have is refused
-    void (() => pgRest.query({ table: "venues", action: "insert", rows: { label: "x", owner: { nope: "y" } } }));
+    void (() => pgRest.insert({ table: "venues", rows: { label: "x", owner: { nope: "y" } } }));
     // @ts-expect-error an identity column cannot be written (the fixture's moods.id is one)
-    void (() => pgRest.query({ table: "moods", action: "insert", rows: { id: 42, mood: "ok" } }));
+    void (() => pgRest.insert({ table: "moods", rows: { id: 42, mood: "ok" } }));
     // the string forms that change or invent a column are not described by the types: a cast, a
     // JSON path and an aggregate all need an untyped instance
     // @ts-expect-error
-    void (() => pgRest.query({ table: "orders", select: ["total::text"] }));
+    void (() => pgRest.select({ table: "orders", select: ["total::text"] }));
     // @ts-expect-error
-    void (() => pgRest.query({ table: "clients", select: ["meta->>tier"] }));
+    void (() => pgRest.select({ table: "clients", select: ["meta->>tier"] }));
     // @ts-expect-error
-    void (() => pgRest.query({ table: "orders", select: ["total.sum()"] }));
+    void (() => pgRest.select({ table: "orders", select: ["total.sum()"] }));
     expect(true).toBe(true);
   });
 
@@ -532,7 +515,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     const { data } = ok(
       await pgRest.transaction(async (tx) => {
         // no `ok()` and no narrowing: `tx.query` rejects on failure, so its result is the success
-        const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Tx" }, single: true });
+        const client = await tx.insert({ table: "clients", rows: { name: "Tx" }, single: true });
         assertType<
           Equal<
             typeof client.data,
@@ -541,16 +524,15 @@ describe.skipIf(!hasDb)("a typed instance", () => {
         >();
         assertType<Equal<typeof client.error, null>>();
 
-        const order = await tx.query({
+        const order = await tx.insert({
           table: "orders",
-          action: "insert",
           rows: { client_id: client.data.id, total: 5 },
           select: ["id", { clients: ["name"] }],
         });
         assertType<Equal<typeof order.data, Array<{ id: number; clients: { name: string } | null }>>>();
 
         // the count a query asked for is a number, not a maybe
-        const counted = await tx.query({ table: "clients", select: ["id"], count: "exact" });
+        const counted = await tx.select({ table: "clients", select: ["id"], count: "exact" });
         assertType<Equal<typeof counted.count, number>>();
 
         return order.data[0]!.clients?.name;
@@ -569,9 +551,9 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(nested.data.data).toBe("inner");
 
     // @ts-expect-error a query inside a scope takes no context: the transaction already has one
-    void (() => pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["id"] }, authed)));
+    void (() => pgRest.transaction(async (tx) => tx.select({ table: "clients", select: ["id"] }, authed)));
     // @ts-expect-error and the typing of the input is the same one
-    void (() => pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["nope"] })));
+    void (() => pgRest.transaction(async (tx) => tx.select({ table: "clients", select: ["nope"] })));
     // @ts-expect-error a nested scope takes no options either
     void (() => pgRest.transaction(async (tx) => tx.transaction(async () => 1, { readOnly: true })));
   });

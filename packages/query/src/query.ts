@@ -316,6 +316,79 @@ export interface RpcQuery extends Common {
 
 export type QueryInput = SelectQuery | InsertQuery | UpdateQuery | DeleteQuery | RpcQuery;
 
+/** What `select` takes: a {@link SelectQuery} minus the `action`, which the method is. */
+export type SelectInput = Omit<SelectQuery, "action">;
+/** What `insert` takes: `rows` and the options of a plain insert (a conflict is `upsert`'s business). */
+export type InsertInput = Omit<InsertQuery, "action" | "onConflict">;
+/** What `upsert` takes: an insert that also names the columns a conflict is resolved on. */
+export type UpsertInput = Omit<InsertQuery, "action">;
+/** What `update` takes: `set`, and `where` for the rows to change. */
+export type UpdateInput = Omit<UpdateQuery, "action">;
+/** What `delete` takes: `where` for the rows to remove. */
+export type DeleteInput = Omit<DeleteQuery, "action">;
+/** What `rpc` takes: the function and its arguments. */
+export type RpcInput = RpcQuery;
+
+/**
+ * What an operation answers with. `"result"` is the promise that never rejects (`data` or `error`);
+ * `"ok"` is a query inside a transaction, which rejects on failure so that its result is the success.
+ */
+export type Settled<Mode extends "result" | "ok", T, C extends number | undefined> = Mode extends "ok"
+  ? QueryOk<T, C>
+  : QueryResult<T, C>;
+
+/**
+ * The six operations, one method each. `Ctx` is what follows the input: a context for an instance
+ * or a `setContextQuery` object, nothing in a transaction, whose context was decided on entry.
+ */
+export interface Operations<Mode extends "result" | "ok", Ctx extends unknown[]> {
+  /** Read rows from a table or view. */
+  select<T = unknown, C extends number | undefined = number | undefined>(
+    input: SelectInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Insert one row or several. */
+  insert<T = unknown, C extends number | undefined = number | undefined>(
+    input: InsertInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Insert, or update the row a conflict is found with (`onConflict`, the primary key by default). */
+  upsert<T = unknown, C extends number | undefined = number | undefined>(
+    input: UpsertInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Change the rows `where` matches. */
+  update<T = unknown, C extends number | undefined = number | undefined>(
+    input: UpdateInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Remove the rows `where` matches. */
+  delete<T = unknown, C extends number | undefined = number | undefined>(
+    input: DeleteInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Call a function, like `POST /rpc/name`. */
+  rpc<T = unknown, C extends number | undefined = number | undefined>(
+    input: RpcInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+}
+
+/**
+ * The six methods over one function that runs a {@link QueryInput}: each fixes the `action` the
+ * method stands for and hands the rest on, so there is one way in to the engine.
+ */
+export const operationsOf = <X extends unknown[], R>(
+  run: (input: QueryInput, ...rest: X) => R,
+): Record<"select" | "insert" | "upsert" | "update" | "delete" | "rpc", (input: never, ...rest: X) => R> => ({
+  select: (input, ...rest) => run({ ...(input as object), action: "select" } as QueryInput, ...rest),
+  insert: (input, ...rest) => run({ ...(input as object), action: "insert" } as QueryInput, ...rest),
+  upsert: (input, ...rest) => run({ ...(input as object), action: "upsert" } as QueryInput, ...rest),
+  update: (input, ...rest) => run({ ...(input as object), action: "update" } as QueryInput, ...rest),
+  delete: (input, ...rest) => run({ ...(input as object), action: "delete" } as QueryInput, ...rest),
+  rpc: (input, ...rest) => run(input as QueryInput, ...rest),
+});
+
 /**
  * What `count` a query gets back from the `count` it asked for. `"exact"` and `"estimated"` always
  * answer with a number -- when paging leaves nothing to count, that number is the page's own length.
@@ -1155,12 +1228,11 @@ export type ContextSource = RequestContext | (() => RequestContext | undefined |
  * `query` with its context already decided. Passing one anyway overrides the source for that call,
  * which is how an administrative call escapes the ambient context without leaving it.
  *
- * It is callable, and it carries `transaction`: a scope is the other place application code runs a
+ * It carries the six operations and `transaction`: a scope is the other place application code runs a
  * query, and it reads the same source -- once, on entry, because the transaction has one
  * `set_config`.
  */
-export interface ContextQuery {
-  <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+export interface ContextQuery extends Operations<"result", [ctx?: RequestContext]> {
   /** Run a call of a prepared query, with this context. */
   run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /**
@@ -1235,36 +1307,32 @@ export interface TransactionOptions extends RequestContext {
 }
 
 /**
- * One transaction, several queries. `query` is {@link runQuery} minus its context: the role and the
+ * One transaction, several queries. Its operations are the instance's minus the context: the role and the
  * claims were set with `set_config(..., true)` once at the head of the transaction, and re-issuing
  * them halfway through would change the role for every statement that follows instead of scoping
  * anything -- so a context here is a type error rather than an argument quietly ignored.
+ *
+ * What differs from the instance is the failure, and for one reason -- a query that failed is a
+ * transaction that will not commit, so there is nothing for the rest of the callback to do with it.
+ * An operation **rejects** instead of answering an `error`, which is what makes the result the
+ * success: `data` is not null, `count` is the number the query asked for, and nothing has to be
+ * narrowed. `transaction()` catches it, rolls the transaction back and hands it to you as its own
+ * `error`, so the promise that does not reject is still there -- it is the scope's now.
+ *
+ * ```ts ignore
+ * const { data, count } = await tx.select({ table: "todos", select: ["id"], count: "exact" });
+ * ```
+ *
+ * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint
+ * is the only place a transaction can carry on after one.
  */
-export interface Transaction {
-  /**
-   * Run a query in this transaction: same SQL and the same errors as `query()`. What differs
-   * is the failure, and for one reason -- a query that failed is a transaction that will not
-   * commit, so there is nothing for the rest of the callback to do with it.
-   *
-   * It **rejects** instead of answering an `error`, which is what makes the result the success:
-   * `data` is not null, `count` is the number the query asked for, and nothing has to be narrowed.
-   * `transaction()` catches it, rolls the transaction back and hands it to you as its own `error`,
-   * so the promise that does not reject is still there -- it is the scope's now, not the query's.
-   *
-   * ```ts ignore
-   * const { data, count } = await tx.query({ table: "todos", select: ["id"], count: "exact" });
-   * ```
-   *
-   * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint
-   * is the only place a transaction can carry on after one.
-   */
-  query<T = unknown, C extends number | undefined = number | undefined>(input: QueryInput): Promise<QueryOk<T, C>>;
-  /** Run a call of a prepared query in this transaction. Like `query`, it rejects on failure. */
+export interface Transaction extends Operations<"ok", []> {
+  /** Run a call of a prepared query in this transaction. Like the operations, it rejects on failure. */
   run<T, C extends number | undefined>(call: Prepared<T, C>): Promise<QueryOk<T, C>>;
   /**
    * A nested scope, on a `SAVEPOINT`: it rolls back on its own when it fails, leaving the
    * transaction around it usable. That is how one query is allowed to fail inside a scope -- and
-   * unlike `query`, this answers a {@link QueryResult} rather than rejecting, because here the
+   * unlike an operation, this answers a {@link QueryResult} rather than rejecting, because here the
    * failure is recoverable: the savepoint undid it, and the enclosing scope decides what next.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>): Promise<QueryResult<A, undefined>>;
@@ -1354,7 +1422,7 @@ const runScope = async <A>(
   };
 
   const tx: Transaction = {
-    query: exec,
+    ...(operationsOf((input: QueryInput) => exec(input)) as unknown as Operations<"ok", []>),
     run: exec,
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {

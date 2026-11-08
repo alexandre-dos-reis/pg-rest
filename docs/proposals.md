@@ -33,9 +33,9 @@ is a closed grammar — so what pg-rest does *not* have is not a backlog:
   inside the one statement) and never become objects that are mapped back
 
 Which gives the test an addition has to pass: **can anything new be said to the database?** A scope passes it, and that
-is checkable rather than arguable — `tx.query` is `runQuery` unchanged, and the only statements `transaction()` adds are
+is checkable rather than arguable — a scope's operation is `runQuery` unchanged, and the only statements `transaction()` adds are
 `BEGIN`/`COMMIT`, `SAVEPOINT`/`ROLLBACK TO` and `SET TRANSACTION`. Transaction control, not grammar. A scope is a
-**boundary around** requests, which is why `tx.query` is `query` minus its context and nothing else.
+**boundary around** requests, which is why a scope's operations are the instance's minus the context and nothing else.
 
 What the invariant was: every input to pg-rest is a PostgREST request. What it is now: every *query* is a PostgREST
 request, and anything else can only be a boundary. That is weaker, and it is written down here because it is the
@@ -60,7 +60,7 @@ belongs — in your driver, your SQL, your Drizzle — and not in this library's
 
 ## 1. Joining a transaction the application opened
 
-**Done, and not this.** A transaction across several `query()` calls was the first half of this proposal and is now
+**Done, and not this.** A transaction across several operations was the first half of this proposal and is now
 built: `transaction(fn, ctx)` lends a session to a callback, applies the context once for all of it, commits when the
 callback returns and rolls back when it throws or when any query in it failed — see
 [`query.md`](query.md#transactions). pg-rest owns the boundary there.
@@ -72,7 +72,7 @@ to pg-rest.
 await sql.begin(async (tx) => {
   //                                                  postgres.js owns BEGIN, COMMIT and ROLLBACK
   await myOwnStep(tx); //                             your SQL, Drizzle, an outbox row
-  const { error } = await pgRest.query(
+  const { error } = await pgRest.select(
     { table: "todos", insert: { title: "t" } },
     { role: "authenticated", session: postgresJsSession(tx) }, // and pg-rest writes inside it
   );
@@ -101,7 +101,7 @@ inside a single transaction.
 - `Prefer: tx=rollback` and plan output throw `RollbackWith` in order to force a `ROLLBACK`. On a borrowed transaction
   there is nothing to force. They have to be refused in this mode rather than quietly ignored.
 - `single` and `maxAffected` (`PGRST116`, `PGRST124`) throw in order to undo the write they just measured. Here the
-  write stays, and since `query()` *returns* failures, a caller who logs the `error` and commits anyway has committed
+  write stays, and since the operations *return* failures, a caller who logs the `error` and commits anyway has committed
   something the library reported as a failure. They become assertions whose remedy is the caller's: rethrow, so your
   own transaction rolls back. That is the footgun of the whole idea, and it is the one thing the scope *can* answer —
   it refuses to commit after a failed query, because it is the one holding the `COMMIT`.
@@ -111,7 +111,7 @@ The serialization retry goes with them: replaying a transaction we did not open 
 
 **And a question of shape.** `RequestContext`'s three fields all say *who* is asking (`role`, `claims`, `settings`); a
 session says *where* to run. Putting it there mixes identity with plumbing, and a third argument
-(`query(input, ctx, { session })`) would separate them at the cost of one more signature.
+(an operation taking `{ session }` as a third argument) would separate them at the cost of one more signature.
 
 What makes it worth any of this: it is the only way a pg-rest query and the application's own SQL land in **one**
 atomic unit — a job, a webhook, an outbox — which is what "one process, one pool" in [`design.md`](design.md) promises
@@ -191,7 +191,7 @@ HTTP.
 ```ts ignore
 const pgRest = await createQuery({ db: nodePostgresAdapter(pool), debug: true });
 
-const { data, error, debug } = await pgRest.query({ table: "todos", select: ["id", { tags: ["label"] }] });
+const { data, error, debug } = await pgRest.select({ table: "todos", select: ["id", { tags: ["label"] }] });
 debug?.sql; //      the statement, as the builders wrote it
 debug?.params; //   the values, in order -- nothing is interpolated, which is the point
 debug?.parsed; //   the ParsedQuery: the select tree, the filter tree, order, paging

@@ -5,7 +5,7 @@ Two packages for talking to PostgreSQL from your own process, built on one core:
 | package | what it is |
 | --- | --- |
 | **`@tsql/rest`** | **PostgREST v16, as a library.** `handle(Request) => Promise<Response>`, identical to PostgREST: nothing added, nothing taken away |
-| **`@tsql/query`** | **The same engine without HTTP.** `query()` from an object, typed from your schema, with `$` filters and computed updates PostgREST does not have |
+| **`@tsql/query`** | **The same engine without HTTP.** `select()`, `insert()`, `update()`... from an object, typed from your schema, with `$` filters and computed updates PostgREST does not have |
 
 They share the parser, the SQL, the schema cache, the errors and the adapters (each package bundles that core, so there is
 nothing else to install). Use either, or both.
@@ -86,11 +86,11 @@ const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
 ### In the same process, with types from your schema
 
 No HTTP, no loopback call: the same parser, the same SQL and the same `set_config` of the role and claims, so Row Level
-Security applies as it would over the wire. If you know `postgrest-js`, `query()` is the same shape of request —
+Security applies as it would over the wire. If you know `postgrest-js`, the operations take the same shape of request —
 without the server on the other end: no second process to run, and the pool stays yours.
 
 ```ts
-const { data, error } = await pgRest.query(
+const { data, error } = await pgRest.select(
   {
     table: "todos",
     select: ["id", "title", { tags: ["label"] }],
@@ -106,14 +106,14 @@ if (error) throw error; // or switch on `error.kind` and answer as your framewor
 
 A failure is part of the result: `error` is a `QueryError` carrying the `message`, `details`, `hint`, the `sqlState` of a database error, a `summary` written
 out for whoever reads it, and a `kind` — `"conflict"`, `"not_single_row"`, `"forbidden"`… — which is a string union, so
-a `switch` on it is checked by the compiler instead of against a table of error codes. `query()` never rejects.
+a `switch` on it is checked by the compiler instead of against a table of error codes. The operations never reject.
 
 Two writes that must land together get one transaction, with the context applied once for all of it:
 
 ```ts
 const { data, error } = await pgRest.transaction(async (tx) => {
-  const todo = await tx.query({ table: "todos", action: "insert", rows: { title: "ship it" }, single: true });
-  await tx.query({ table: "tags", action: "insert", rows: { todo_id: todo.data.id, label: "release" } });
+  const todo = await tx.insert({ table: "todos", rows: { title: "ship it" }, single: true });
+  await tx.insert({ table: "tags", rows: { todo_id: todo.data.id, label: "release" } });
   return todo.data.id;
 }, { role: "authenticated", claims: { sub: user.id } });
 ```
@@ -134,7 +134,7 @@ writeFileSync("src/db.generated.ts", generateModule(await introspect(nodePostgre
 ```ts
 const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
-const { data, count, error } = await pgRest.query({
+const { data, count, error } = await pgRest.select({
   table: "todos", //                             only a relation that exists
   select: ["id", "title", { tags: ["label"] }], //  only real columns and relationships
   where: { done: false }, //                     only its own columns, with the right value type
@@ -153,7 +153,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 
 |                                                |                                                                   |
 | ---------------------------------------------- | ----------------------------------------------------------------- |
-| [`docs/query.md`](docs/query.md)               | `query()`, with an example for every field                        |
+| [`docs/query.md`](docs/query.md)               | the operations, with an example for every field                   |
 | [`docs/types.md`](docs/types.md)               | generating types, the typed instance, and what it cannot describe |
 | [`docs/options.md`](docs/options.md)           | every `createRest` and `createQuery` option, and what they give back |
 | [`docs/adapters.md`](docs/adapters.md)         | `DbAdapter`, the four that ship, and writing your own             |
