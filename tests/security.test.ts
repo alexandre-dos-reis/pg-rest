@@ -108,7 +108,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
     expect(cut.json()).toEqual(plain.json());
     await intact();
     // a typed call refuses it instead
-    const r = await t.api.query({ table: "clients", where: { name: "a\u0000b" } });
+    const r = await t.api.select({ table: "clients", where: { name: "a\u0000b" } });
     expect(r.error?.kind).toBe("invalid_query");
   });
 
@@ -148,7 +148,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
   });
 
   // query() builds the query parameters itself, so a value must never be able to end up read as syntax.
-  test("query(): hostile values stay values, hostile column names are refused", async () => {
+  test("select(): hostile values stay values, hostile column names are refused", async () => {
     for (const p of PAYLOADS) {
       expect((await t.api.select({ table: "clients", columns: ["id"], where: { name: p } })).data).toEqual([]);
       expect(
@@ -165,7 +165,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await intact();
   });
 
-  test("query(): hostile values and names in the expressions of set stay values or are refused", async () => {
+  test("select(): hostile values and names in the expressions of set stay values or are refused", async () => {
     const run = (set: object) => t.api.update({ table: "clients", set, where: { id: 3 } } as never, authed());
     for (const p of PAYLOADS) {
       // a string is a literal, whatever it says
@@ -182,30 +182,30 @@ describe.skipIf(!hasDb)("hostile input", () => {
   });
 
   // `nulls` is a keyword in the statement: a value that did not come through the type (JSON) must not reach it
-  test("query(): order's nulls only takes first or last, and names are strings", async () => {
+  test("select(): order's nulls only takes first or last, and names are strings", async () => {
     for (const p of PAYLOADS) {
-      const r = await t.api.query({ table: "clients", order: [{ column: "id", nulls: p as never }] });
+      const r = await t.api.select({ table: "clients", order: [{ column: "id", nulls: p as never }] });
       expect(r.error?.kind).toBe("invalid_query");
     }
     const timed = performance.now();
-    const r = await t.api.query({
+    const r = await t.api.select({
       table: "clients",
       order: [{ column: "id", nulls: "first, (select pg_sleep(1)::text)" as never }],
     });
     expect(r.error?.kind).toBe("invalid_query");
     expect(performance.now() - timed).toBeLessThan(900);
     for (const nulls of ["first", "last"] as const) {
-      expect((await t.api.query({ table: "clients", order: [{ column: "id", nulls }] })).error).toBeNull();
+      expect((await t.api.select({ table: "clients", order: [{ column: "id", nulls }] })).error).toBeNull();
     }
     // an object with its own toString is not a name
     const name = { toString: () => "clients" };
-    expect((await t.api.query({ table: name as never })).error?.kind).toBe("invalid_query");
-    expect((await t.api.query({ rpc: name as never })).error?.kind).toBe("invalid_query");
-    expect((await t.api.query({ table: "clients", schema: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.select({ table: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.rpc({ rpc: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.select({ table: "clients", schema: name as never })).error?.kind).toBe("invalid_query");
     await intact();
   });
 
-  test("query(): a string with quotes round-trips unchanged", async () => {
+  test("select(): a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x, (y)`;
     const created = await t.api.insert<Array<{ name: string }>>(
       { table: "clients", rows: { name }, returning: ["name"] },
