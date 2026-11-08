@@ -304,7 +304,7 @@ const buildEmbed = (
   };
 };
 
-/** Build the SELECT (and matching COUNT) for a read request. */
+/** Build the SELECT (and matching COUNT) for a read. */
 export const buildRead = (opts: ReadOptions): ReadSql => {
   const ctx: Ctx = { cache: opts.cache, query: opts.query, aliases: new Aliases(), values: opts.values ?? inlined };
   const built = buildItems(ctx, opts.query.select, opts.rel, ROOT_ALIAS, []);

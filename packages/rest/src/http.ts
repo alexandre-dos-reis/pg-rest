@@ -1,11 +1,10 @@
 import {
-  type Call,
+  type SqlCall,
   type CoreConfig,
-  type Env,
-  type Outcome,
-  type Plan,
-  type QueryParams,
-  type RequestContext,
+  type SqlEnv,
+  type SqlPlan,
+  type SqlQueryParams,
+  type SqlRequestContext as RequestContext,
   assertRole,
   execute,
   identityOf,
@@ -15,8 +14,8 @@ import {
 } from "@tsql/core/core";
 import type { DbSession } from "@tsql/core/adapter";
 import { quoteIdent } from "@tsql/core/quote";
+import type { SqlOperation } from "@tsql/core/parse/sql-options";
 import { PgRestError } from "./errors";
-import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
 import { parseQuery } from "./parse/query-string";
@@ -29,9 +28,11 @@ import {
   parsePrefer,
   parseRange,
   parseTarget,
+  type Method,
   type Negotiated,
 } from "./request";
 import { toEngineFormat } from "./render";
+import { type Outcome, RESPONSE_SETTINGS, buildOutcome, withApplied } from "./outcome";
 
 /** What `preRequest` is told about the request it runs for. */
 export interface PreRequestInfo {
@@ -60,7 +61,7 @@ export interface HttpConfig extends CoreConfig {
   readonly serverUrl?: string | undefined;
 }
 
-export interface HttpEnv extends Env {
+export interface HttpEnv extends SqlEnv {
   readonly config: HttpConfig;
 }
 
@@ -68,7 +69,7 @@ export interface HttpEnv extends Env {
  * What this request adds to its transaction: the `request.*` settings SQL reads (PostgREST's HTTP
  * contract) and `preRequest`. The engine knows neither; it issues them in order.
  */
-const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Method, path: string): Call => {
+const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Method, path: string): SqlCall => {
   const settings: Array<readonly [string, string]> = [];
   if (env.config.requestSettings) {
     const headers: Record<string, string> = {};
@@ -92,6 +93,22 @@ const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Met
       else await pre(session, { role, claims, method, path, request });
     },
   };
+};
+
+/** What a method does to a table. */
+const operationOf = (method: Method): SqlOperation => {
+  switch (method) {
+    case "POST":
+      return "insert";
+    case "PATCH":
+      return "update";
+    case "PUT":
+      return "put";
+    case "DELETE":
+      return "delete";
+    default:
+      return "read";
+  }
 };
 
 const JSON_CT = "application/json; charset=utf-8";
@@ -126,7 +143,7 @@ const toResponse = (
   outcome: Outcome,
   method: Method,
   format: Negotiated,
-  plan: Plan,
+  plan: SqlPlan,
   wantsPlan: Extract<Negotiated, { kind: "plan" }> | undefined,
 ): Response => {
   if (wantsPlan) {
@@ -255,22 +272,38 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const body = await parseBody(request, method);
 
   const params = [...url.searchParams];
-  const qp: QueryParams = {
+  const qp: SqlQueryParams = {
     params,
     bare: bareKeys(url.search),
+    read: RESPONSE_SETTINGS,
     parse: (options) =>
       parseQuery(options?.skip ? params.filter(([k, v]) => !options.skip!(k, v)) : params, {
         allowFilterKey: options?.allowFilterKey,
       }),
   };
-  let plan: Plan;
+  let plan: SqlPlan;
   if (target.type === "table") {
-    plan = planTable(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
+    plan = planTable(env, operationOf(method), schema, target.name, qp, prefer, engineFormat, range, body);
   } else {
-    plan = planRpc(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") {
+      throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
+    }
+    plan = planRpc(env, method === "POST", schema, target.name, qp, prefer, engineFormat, range, body);
   }
 
   const call = callOf(env, ctx, request, method, url.pathname);
-  const outcome = await execute(env, ctx, call, schema, prefer, engineFormat, plan, honoredTx, wantsPlan);
+  let result;
+  try {
+    result = await execute(env, ctx, call, schema, prefer, engineFormat, plan, {
+      rollback: honoredTx && prefer.tx === "rollback",
+      explain: wantsPlan,
+    });
+  } catch (e) {
+    throw withApplied(e, prefer, honoredTx);
+  }
+  // an EXPLAIN is its text, whatever the format it describes
+  const outcome: Outcome = wantsPlan
+    ? { status: 200, headers: {}, text: result.body }
+    : buildOutcome(env, prefer, plan, result, honoredTx);
   return toResponse(outcome, method, format, plan, wantsPlan);
 };

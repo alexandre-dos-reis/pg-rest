@@ -42,8 +42,6 @@ export type Reason =
   | "ambiguous_function"
   /** No table or view by that name. */
   | "table_not_found"
-  /** A function cannot be called that way. */
-  | "rpc_method_not_allowed"
   /** An upsert by `PUT` needs the primary key and nothing else as filters. */
   | "put_requires_pk"
   /** A schema that is not one of the exposed ones. */
@@ -51,11 +49,7 @@ export type Reason =
   /** `single` matched other than exactly one row. */
   | "not_single_row"
   /** The offset or limit leaves nothing to answer with. */
-  | "range_not_satisfiable"
-  /** The function's `response.headers` setting is not what it should be. */
-  | "invalid_response_headers"
-  /** The function's `response.status` setting is not a status. */
-  | "invalid_response_status";
+  | "range_not_satisfiable";
 
 /** What a reason may carry besides its text. */
 export interface EngineErrorData {

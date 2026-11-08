@@ -77,7 +77,7 @@ const functionHint = (
 
 /**
  * Pick the function to call from the argument names the client supplied.
- * `rawBody` is true when a request body that is not a JSON object was given;
+ * `rawBody` is true when a body that is not a JSON object was given;
  * `post` tells whether the function was invoked with POST (which also allows a single unnamed parameter).
  */
 export const resolveFunction = (

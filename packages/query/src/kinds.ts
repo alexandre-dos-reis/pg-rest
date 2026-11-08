@@ -65,13 +65,10 @@ const REASON_KINDS: Readonly<Record<Reason, ErrorKind>> = {
   function_not_found: "undefined_object",
   ambiguous_function: "invalid_query",
   table_not_found: "undefined_object",
-  rpc_method_not_allowed: "invalid_query",
   put_requires_pk: "invalid_query",
   schema_not_exposed: "invalid_query",
   not_single_row: "not_single_row",
   range_not_satisfiable: "invalid_query",
-  invalid_response_headers: "internal",
-  invalid_response_status: "internal",
 };
 
 /** The SQLSTATEs a caller is likely to act on. */

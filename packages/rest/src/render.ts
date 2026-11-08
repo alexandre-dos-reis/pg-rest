@@ -1,4 +1,4 @@
-import type { OutputFormat } from "@tsql/core/parse/request";
+import type { SqlOutputFormat } from "@tsql/core/parse/sql-options";
 import type { MediaChoice, Negotiated } from "./request";
 
 // The formats `Accept` can ask for beyond JSON, as SQL. The engine knows none of them: it is given
@@ -27,7 +27,7 @@ const handlerBody = (h: MediaChoice): string => {
 };
 
 /** What the engine is told about a negotiated format. */
-export const toEngineFormat = (format: Negotiated): OutputFormat => {
+export const toEngineFormat = (format: Negotiated): SqlOutputFormat => {
   switch (format.kind) {
     case "json":
     case "object":

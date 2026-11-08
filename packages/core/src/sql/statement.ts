@@ -1,5 +1,6 @@
+import { literal } from "../quote";
 /**
- * How the rows produced by the request are turned into a response body.
+ * How the rows produced by the call are turned into a body.
  * - `array`:       `[{...}, {...}]`
  * - `object`:      first row as an object (singular responses, composite RPC)
  * - `scalar-array`: `[1, 2, 3]` (SETOF scalar)
@@ -22,9 +23,11 @@ export interface StatementOptions {
    * handler: the caller knows which). Ignored when the shape is `none`.
    */
   readonly render?: string | undefined;
+  /** Settings to read once the statement is done: they come back as `setting_<n>`, in this order. */
+  readonly read?: ReadonlyArray<string> | undefined;
   /**
    * `source` flags inserted rows in a `pgrst_inserted` column (merge-duplicates upsert). These are the
-   * source's other columns; the status becomes 200 when rows were returned but none was inserted.
+   * source's other columns; `none_inserted` says that rows were returned but none was inserted.
    */
   readonly upsertColumns?: ReadonlyArray<string> | undefined;
 }
@@ -47,11 +50,11 @@ const bodyExpr = (shape: BodyShape, strip: boolean, render?: string): string => 
 };
 
 /**
- * The one statement that runs a request. Result columns:
- * `page_total`, `body`, `total_result_set`, `response_headers`, `response_status`.
+ * The one statement that runs a call. Result columns:
+ * `page_total`, `body`, `total_result_set`, one `setting_<n>` for each name of `read`, and `none_inserted`.
  *
- * `response.headers` / `response.status` are read at the end so that functions
- * (RPC, triggers) can influence the response by calling `set_config`.
+ * The settings of `read` are read at the end so that functions (RPC, triggers) can answer by calling
+ * `set_config`.
  */
 export const buildStatement = (o: StatementOptions): string => {
   const up = o.upsertColumns;
@@ -68,11 +71,10 @@ export const buildStatement = (o: StatementOptions): string => {
     `count(*)::text AS page_total, ` +
     `${bodyExpr(o.shape, Boolean(o.stripNulls), o.render)} AS body, ` +
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
-    `nullif(current_setting('response.headers', true), '') AS response_headers, ` +
+    (o.read ?? []).map((name, i) => `nullif(current_setting(${literal(name)}, true), '') AS setting_${i}, `).join("") +
     (up
-      ? `coalesce(nullif(current_setting('response.status', true), ''), CASE WHEN EXISTS (SELECT 1 FROM pgrst_ins) AND NOT EXISTS (SELECT 1 FROM pgrst_ins WHERE pgrst_inserted) THEN '200' END)`
-      : `nullif(current_setting('response.status', true), '')`) +
-    ` AS response_status ` +
+      ? `(EXISTS (SELECT 1 FROM pgrst_ins) AND NOT EXISTS (SELECT 1 FROM pgrst_ins WHERE pgrst_inserted)) AS none_inserted `
+      : `false AS none_inserted `) +
     `FROM pgrst_body AS _t`
   );
 };
