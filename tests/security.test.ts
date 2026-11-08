@@ -177,6 +177,30 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await intact();
   });
 
+  // `nulls` is a keyword in the statement: a value that did not come through the type (JSON) must not reach it
+  test("query(): order's nulls only takes first or last, and names are strings", async () => {
+    for (const p of PAYLOADS) {
+      const r = await t.api.query({ table: "clients", order: [{ column: "id", nulls: p as never }] });
+      expect(r.error?.kind).toBe("invalid_query");
+    }
+    const timed = performance.now();
+    const r = await t.api.query({
+      table: "clients",
+      order: [{ column: "id", nulls: "first, (select pg_sleep(1)::text)" as never }],
+    });
+    expect(r.error?.kind).toBe("invalid_query");
+    expect(performance.now() - timed).toBeLessThan(900);
+    for (const nulls of ["first", "last"] as const) {
+      expect((await t.api.query({ table: "clients", order: [{ column: "id", nulls }] })).error).toBeNull();
+    }
+    // an object with its own toString is not a name
+    const name = { toString: () => "clients" };
+    expect((await t.api.query({ table: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.query({ rpc: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.query({ table: "clients", schema: name as never })).error?.kind).toBe("invalid_query");
+    await intact();
+  });
+
   test("query(): a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x, (y)`;
     const created = await t.api.insert<Array<{ name: string }>>(

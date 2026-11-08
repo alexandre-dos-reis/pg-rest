@@ -18,7 +18,7 @@ import type { SqlOperation } from "@tsql/core/parse/sql-options";
 import { PgRestError } from "./errors";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
-import { parseQuery } from "./parse/query-string";
+import { keysChecked, parseQuery } from "./parse/query-string";
 import { buildOpenApi } from "./openapi";
 import {
   parseAccept,
@@ -271,7 +271,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
   const body = await parseBody(request, method);
 
-  const params = [...url.searchParams];
+  const params = target.type === "rpc" ? keysChecked([...url.searchParams]) : [...url.searchParams];
   const qp: SqlQueryParams = {
     params,
     bare: bareKeys(url.search),

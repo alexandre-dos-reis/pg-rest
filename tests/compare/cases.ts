@@ -652,6 +652,37 @@ const allCases: Case[] = [
   { name: "PATCH unknown table", method: "PATCH", path: "/nope", body: {}, headers: J },
   { name: "TRACE not supported", method: "TRACE", path: "/clients" },
   get("/", { name: "OpenAPI root status", ignoreBody: true }),
+
+  // ── hostile names: the key of a filter, columns and on_conflict are read with PostgREST's grammar ──
+  get("/clients?%27%20OR%20%271%27%3D%271=eq.1", { name: "filter key that is not a name" }),
+  get("/clients?id%3B%20DROP%20TABLE%20api.clients=eq.1", {
+    name: "filter key followed by SQL (ignored after the name)",
+  }),
+  get("/clients?id%2C(select%20pg_sleep(3))=eq.1", { name: "filter key followed by a subquery" }),
+  get("/clients?meta-%3E%3E%22=eq.1", { name: "filter key with an open quote in a JSON path" }),
+  get("/clients?select=id,orders(id)&orders.%27%20OR%20%271%27%3D%271=eq.1", {
+    name: "embedded filter key that is not a name",
+  }),
+  get("/rpc/orders_by_status?s=x&%27%20OR%20%271%27%3D%271=eq.1", { name: "rpc filter key that is not a name" }),
+  get("/rpc/add?%27%20OR%20%271%27%3D%271=1", { name: "rpc argument that is not a name" }),
+  get("/rpc/add?a%3B%20DROP%20TABLE%20api.clients=1&b=1", { name: "rpc argument followed by SQL" }),
+  post(
+    "/clients?columns=%27%20OR%20%271%27%3D%271",
+    { name: "x" },
+    { as: "alice", headers: { Prefer: "tx=rollback" } },
+  ),
+  post(
+    "/clients?columns=name%3B%20DROP%20TABLE%20api.clients",
+    { name: "x" },
+    { as: "alice", headers: { Prefer: "tx=rollback" } },
+  ),
+  post(
+    "/clients?on_conflict=%27%20OR%20%271%27%3D%271",
+    { id: 1, name: "x" },
+    { as: "alice", headers: { Prefer: "resolution=merge-duplicates,tx=rollback" } },
+  ),
+  get("/clients?order=id.desc.nullsfoo", { name: "order nulls that is not first or last" }),
+  get("/clients?order=id.desc.nullsfirst%3B%20SELECT%20pg_sleep(3)", { name: "order nulls followed by SQL" }),
 ];
 
 /**

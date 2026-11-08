@@ -251,6 +251,23 @@ export const checkFilter = (input: string): EngineError | undefined => {
   return r.ok ? undefined : fail("filter", input, r.failure);
 };
 
+/**
+ * The key of a filter (`orders.meta->>a`): fields joined by dots, then a JSON path. Like PostgREST,
+ * whatever follows what parses is ignored: returns where the parse stopped, or the error.
+ */
+const treePath = before(sepBy1(fieldName, delimiter), option([] as unknown[], jsonPath));
+export const checkTreePath = (input: string): number | EngineError => {
+  const r = run(treePath, input);
+  return r.ok ? r.end : fail("tree path", input, r.failure);
+};
+
+/** `columns=` and `on_conflict=`: field names separated by commas; returns where the parse stopped, or the error. */
+const fieldList = sepBy1(lexeme(fieldName), char(","));
+export const checkFieldList = (what: "columns" | "on_conflict", input: string): number | EngineError => {
+  const r = run(fieldList, input);
+  return r.ok ? r.end : fail(`${what} parameter`, input, r.failure);
+};
+
 /** An `order=` value; `undefined` when it parses. */
 export const checkOrder = (input: string): EngineError | undefined => {
   const r = run(order, input);

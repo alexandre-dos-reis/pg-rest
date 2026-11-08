@@ -746,6 +746,11 @@ const conditionsOf = (w: Where): FilterNode[] =>
 
 const orderOf = (o: Order): OrderTerm[] => {
   if (typeof o === "string") return parseOrderTerms(o);
+  // `nulls` ends up in the statement as a keyword: the type says "first" | "last", but a value that
+  // came from JSON is not checked by the type
+  if (o.nulls !== undefined && o.nulls !== "first" && o.nulls !== "last") {
+    throw bad(`Invalid nulls placement ${JSON.stringify(o.nulls)}`, 'Use "first" or "last".');
+  }
   return [{ field: parseField(o.column), dir: o.desc ? "desc" : "asc", ...(o.nulls ? { nulls: o.nulls } : {}) }];
 };
 
@@ -866,8 +871,23 @@ const columnsOf = (input: QueryInput): Select | undefined => {
   return asked === undefined || typeof asked === "string" ? undefined : asked;
 };
 
+/**
+ * The names a query carries are identifiers: they are quoted later, but a value that is not a string
+ * must not be turned into one by `String()` (an object with its own `toString`).
+ */
+const assertNames = (input: QueryInput): void => {
+  for (const [what, v] of [
+    ["table", (input as SelectQuery).table],
+    ["rpc", (input as RpcQuery).rpc],
+    ["schema", input.schema],
+  ] as const) {
+    if (v !== undefined && typeof v !== "string") throw bad(`"${what}" must be a string`);
+  }
+};
+
 /** `input` as the engine's parsed form: what a query string with the same meaning parses to. */
 export const toParsed = (input: QueryInput): ParsedQuery => {
+  assertNames(input);
   const embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }> = [];
   const listed = columnsOf(input);
   const select: SelectItem[] = listed?.length ? selectOf(listed, [], embeds) : [{ kind: "star" }];
@@ -953,6 +973,7 @@ const preferencesOf = (input: QueryInput): SqlPreferences => ({
 const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
   if (isPrepared(given)) return runPrepared(env, given, ctx);
   const input = given;
+  assertNames(input);
   assertRole(env, ctx);
   if (isRpc(input) && "table" in input) {
     throw bad("A query names either a table or an rpc, not both");
