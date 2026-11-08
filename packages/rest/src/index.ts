@@ -1,4 +1,4 @@
-import type { RequestContext } from "@tsql/core/core";
+import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 import { type EngineOptions, createEngine } from "@tsql/core/engine";
 import { ApiError, toApiError } from "./errors";
 import type { SchemaCache } from "@tsql/core/schema";
@@ -6,7 +6,7 @@ import type { HttpConfig, PreRequest } from "./http";
 import { errorResponse, handleSafely } from "./serve";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
-export type { RequestContext } from "@tsql/core/core";
+export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 export type { PreRequest, PreRequestInfo } from "./http";
 export type { EngineOptions } from "@tsql/core/engine";
 export { DbQueryError } from "@tsql/core/errors";

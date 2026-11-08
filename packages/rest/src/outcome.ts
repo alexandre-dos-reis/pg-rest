@@ -1,5 +1,5 @@
 import { EngineError } from "@tsql/core/errors";
-import { type Env, type Plan, type Result, shownBody } from "@tsql/core/core";
+import { type SqlEnv, type SqlPlan, type SqlResult, shownBody } from "@tsql/core/core";
 import { PgRestError } from "./errors";
 import type { Prefer } from "./request";
 
@@ -69,7 +69,13 @@ export const appliedHeader = (p: Prefer, honoredTx: boolean): string | undefined
 };
 
 /** What the engine ran, as HTTP says it: status, `Content-Range`, `Location`, `Preference-Applied`, the body. */
-export const buildOutcome = (_env: Env, prefer: Prefer, plan: Plan, r: Result, honoredTx: boolean): Outcome => {
+export const buildOutcome = (
+  _env: SqlEnv,
+  prefer: Prefer,
+  plan: SqlPlan,
+  r: SqlResult,
+  honoredTx: boolean,
+): Outcome => {
   const headers: Record<string, string> = {};
   const applied = appliedHeader(prefer, honoredTx);
   if (applied) headers["Preference-Applied"] = applied;

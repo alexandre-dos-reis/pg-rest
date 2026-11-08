@@ -2,7 +2,7 @@ import type { DbAdapter, DbSession } from "./adapter";
 import { DbQueryError, EngineError } from "./errors";
 import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
-import { type Operation, type OutputFormat, type Preferences } from "./parse/request";
+import { type SqlOperation, type SqlOutputFormat, type SqlPreferences } from "./parse/sql-options";
 import { literal, quoteIdent } from "./quote";
 import { getRelation, type Relation, type SchemaCache } from "./schema";
 import { buildRead } from "./sql/read";
@@ -11,9 +11,9 @@ import { buildStatement, type BodyShape } from "./sql/statement";
 import { type Values, bindFrom, inlined } from "./sql/values";
 import { buildDelete, buildInsert, upsertColumns, buildUpdate, type JsonObject, type Returning } from "./sql/write";
 
-/** Who is making the request, as far as the database is concerned. */
-export interface RequestContext {
-  /** Database role to run the request as. Defaults to the anonymous role. */
+/** Who is making the call, as far as the database is concerned. */
+export interface SqlRequestContext {
+  /** Database role to run the call as. Defaults to the anonymous role. */
   readonly role?: string | undefined;
   /**
    * Claims exposed to SQL as `current_setting('request.jwt.claims')`.
@@ -27,13 +27,13 @@ export interface RequestContext {
 
 export interface CoreConfig {
   readonly schemas: ReadonlyArray<string>;
-  /** Role for requests without one; `undefined` refuses anonymous access. */
+  /** Role for calls without one; `undefined` refuses anonymous access. */
   readonly anonymousRole: string | undefined;
   readonly maxRows?: number | undefined;
   readonly extraSearchPath: ReadonlyArray<string>;
 }
 
-export interface Env {
+export interface SqlEnv {
   readonly db: DbAdapter;
   readonly config: CoreConfig;
   readonly cache: SchemaCache;
@@ -50,7 +50,7 @@ export interface Env {
  * settings and `preRequest` are built by the packages (`@tsql/rest` from the HTTP request, `@tsql/query`
  * from its own options); the engine only issues them, in the transaction, in this order.
  */
-export interface Call {
+export interface SqlCall {
   /** Transaction-local settings (`set_config(name, value, true)`), issued with the ones for the statement. */
   readonly settings?: ReadonlyArray<readonly [string, string]> | undefined;
   /** Run in the call's transaction after the settings and before the statement. A throw ends the call. */
@@ -58,13 +58,13 @@ export interface Call {
 }
 
 /** Who the database will see for a call: the role (or the anonymous one) and the claims. */
-export const identityOf = (env: Env, ctx: RequestContext): { role: string; claims: Record<string, unknown> } => {
+export const identityOf = (env: SqlEnv, ctx: SqlRequestContext): { role: string; claims: Record<string, unknown> } => {
   const role = ctx.role ?? env.config.anonymousRole!;
   return { role, claims: { role, ...(ctx.claims ?? {}) } };
 };
 
-/** What a request's query parameters turn into, once they are parsed: see {@link QueryParams.parse}. */
-export interface ParseOptions {
+/** What a call's parameters turn into, once they are read: see {@link SqlQueryParams.parse}. */
+export interface SqlParseOptions {
   /** Leave out the parameters this says yes to (a bare `?a` a function reads as an argument). */
   readonly skip?: ((key: string, value: string) => boolean) | undefined;
   /** Parameters this says no to are not filters (on a GET, the ones that name function arguments). */
@@ -72,14 +72,14 @@ export interface ParseOptions {
 }
 
 /**
- * The parameters of a request, plus the way to read them. The engine knows no syntax: `parse` gives
+ * The parameters of a call, plus the way to read them. The engine knows no syntax: `parse` gives
  * it the {@link ParsedQuery} -- `@tsql/rest` parses the query string, `@tsql/query` builds it from its
  * object. `params` and `bare` are only what a GET on a function reads its arguments from.
  */
-export interface QueryParams {
+export interface SqlQueryParams {
   readonly params: ReadonlyArray<readonly [string, string]>;
   readonly bare: ReadonlySet<string>;
-  readonly parse: (options?: ParseOptions) => ParsedQuery;
+  readonly parse: (options?: SqlParseOptions) => ParsedQuery;
   /**
    * Pass the values of the filters to the driver as parameters instead of writing them into the SQL.
    * The text of the statement then depends on the shape of the query only, which is what lets the
@@ -100,10 +100,10 @@ export interface QueryParams {
 }
 
 /** Where the values of the filters go: into the SQL, or into parameters numbered after `taken` others. */
-const valuesFor = (qp: QueryParams, taken: number): Values => (qp.bind ? bindFrom(taken) : inlined);
+const valuesFor = (qp: SqlQueryParams, taken: number): Values => (qp.bind ? bindFrom(taken) : inlined);
 
 /** Statement options that depend on the output format. */
-const formatOptions = (format: OutputFormat, qp: QueryParams) => ({
+const formatOptions = (format: SqlOutputFormat, qp: SqlQueryParams) => ({
   render: format.kind === "rendered" ? format.sql : undefined,
   read: qp.read,
 });
@@ -113,7 +113,7 @@ const formatOptions = (format: OutputFormat, qp: QueryParams) => ({
 // ---------------------------------------------------------------------------
 
 /** The schema a call runs against: the one it asks for, if exposed, else the default one. */
-export const useSchema = (env: Env, wanted: string | null | undefined): string => {
+export const useSchema = (env: SqlEnv, wanted: string | null | undefined): string => {
   const name = wanted?.trim();
   if (!name) return env.config.schemas[0]!;
   if (!env.config.schemas.includes(name)) {
@@ -128,7 +128,7 @@ export const useSchema = (env: Env, wanted: string | null | undefined): string =
 };
 
 /** Refuse a call that has no role when anonymous access is disabled. */
-export const assertRole = (env: Env, ctx: RequestContext): void => {
+export const assertRole = (env: SqlEnv, ctx: SqlRequestContext): void => {
   if (!ctx.role && env.config.anonymousRole === undefined) {
     throw new EngineError("anonymous_disabled", "Anonymous access is disabled", null, null);
   }
@@ -141,7 +141,7 @@ const whoEntries = (role: string, claims: Record<string, unknown>): Array<[strin
 ];
 
 /** The caller's own settings, which go last so one of them wins over a setting of ours it names. */
-const settingsEntries = (ctx: RequestContext): Array<[string, string]> => {
+const settingsEntries = (ctx: SqlRequestContext): Array<[string, string]> => {
   const out: Array<[string, string]> = [];
   for (const [k, v] of Object.entries(ctx.settings ?? {})) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9_.]+$/.test(k)) {
@@ -159,19 +159,19 @@ const settingsEntries = (ctx: RequestContext): Array<[string, string]> => {
 
 /**
  * The `set_config(..., true)` one call needs. `"statement"` is the half that says where the
- * statement runs -- the schema, the request SQL reads, the time zone it asked for -- and is all a
+ * statement runs -- the schema, the settings SQL reads, the time zone it asked for -- and is all a
  * query inside a transaction scope issues: the identity was set once, on entry, because
  * `set_config` is transaction-local and re-issuing the role halfway through scopes nothing. This
  * half stays per statement, which is what lets two queries of one scope name two schemas.
  */
 const ctxEntries = (
-  env: Env,
-  ctx: RequestContext,
+  env: SqlEnv,
+  ctx: SqlRequestContext,
   role: string,
   claims: Record<string, unknown>,
-  call: Call,
+  call: SqlCall,
   schema: string,
-  prefer: Preferences,
+  prefer: SqlPreferences,
   part: "statement" | "both",
 ): Array<[string, string]> => {
   const where: Array<[string, string]> = call.settings ? call.settings.map(([k, v]) => [k, v]) : [];
@@ -191,7 +191,7 @@ const setConfigSql = (entries: ReadonlyArray<readonly [string, string]>): { sql:
  * What a transaction scope issues on entry: who is asking, for the whole of it. The schema and the
  * `request.*` settings are not here -- every query inside the scope sets its own.
  */
-export const transactionSetup = (env: Env, ctx: RequestContext): { sql: string; params: string[] } => {
+export const transactionSetup = (env: SqlEnv, ctx: SqlRequestContext): { sql: string; params: string[] } => {
   const role = ctx.role ?? env.config.anonymousRole!;
   const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
   return setConfigSql([...whoEntries(role, claims), ...settingsEntries(ctx)]);
@@ -207,7 +207,7 @@ class RollbackWith<T> extends Error {
 // plans
 // ---------------------------------------------------------------------------
 
-export interface Plan {
+export interface SqlPlan {
   readonly statement: string;
   readonly params: string[];
   readonly readOnly: boolean;
@@ -236,7 +236,7 @@ const asRows = (body: unknown): JsonObject[] => {
   return isObj(body) ? [body] : [];
 };
 
-const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; limit?: number } | undefined) => {
+const effectivePaging = (env: SqlEnv, query: ParsedQuery, range: { offset: number; limit?: number } | undefined) => {
   if (query.root.limit !== undefined && query.root.limit < 0) {
     throw new EngineError(
       "range_not_satisfiable",
@@ -257,16 +257,16 @@ const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; 
 // ---------------------------------------------------------------------------
 
 export const planTable = (
-  env: Env,
-  operation: Operation,
+  env: SqlEnv,
+  operation: SqlOperation,
   schema: string,
   name: string,
-  qp: QueryParams,
-  prefer: Preferences,
-  format: OutputFormat,
+  qp: SqlQueryParams,
+  prefer: SqlPreferences,
+  format: SqlOutputFormat,
   range: { offset: number; limit?: number } | undefined,
   body: { kind: string; value: unknown } | undefined,
-): Plan => {
+): SqlPlan => {
   const rel = getRelation(env.cache, schema, name);
   const query = qp.parse();
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
@@ -315,7 +315,7 @@ export const planTable = (
     r === "representation" ? (singular ? "object" : "array") : r === "pk" ? "array" : "none";
   const rowsFor = (r: Returning): { rows: string; shape: BodyShape } => {
     if (r === "representation") {
-      // The request's filters selected the rows to write; they must not be applied
+      // The call's filters selected the rows to write; they must not be applied
       // again to the rows that were written (an UPDATE may no longer match them).
       const resultQuery: ParsedQuery = { ...query, root: { ...query.root, filters: [], presence: [] } };
       const read = buildRead({ cache: env.cache, rel, from: "pgrst_source", query: resultQuery });
@@ -382,7 +382,7 @@ export const planTable = (
     });
     const { rows: outRows, shape } = rowsFor(returning);
     if (updateSql === null) {
-      // Nothing to set: the request matches rows but changes none.
+      // Nothing to set: the call matches rows but changes none.
       const emptyShape: BodyShape = returning === "representation" ? (singular ? "object" : "array") : "none";
       return {
         ...common,
@@ -518,17 +518,17 @@ const looksLikeFilter = (v: string): boolean => FILTER_VALUE.test(v);
 const RESERVED = new Set(["select", "order", "limit", "offset", "and", "or", "columns", "on_conflict"]);
 
 export const planRpc = (
-  env: Env,
+  env: SqlEnv,
   /** Whether the function may write: it is called in a transaction that is not read only. */
   write: boolean,
   schema: string,
   name: string,
-  qp: QueryParams,
-  prefer: Preferences,
-  format: OutputFormat,
+  qp: SqlQueryParams,
+  prefer: SqlPreferences,
+  format: SqlOutputFormat,
   range: { offset: number; limit?: number } | undefined,
   body: { kind: string; value: unknown } | undefined,
-): Plan => {
+): SqlPlan => {
   let argValues: Record<string, unknown> = {};
   let nonObjectBody = false;
   const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -652,7 +652,7 @@ export const planRpc = (
  * statement made (see {@link shownBody}), `rows` the rows of the page, `total` the count the plan asked for
  * (see `Preferences.count`) and `settings` what {@link QueryParams.read} asked to be read afterwards.
  */
-export interface Result {
+export interface SqlResult {
   readonly body: string;
   readonly rows: number;
   readonly total: number | undefined;
@@ -683,22 +683,22 @@ export interface ExecuteOptions {
  * The body a caller shows: what the statement made for a read or a function call, nothing for a write
  * that does not return its rows.
  */
-export const shownBody = (plan: Plan, body: string): string => {
+export const shownBody = (plan: SqlPlan, body: string): string => {
   if (plan.kind === "read" || plan.kind === "rpc") return body;
   if ((plan.returning ?? "minimal") !== "representation") return "";
   return plan.shape === "none" ? "" : body;
 };
 
 export const execute = async (
-  env: Env,
-  ctx: RequestContext,
-  call: Call,
+  env: SqlEnv,
+  ctx: SqlRequestContext,
+  call: SqlCall,
   schema: string,
-  prefer: Preferences,
-  format: OutputFormat,
-  plan: Plan,
+  prefer: SqlPreferences,
+  format: SqlOutputFormat,
+  plan: SqlPlan,
   options: ExecuteOptions = {},
-): Promise<Result> => {
+): Promise<SqlResult> => {
   const wantsPlan = options.explain;
   const { role, claims } = identityOf(env, ctx);
   // Inside a scope the transaction is already open and already carries the identity: this call
@@ -842,7 +842,7 @@ const settingsOf = (row: Record<string, unknown>): Array<string | null> => {
  * The count a call asked for (`Preferences.count`). A read or a function call counts what the plan counted;
  * a write only knows how many rows it touched, which is the count when it is `exact`.
  */
-const totalOf = (env: Env, prefer: Preferences, plan: Plan, r: RawResult): number | undefined => {
+const totalOf = (env: SqlEnv, prefer: SqlPreferences, plan: SqlPlan, r: RawResult): number | undefined => {
   if (plan.kind !== "read" && plan.kind !== "rpc") return prefer.count === "exact" ? r.rows : undefined;
   let total: number | undefined;
   if (prefer.count === "exact") total = plan.countInStatement ? r.total : r.rows;

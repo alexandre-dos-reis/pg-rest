@@ -1,10 +1,10 @@
 import {
-  type Call,
+  type SqlCall,
   type CoreConfig,
-  type Env,
-  type Plan,
-  type QueryParams,
-  type RequestContext,
+  type SqlEnv,
+  type SqlPlan,
+  type SqlQueryParams,
+  type SqlRequestContext as RequestContext,
   assertRole,
   execute,
   identityOf,
@@ -14,7 +14,7 @@ import {
 } from "@tsql/core/core";
 import type { DbSession } from "@tsql/core/adapter";
 import { quoteIdent } from "@tsql/core/quote";
-import type { Operation } from "@tsql/core/parse/request";
+import type { SqlOperation } from "@tsql/core/parse/sql-options";
 import { PgRestError } from "./errors";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
@@ -61,7 +61,7 @@ export interface HttpConfig extends CoreConfig {
   readonly serverUrl?: string | undefined;
 }
 
-export interface HttpEnv extends Env {
+export interface HttpEnv extends SqlEnv {
   readonly config: HttpConfig;
 }
 
@@ -69,7 +69,7 @@ export interface HttpEnv extends Env {
  * What this request adds to its transaction: the `request.*` settings SQL reads (PostgREST's HTTP
  * contract) and `preRequest`. The engine knows neither; it issues them in order.
  */
-const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Method, path: string): Call => {
+const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Method, path: string): SqlCall => {
   const settings: Array<readonly [string, string]> = [];
   if (env.config.requestSettings) {
     const headers: Record<string, string> = {};
@@ -96,7 +96,7 @@ const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Met
 };
 
 /** What a method does to a table. */
-const operationOf = (method: Method): Operation => {
+const operationOf = (method: Method): SqlOperation => {
   switch (method) {
     case "POST":
       return "insert";
@@ -143,7 +143,7 @@ const toResponse = (
   outcome: Outcome,
   method: Method,
   format: Negotiated,
-  plan: Plan,
+  plan: SqlPlan,
   wantsPlan: Extract<Negotiated, { kind: "plan" }> | undefined,
 ): Response => {
   if (wantsPlan) {
@@ -272,7 +272,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const body = await parseBody(request, method);
 
   const params = [...url.searchParams];
-  const qp: QueryParams = {
+  const qp: SqlQueryParams = {
     params,
     bare: bareKeys(url.search),
     read: RESPONSE_SETTINGS,
@@ -281,7 +281,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
         allowFilterKey: options?.allowFilterKey,
       }),
   };
-  let plan: Plan;
+  let plan: SqlPlan;
   if (target.type === "table") {
     plan = planTable(env, operationOf(method), schema, target.name, qp, prefer, engineFormat, range, body);
   } else {

@@ -15,8 +15,8 @@ export interface EngineOptions {
   /** Schemas to expose. The first one is the default. Default `["public"]`. */
   readonly schemas?: ReadonlyArray<string>;
   /**
-   * Role used when the request context has none. Default `"anon"`. `false` refuses anonymous requests:
-   * a request with no role is an error (`unauthenticated` in `@tsql/query`, a `401` in `@tsql/rest`).
+   * Role used when the context has none. Default `"anon"`. `false` refuses anonymous calls:
+   * a call with no role is an error (`unauthenticated` in `@tsql/query`, a `401` in `@tsql/rest`).
    */
   readonly anonymousRole?: string | false;
   /** Maximum rows returned by a read. */

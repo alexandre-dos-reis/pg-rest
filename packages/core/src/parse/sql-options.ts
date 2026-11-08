@@ -3,9 +3,9 @@
 // `@tsql/query` builds them from an object.
 
 /** What a call does to a table: read it, insert into it, update, delete from it, or upsert one row by key (`put`). */
-export type Operation = "read" | "insert" | "update" | "delete" | "put";
+export type SqlOperation = "read" | "insert" | "update" | "delete" | "put";
 
-export interface Preferences {
+export interface SqlPreferences {
   readonly return?: "minimal" | "headers-only" | "representation";
   readonly count?: "exact" | "planned" | "estimated";
   readonly resolution?: "merge-duplicates" | "ignore-duplicates";
@@ -21,7 +21,7 @@ export interface Preferences {
  * handler: what `Accept` can ask for over HTTP) is `rendered` by SQL that the caller supplies, so the engine
  * knows none of those formats.
  */
-export type OutputFormat =
+export type SqlOutputFormat =
   | { readonly kind: "json"; readonly stripNulls: boolean }
   | { readonly kind: "object"; readonly stripNulls: boolean }
   | {

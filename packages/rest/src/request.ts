@@ -1,11 +1,11 @@
 import { PgRestError } from "./errors";
 import { parseError } from "@tsql/core/parse/field";
-import type { Preferences } from "@tsql/core/parse/request";
+import type { SqlPreferences } from "@tsql/core/parse/sql-options";
 
 export type Method = "GET" | "HEAD" | "POST" | "PATCH" | "PUT" | "DELETE" | "OPTIONS";
 
 /** The `Prefer` header: what the engine takes ({@link Preferences}), plus what only HTTP has. */
-export interface Prefer extends Preferences {
+export interface Prefer extends SqlPreferences {
   readonly tx?: "commit" | "rollback";
   /** Preferences that were present but not understood. */
   readonly invalid: ReadonlyArray<string>;

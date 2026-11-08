@@ -1,6 +1,6 @@
 import { literal } from "../quote";
 /**
- * How the rows produced by the request are turned into a response body.
+ * How the rows produced by the call are turned into a body.
  * - `array`:       `[{...}, {...}]`
  * - `object`:      first row as an object (singular responses, composite RPC)
  * - `scalar-array`: `[1, 2, 3]` (SETOF scalar)
@@ -50,7 +50,7 @@ const bodyExpr = (shape: BodyShape, strip: boolean, render?: string): string => 
 };
 
 /**
- * The one statement that runs a request. Result columns:
+ * The one statement that runs a call. Result columns:
  * `page_total`, `body`, `total_result_set`, one `setting_<n>` for each name of `read`, and `none_inserted`.
  *
  * The settings of `read` are read at the end so that functions (RPC, triggers) can answer by calling

@@ -1,5 +1,5 @@
 import type { DbAdapter } from "@tsql/core/adapter";
-import type { RequestContext } from "@tsql/core/core";
+import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 import { DbQueryError, EngineError } from "@tsql/core/errors";
 import { type ApiError, PgRestError, toApiError } from "./errors";
 import type { SchemaCache } from "@tsql/core/schema";

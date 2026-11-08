@@ -1,4 +1,4 @@
-import type { RequestContext } from "@tsql/core/core";
+import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 import type {
   ContextSource,
   CountFrom,

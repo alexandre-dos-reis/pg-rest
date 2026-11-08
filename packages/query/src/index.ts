@@ -1,4 +1,4 @@
-import type { RequestContext } from "@tsql/core/core";
+import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 import { type EngineOptions, createStaticEngine } from "@tsql/core/engine";
 import {
   type ContextQuery,
@@ -24,7 +24,7 @@ import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
-export type { RequestContext } from "@tsql/core/core";
+export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 export type { PreRequest, PreRequestInfo } from "./query";
 export { describeErrorKind } from "./kinds";
 export type { ErrorKind as QueryErrorKind } from "./kinds";
