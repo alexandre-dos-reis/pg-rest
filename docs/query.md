@@ -8,6 +8,14 @@ options of the instance itself are in [`options.md`](options.md), and the types 
 Every TypeScript block below is compiled by `tests/docs.test.ts` against the schema it describes, so an example that
 drifts fails the build. The ones that are meant to be refused carry `@ts-expect-error`, which is how the check knows.
 
+Under most examples a collapsed block shows **the SQL the library runs** for the calls above it, in order. It is not
+written by hand: `bun run docs:sql` runs each call against the fixture database and records the statement. Each call is
+one transaction on one connection: a read starts with `SET TRANSACTION READ ONLY`, a `set_config` call applies the role,
+the claims and the `search_path` of the context, and then comes the one statement shown. Values are parameters (`$1`,
+listed under the statement), never part of the text, and the `count(*)` / `json_agg` at the end is the envelope that
+turns the rows into JSON, the same for every call. An example that depends on a variable (`ctx`, an earlier result) or
+that is refused on purpose has no SQL.
+
 <!-- toc -->
 
 - [The schema these examples use](#the-schema-these-examples-use)
@@ -130,6 +138,24 @@ const { data } = await pgRest.select<Array<{ id: number; name: string }>>({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."name"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 With one, everything inside is checked and the result is inferred. The type comes from the catalog — see [`types.md`](types.md):
 
 ```ts
@@ -140,6 +166,24 @@ const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 const { data } = await pgRest.select({ table: "clients", columns: ["id", "name"] });
 // data: Array<{ id: number; name: string }>
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."name"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 Everything below assumes the typed instance. The rest of the API — `setContextQuery`, `transaction`, `close` — is
 unchanged.
@@ -166,12 +210,66 @@ const star = await pgRest.select({ table: "profiles", columns: ["*"] });
 // star.data: Array<{ client_id: number; bio: string | null }>
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."name" AS "who"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.profiles
+WITH pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM "api"."profiles" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 An enum column is a union of its labels, so the compiler knows the three values:
 
 ```ts
 const moods = await pgRest.select({ table: "moods", columns: ["mood", "seen"] });
 // moods.data: Array<{ mood: "sad" | "ok" | "happy"; seen: Array<"sad" | "ok" | "happy"> | null }>
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.moods
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."mood", "pgrst_root"."seen"
+  FROM "api"."moods" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 ### Embedded resources
 
@@ -199,6 +297,109 @@ const nested = await pgRest.select({
 });
 // nested.data: Array<{ name: string; orders: Array<{ id: number; order_items: Array<{ qty: number }> }> }>
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+  FROM "api"."orders" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT to_jsonb(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."clients" AS "pgrst_c1"
+      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+    ) AS _r
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."total"
+      FROM "api"."orders" AS "pgrst_c1"
+      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", coalesce("pgrst_j2".j, '[]'::jsonb) AS "products"
+  FROM "api"."orders" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."products" AS "pgrst_c1" JOIN "api"."order_items" AS "pgrst_m3" ON "pgrst_m3"."product_id" = "pgrst_c1"."id"
+      WHERE "pgrst_m3"."order_id" = "pgrst_root"."id"
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "recent_orders"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."total"
+      FROM "api"."recent_orders"("pgrst_root") AS "pgrst_c1"
+      WHERE TRUE
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."id", coalesce("pgrst_j4".j, '[]'::jsonb) AS "order_items"
+      FROM "api"."orders" AS "pgrst_c1"
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(_r) AS j
+        FROM (
+          SELECT "pgrst_c3"."qty"
+          FROM "api"."order_items" AS "pgrst_c3"
+          WHERE "pgrst_c3"."order_id" = "pgrst_c1"."id"
+        ) AS _r
+      ) AS "pgrst_j4" ON TRUE
+      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 The long form adds the embed's own filters, order and paging — and four modifiers:
 
@@ -252,6 +453,138 @@ const page = await pgRest.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+  FROM "api"."orders" AS "pgrst_root" JOIN LATERAL (
+    SELECT to_jsonb(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."clients" AS "pgrst_c1"
+      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+    ) AS _r
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_j2".j AS "who"
+  FROM "api"."orders" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT to_jsonb(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."clients" AS "pgrst_c1"
+      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+    ) AS _r
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_j2"."name" AS "name"
+  FROM "api"."orders" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."clients" AS "pgrst_c1"
+    WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", "pgrst_j2"."t" AS "t", "pgrst_j2"."status" AS "status"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT coalesce(jsonb_agg(_r."t"), '[]'::jsonb) AS "t", coalesce(jsonb_agg(_r."status"), '[]'::jsonb) AS "status"
+    FROM (
+      SELECT "pgrst_c1"."total" AS "t", "pgrst_c1"."status"
+      FROM "api"."orders" AS "pgrst_c1"
+      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.employees
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", "pgrst_j2".j AS "manager"
+  FROM "api"."employees" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT to_jsonb(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."employees" AS "pgrst_c1"
+      WHERE "pgrst_c1"."id" = "pgrst_root"."manager_id"
+    ) AS _r
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+  FROM "api"."orders" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT to_jsonb(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."name"
+      FROM "api"."clients" AS "pgrst_c1"
+      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+    ) AS _r
+    LIMIT 1
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."total"
+      FROM "api"."orders" AS "pgrst_c1"
+      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1
+      ORDER BY "pgrst_c1"."total" DESC
+      LIMIT 3
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'paid'
+```
+
+</details>
+<!-- sql:end -->
+
 A filter on an embedded resource can also be written as a dotted path, the way the query string does it. The column
 belongs to the other resource, so only the shape of the condition is checked there -- prefer the embed's own `where`,
 which knows its columns:
@@ -263,6 +596,34 @@ const dotted = await pgRest.select({
   where: { "orders.status": "paid", "orders.total": { $gte: 100 } },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+  FROM "api"."clients" AS "pgrst_root"
+  LEFT JOIN LATERAL (
+    SELECT jsonb_agg(_r) AS j
+    FROM (
+      SELECT "pgrst_c1"."total"
+      FROM "api"."orders" AS "pgrst_c1"
+      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1 AND "pgrst_c1"."total" >= $2
+    ) AS _r
+  ) AS "pgrst_j2" ON TRUE
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'paid'
+-- $2 = '100'
+```
+
+</details>
+<!-- sql:end -->
 
 ### Filters
 
@@ -291,6 +652,42 @@ const nulls = await pgRest.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE "pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2 AND "pgrst_root"."total" < $3 AND "pgrst_root"."placed_at" < $4 AND "pgrst_root"."id" IN ($5, $6, $7)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'paid'
+-- $2 = '100'
+-- $3 = '500'
+-- $4 = '2026-03-01'
+-- $5 = '1'
+-- $6 = '2'
+-- $7 = '3'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 Every operator, by what it works on. A `$` key is an operator; the table at the end lists them all.
 
 **Comparison** works on numbers, text, dates, enums and arrays:
@@ -314,6 +711,43 @@ const ranged = await pgRest.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE "pgrst_root"."status" <> $1 AND "pgrst_root"."total" > $2 AND "pgrst_root"."total" <= $3 AND "pgrst_root"."placed_at" >= $4 AND "pgrst_root"."client_id" IN ($5, $6)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'void'
+-- $2 = '10'
+-- $3 = '500'
+-- $4 = '2026-01-01'
+-- $5 = '1'
+-- $6 = '2'
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE "pgrst_root"."total" >= $1 AND "pgrst_root"."total" < $2
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '100'
+-- $2 = '500'
+```
+
+</details>
+<!-- sql:end -->
+
 **Text** has the pattern operators. `*` is the wildcard of `$like` and `$ilike`; `$match` and `$imatch` take a POSIX
 regular expression:
 
@@ -333,6 +767,39 @@ const regex = await pgRest.select({
   where: { name: { $match: "^A.*a$" }, email: { $imatch: "@example\\.com$" } }, //  ~ and ~*
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."name" LIKE $1 AND "pgrst_root"."email" ILIKE $2
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'A%'
+-- $2 = '%@EXAMPLE.com'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."name" ~ $1 AND "pgrst_root"."email" ~* $2
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '^A.*a$'
+-- $2 = '@example\.com$'
+```
+
+</details>
+<!-- sql:end -->
 
 **NULL, booleans and `DISTINCT`**. Comparing with `null` is a NULL test, so `$eq: null` and `$neq: null` are `IS NULL` and
 `IS NOT NULL`; `$is` is for the three-valued logic of booleans:
@@ -368,6 +835,39 @@ const flags = await untyped.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL) AND "pgrst_root"."tags" IS NOT NULL
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE "pgrst_root"."total" IS DISTINCT
+  FROM $1 AND "pgrst_root"."placed_at" IS DISTINCT
+  FROM $2
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '0'
+-- $2 = 'null'
+```
+
+</details>
+<!-- sql:end -->
+
 **Full-text search** wraps a column that is not a `tsvector` in `to_tsvector()`. The four operators differ in how they read the
 query; each takes a text, or `{ query, config }`:
 
@@ -388,6 +888,38 @@ const searches = await pgRest.select({
   },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE to_tsvector("pgrst_root"."name") @@ to_tsquery($1)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'ada & lovelace'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE to_tsvector("pgrst_root"."name") @@ plainto_tsquery($1) AND to_tsvector("pgrst_root"."email") @@ phraseto_tsquery($2) AND to_tsvector('english', "pgrst_root"."meta") @@ websearch_to_tsquery('english', 'ada -babbage')
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'ada lovelace'
+-- $2 = 'ada lovelace'
+```
+
+</details>
+<!-- sql:end -->
 
 **Arrays** have containment and overlap. To compare a whole array, say so with `$eq`: an array alone is not a condition:
 
@@ -421,6 +953,59 @@ const whole = await pgRest.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."tags" @> $1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{vip}'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."tags" <@ $1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{vip,early,beta}'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."tags" && $1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{vip,beta}'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."tags" = $1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{vip,early}'
+```
+
+</details>
+<!-- sql:end -->
+
 **`jsonb` and ranges**. Their generated type is `unknown`, so every operator is offered. `$cs` and `$cd` work on `jsonb`
 too, and the range operators on a range column:
 
@@ -445,6 +1030,25 @@ const ranges = await untyped.select({
   },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."meta" @> '{"tier":"gold"}'
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 **A path into a column** (`->` and `->>`) filters on a field of a `json`/`jsonb`, composite or array column; every
 operator applies to the result. It is available on an instance created without a type argument:
@@ -491,6 +1095,50 @@ const everyone = await pgRest.select({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE NOT ("pgrst_root"."status" IN ($1, $2)) AND NOT ("pgrst_root"."client_id" = $3) AND NOT ("pgrst_root"."placed_at" IS NULL)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'paid'
+-- $2 = 'shipped'
+-- $3 = '2'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."name" LIKE ANY ($1)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{A%,B%}'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."email" ILIKE ALL ($1)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"%@example.com",ada%}'
+```
+
+</details>
+<!-- sql:end -->
+
 **Groups**. Conditions at the top level are ANDed. `$or` takes a list of groups, `$and` is for the same operator twice
 on one column, and `$not` inverts the AND of what is inside it:
 
@@ -523,6 +1171,56 @@ const inverted = await pgRest.select({
   },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE ("pgrst_root"."status" = $1 OR "pgrst_root"."total" >= $2 OR ("pgrst_root"."status" = $3 AND "pgrst_root"."total" < $4))
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'new'
+-- $2 = '400'
+-- $3 = 'paid'
+-- $4 = '50'
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE ("pgrst_root"."name" LIKE $1 AND "pgrst_root"."name" LIKE $2)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'A%'
+-- $2 = '%a'
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  WHERE NOT ("pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2) AND ("pgrst_root"."client_id" = $3 OR NOT (("pgrst_root"."status" = $4 OR "pgrst_root"."status" = $5)))
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'paid'
+-- $2 = '100'
+-- $3 = '1'
+-- $4 = 'new'
+-- $5 = 'void'
+```
+
+</details>
+<!-- sql:end -->
 
 Several conditions in one group are ANDed, so the third member of the first `$or` is a nested `and(…)`.
 
@@ -583,6 +1281,77 @@ const plain = await pgRest.select({ table: "orders", columns: ["id"] });
 const lean = await pgRest.select({ table: "clients", columns: ["name", "meta"], stripNulls: true });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  ORDER BY "pgrst_root"."total" DESC NULLS LAST, "pgrst_root"."placed_at" ASC, "pgrst_root"."id" ASC
+  LIMIT 10
+  OFFSET 20
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."id" = $1
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+  LIMIT 1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, (
+  SELECT count(*)
+  FROM "api"."orders" AS "pgrst_root"
+)::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."orders" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."name", "pgrst_root"."meta"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_strip_nulls(json_agg(_t)), '[]'::json)::text AS body,
+  NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 ### Composite types
 
 A column of a [composite type](https://www.postgresql.org/docs/current/rowtypes.html) is an object, in both directions:
@@ -621,6 +1390,51 @@ const placed = await pgRest.insert({
 });
 // placed.data: [{ owner: { name: "Barbara", home: { city: "Brussels", zip: null }, tags: null } }]
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.venues
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."label", "pgrst_root"."owner", "pgrst_root"."branches"
+  FROM "api"."venues" AS "pgrst_root"
+  WHERE "pgrst_root"."id" = $1
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- select from api.venues
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."venues" AS "pgrst_root"
+  WHERE "pgrst_root"."owner" = json_populate_record(null::"api"."contact", ('{"name":"Ada","home":{"city":"Paris","zip":"75001"},"tags":["music"]}')::json)
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- insert into api.venues
+WITH pgrst_source AS (
+  INSERT INTO "api"."venues" AS "pgrst_root" ("label", "owner")
+  SELECT "label", "owner"
+  FROM json_populate_recordset(null::"api"."venues", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root"."owner"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"label":"New hall","owner":{"name":"Barbara","home":{"city":"Brussels"}}}]'
+```
+
+</details>
+<!-- sql:end -->
 
 The arrow operators reach a single field, and work on a composite column exactly as they do on `jsonb` — nested, and
 through an array — because the column is converted with `to_jsonb()` first:
@@ -714,6 +1528,141 @@ const careful = await pgRest.update({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name", "email")
+  SELECT "name", "email"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."name"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"Hopper","email":"grace@example.com"}]'
+
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name")
+  SELECT "name"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"A"},{"name":"B"}]'
+
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name")
+  SELECT "name"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"C","email":"c@example.com"}]'
+
+-- upsert into api.products
+WITH pgrst_ins AS (
+  INSERT INTO "api"."products" AS "pgrst_root" ("id", "name", "price")
+  SELECT "id", "name", "price"
+  FROM json_populate_recordset(null::"api"."products", ($1::text)::json)
+  ON CONFLICT ("id") DO
+  UPDATE
+  SET "id" = EXCLUDED."id", "name" = EXCLUDED."name", "price" = EXCLUDED."price"
+  RETURNING "pgrst_root".*, ("pgrst_root".xmax = 0) AS pgrst_inserted
+), pgrst_source AS (
+  SELECT "id", "name", "price"
+  FROM pgrst_ins
+), pgrst_body AS (
+  SELECT "pgrst_root"."name"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  (EXISTS (
+  SELECT 1
+  FROM pgrst_ins
+) AND NOT EXISTS (
+  SELECT 1
+  FROM pgrst_ins
+  WHERE pgrst_inserted
+)) AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"id":1,"name":"Keyboard mk2","price":130}]'
+
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "status" = _u."status"
+  FROM (
+    SELECT *
+    FROM json_populate_record(null::"api"."orders", ($1::text)::json)
+  ) AS _u
+  WHERE "pgrst_root"."status" = $2
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."status"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"status":"shipped"}'
+-- $2 = 'paid'
+
+-- delete from api.orders
+WITH pgrst_source AS (
+  DELETE FROM "api"."orders" AS "pgrst_root"
+  WHERE "pgrst_root"."id" = $1
+  RETURNING 1
+), pgrst_body AS (
+  SELECT *
+  FROM pgrst_source
+)
+SELECT count(*)::text AS page_total, ''::text AS body, NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '99'
+
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "status" = _u."status"
+  FROM (
+    SELECT *
+    FROM json_populate_record(null::"api"."orders", ($1::text)::json)
+  ) AS _u
+  WHERE "pgrst_root"."status" = $2
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"status":"x"}'
+-- $2 = 'paid'
+```
+
+</details>
+<!-- sql:end -->
+
 The payload is typed from the relation: a generated or `GENERATED ALWAYS AS IDENTITY` column is absent, a column with a
 default or a nullable one is optional, and a relation that cannot be written at all has no payload to give.
 
@@ -755,6 +1704,35 @@ const computed = await pgRest.update({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "status" = _u."status", "total" = ("pgrst_root"."total" + 10), "placed_at" = DEFAULT
+  FROM (
+    SELECT *
+    FROM json_populate_record(null::"api"."orders", ($1::text)::json)
+  ) AS _u
+  WHERE "pgrst_root"."id" = $2
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."status", "pgrst_root"."total"
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"status":"paid"}'
+-- $2 = '1'
+```
+
+</details>
+<!-- sql:end -->
+
 `{ $col: "name" }` is a column of the row being updated; a string, number, boolean or `null` is a literal, and a string is
 **never** a column. `{ $val: x }` is any JSON value as a literal. The keys of `set` are the columns of the table, and
 nothing else: PostgreSQL's `(a, b) = ROW(x, y)` is `a = x, b = y`.
@@ -787,6 +1765,60 @@ const power = await pgRest.update({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "total" = ("pgrst_root"."total" + 10 + (- 2))
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "total" = (("pgrst_root"."total" * 3) / 2), "client_id" = (("pgrst_root"."client_id" + 1) % 5)
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '2'
+
+-- update api.products
+WITH pgrst_source AS (
+  UPDATE "api"."products" AS "pgrst_root"
+  SET "price" = ("pgrst_root"."price" ^ 2)
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+```
+
+</details>
+<!-- sql:end -->
+
 **Text, arrays and `jsonb`**: `$concat` is `||`, and the type decides what it means: it joins text, appends to an array and
 merges `jsonb`. `$sub` on a `jsonb` removes a key. A bare string next to an array is read as an array literal, as in
 PostgreSQL, so an element is written `{ $val: ["x"] }`:
@@ -818,6 +1850,75 @@ const removed = await pgRest.update({
   where: { id: 1 },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "name" = ('Dr. ' || "pgrst_root"."name" || '!')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "tags" = (COALESCE("pgrst_root"."tags", '{}') || '{"vip"}')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "meta" = (COALESCE("pgrst_root"."meta", '{}') || '{"seen":true}')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "meta" = ("pgrst_root"."meta" - 'seen')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+```
+
+</details>
+<!-- sql:end -->
 
 **Functions**: `$coalesce`, `$greatest` and `$least` take a list; `$cast` takes an expression and a type, from the same
 allowlist as a column cast. The other functions are a fixed list too, and a name is never taken from the input:
@@ -861,6 +1962,75 @@ const untagged = await pgRest.update({
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "name" = UPPER(BTRIM("pgrst_root"."name")), "created_at" = now()
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "total" = ROUND(("pgrst_root"."total" * 1.2), 2)
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "tags" = ARRAY_APPEND(COALESCE("pgrst_root"."tags", '{}'), 'vip')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.clients
+WITH pgrst_source AS (
+  UPDATE "api"."clients" AS "pgrst_root"
+  SET "tags" = ARRAY_REMOVE("pgrst_root"."tags", 'vip')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+```
+
+</details>
+<!-- sql:end -->
+
 ```ts
 const functions = await pgRest.update({
   table: "orders",
@@ -877,6 +2047,45 @@ const capped = await pgRest.update({
   where: { id: 1 },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "total" = GREATEST("pgrst_root"."total", 0), "status" = COALESCE(("pgrst_root"."client_id")::text, 'none')
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "total" = LEAST(("pgrst_root"."total" * 2), 1000)
+  WHERE "pgrst_root"."id" = $1
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '1'
+```
+
+</details>
+<!-- sql:end -->
 
 **Comparison and logic** make a boolean, for a boolean column: `$eq`, `$neq`, `$gt`, `$gte`, `$lt`, `$lte`, `$cs`, `$cd`,
 `$ov` take two operands; `$and` and `$or` any number; `$not` one.
@@ -910,6 +2119,35 @@ const reset = await pgRest.update({
   where: { id: 1 },
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- update api.orders
+WITH pgrst_source AS (
+  UPDATE "api"."orders" AS "pgrst_root"
+  SET "placed_at" = _u."placed_at", "status" = DEFAULT, "total" = DEFAULT
+  FROM (
+    SELECT *
+    FROM json_populate_record(null::"api"."orders", ($1::text)::json)
+  ) AS _u
+  WHERE "pgrst_root"."id" = $2
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"placed_at":"2026-01-01"}'
+-- $2 = '1'
+```
+
+</details>
+<!-- sql:end -->
 
 | node                                                   | SQL                                                    |
 | ------------------------------------------------------ | ------------------------------------------------------ |
@@ -979,6 +2217,72 @@ const asInt = await pgRest.rpc({ rpc: "ovl", args: { a: 1 } });
 const asText = await pgRest.rpc({ rpc: "ovl", args: { a: "one" } });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- call api.add
+WITH pgrst_body AS (
+  SELECT _f AS pgrst_scalar
+  FROM json_to_record(($1::text)::json) AS _args("a" integer, "b" integer)
+  CROSS JOIN LATERAL "api"."add"("a" := _args."a", "b" := _args."b") AS _f
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
+  NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"a":2,"b":3}'
+
+-- call api.greet
+WITH pgrst_body AS (
+  SELECT _f AS pgrst_scalar
+  FROM "api"."greet"() AS _f
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
+  NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- call api.greet
+WITH pgrst_body AS (
+  SELECT _f AS pgrst_scalar
+  FROM json_to_record(($1::text)::json) AS _args("name" text)
+  CROSS JOIN LATERAL "api"."greet"("name" := _args."name") AS _f
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
+  NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"name":"Ada"}'
+
+-- call api.nothing
+WITH pgrst_body AS (
+  SELECT 1 AS pgrst_scalar
+  FROM "api"."nothing"() AS _f
+)
+SELECT count(*)::text AS page_total, ''::text AS body, NULL::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- call api.orders_by_status
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."total"
+  FROM (
+    SELECT _f.*
+    FROM json_to_record(($1::text)::json) AS _args("s" text)
+    CROSS JOIN LATERAL "api"."orders_by_status"("s" := _args."s") AS _f
+  ) AS "pgrst_root"
+  WHERE "pgrst_root"."total" >= $2
+  ORDER BY "pgrst_root"."total" DESC
+  LIMIT 5
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '{"s":"paid"}'
+-- $2 = '100'
+```
+
+</details>
+<!-- sql:end -->
+
 ```ts
 // @ts-expect-error that function does not exist
 void pgRest.rpc({ rpc: "nope" });
@@ -1011,6 +2315,48 @@ const mine = await pgRest.select({ table: "notes", columns: ["body"] }, ctx);
 await pgRest.select({ table: "notes", columns: ["id"] }, { ...ctx, settings: { "app.tenant": "acme" } });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.notes
+WITH pgrst_source AS (
+  INSERT INTO "api"."notes" AS "pgrst_root" ("body")
+  SELECT "body"
+  FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"body":"mine"}]'
+
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."body"
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 Without a context the query runs as the anonymous role (`anon` by default, `anonymousRole: false` to refuse it
 outright). **The types say nothing about what a role may do**: `insertable` and its siblings come from
 `pg_relation_is_updatable`, which is structural, so an insert as `anon` compiles and Postgres answers `42501` → 401. One
@@ -1039,6 +2385,24 @@ app.use(async (c, next) => {
 const { data, error } = await pgQuery.select({ table: "notes", columns: ["body"] });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."body"
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 ```ts ignore
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { RequestContext } from "@tsql/query";
@@ -1063,6 +2427,33 @@ await db.select({ table: "notes", columns: ["id"] }, { role: "admin" });
 const forgotten = await db.select({ table: "notes" });
 forgotten.error?.kind; // "no_context"
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 Falling back to `anon` there would turn a missing middleware into a silent change of privileges, which is the kind of
 bug that reads as "empty result" in development and as an incident in production. Like the instance's operations, a bound one never
@@ -1143,6 +2534,30 @@ error?.kind; //   the failure, if there was one -- `transaction()` never rejects
 data; //          number | null
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.orders
+WITH pgrst_source AS (
+  INSERT INTO "api"."orders" AS "pgrst_root" ("client_id", "total")
+  SELECT "client_id", "total"
+  FROM json_populate_recordset(null::"api"."orders", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"client_id":1,"total":42}]'
+```
+
+</details>
+<!-- sql:end -->
+
 The result is a `QueryResult` around whatever the callback returned: `data` is that value, and there is no `count`.
 A failure comes back the way an operation's does — a `QueryError` if it was one, an `internal` one carrying the
 original under `cause` if it was anything else.
@@ -1173,6 +2588,27 @@ const { data, count } = await pgRest.transaction(async (tx) => {
   return `${rows.length} of ${total}`;
 }, ctx);
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id", "pgrst_root"."name"
+  FROM "api"."clients" AS "pgrst_root"
+  LIMIT 10
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, (
+  SELECT count(*)
+  FROM "api"."clients" AS "pgrst_root"
+)::text AS total_result_set, false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 The promise that never rejects did not disappear; it moved from the query to the **scope**, which is the only place it
 can mean anything now that several of them share a transaction. What a scope's operation throws is the same `QueryError`
@@ -1207,6 +2643,75 @@ const left = await pgRest.transaction(async (tx) => {
 left.error?.kind; // "rolled_back"
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name", "email")
+  SELECT "name", "email"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"Ada","email":"a@b.c"}]'
+
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name", "email")
+  SELECT "name", "email"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"Dup","email":"a@b.c"}]'
+
+-- insert into api.notes
+WITH pgrst_source AS (
+  INSERT INTO "api"."notes" AS "pgrst_root" ("body")
+  SELECT "body"
+  FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"body":"gone"}]'
+
+-- insert into api.notes
+WITH pgrst_source AS (
+  INSERT INTO "api"."notes" AS "pgrst_root" ("body")
+  SELECT "body"
+  FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"body":"gone"}]'
+```
+
+</details>
+<!-- sql:end -->
+
 A fourth case is worth naming because it is the one that could have been wrong. `single` and `maxAffected`
 (`not_single_row`, `too_many_affected`) are the library's own checks, raised _after_ a statement that worked, in order to undo the
 write they just measured. Nothing has aborted the transaction when they fire — so a scope that committed because the
@@ -1226,6 +2731,41 @@ const kept = await pgRest.transaction(async (tx) => {
 kept.data; //            null -- the scope rolled back regardless
 kept.error?.kind; //     "not_single_row": the query that failed
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.notes
+WITH pgrst_source AS (
+  INSERT INTO "api"."notes" AS "pgrst_root" ("body")
+  SELECT "body"
+  FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"body":"gone"}]'
+
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM "api"."notes" AS "pgrst_root"
+  WHERE "pgrst_root"."body" = $1
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'nobody'
+```
+
+</details>
+<!-- sql:end -->
 
 Which is also why catching inside a scope buys little: PostgreSQL has aborted the transaction, the next statement
 answers `25P02` whatever it is, and the scope will not commit. pg-rest says so rather than passing that on —
@@ -1250,6 +2790,30 @@ await pgRest.transaction(async (tx) => {
   return { client: client.data.id, profile: profile.error === null };
 }, ctx);
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name")
+  SELECT "name"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"Ada"}]'
+```
+
+</details>
+<!-- sql:end -->
 
 Nothing in there has to rethrow: the nested scope catches what the query threw, rolls back to its savepoint, and hands
 the failure to its caller. `nested.rollback()` undoes the savepoint only. A nested scope takes no context and no
@@ -1286,6 +2850,42 @@ await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["
 });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
+
 `isolationLevel` is `"read committed"`, `"repeatable read"` or `"serializable"`, and defaults to the database's own
 setting. `"read uncommitted"` is deliberately absent: PostgreSQL accepts it and runs `read committed` anyway, so it
 would be a synonym pretending to be a level. The other two are where a concurrent write can abort the transaction with
@@ -1311,6 +2911,39 @@ await pgQuery.transaction(async (tx) => tx.insert({ table: "notes", rows: { body
 // set_config works at
 await pgQuery.transaction(async (tx) => tx.select({ table: "notes", columns: ["id"] }), { role: "admin" });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.notes
+WITH pgrst_source AS (
+  INSERT INTO "api"."notes" AS "pgrst_root" ("body")
+  SELECT "body"
+  FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"body":"mine"}]'
+
+-- select from api.notes
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."notes" AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 What a scope is not is a transaction **your** application opened: here pg-rest owns the `BEGIN`, the `COMMIT` and the
 `ROLLBACK`, and lends a session to your callback. Running a pg-rest query inside a `sql.begin` of your own is the other
@@ -1344,6 +2977,30 @@ if (error) {
   void count;
 }
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- insert into api.clients
+WITH pgrst_source AS (
+  INSERT INTO "api"."clients" AS "pgrst_root" ("name", "email")
+  SELECT "name", "email"
+  FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
+  RETURNING "pgrst_root".*
+), pgrst_body AS (
+  SELECT "pgrst_root".*
+  FROM pgrst_source AS "pgrst_root"
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = '[{"name":"Dup","email":"ada@example.com"}]'
+```
+
+</details>
+<!-- sql:end -->
 
 `error` is a `QueryError`, an `Error`: throw it, log it, or read its fields. Even a failure the library did not foresee
 arrives this way -- an `internal` one carrying the original under `cause` -- so no `try`/`catch` is needed anywhere.
@@ -1447,6 +3104,26 @@ void pgRest.select({ table: "clients", columns: ["id"], where: { "nope->>tier": 
 void pgRest.select({ table: "orders", columns: ["status", "total.sum()"] });
 ```
 
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.clients
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."id"
+  FROM "api"."clients" AS "pgrst_root"
+  WHERE "pgrst_root"."meta" ->> 'tier' ILIKE $1
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+-- $1 = 'go%'
+```
+
+</details>
+<!-- sql:end -->
+
 They work on an instance created without a type argument, where the input is loose:
 
 ```ts
@@ -1458,6 +3135,26 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
   order: ["status"],
 });
 ```
+
+<!-- sql:start -->
+<details>
+<summary>The SQL it runs</summary>
+
+```sql
+-- select from api.orders
+WITH pgrst_body AS (
+  SELECT "pgrst_root"."status", sum("pgrst_root"."total") AS "sum"
+  FROM "api"."orders" AS "pgrst_root"
+  GROUP BY "pgrst_root"."status"
+  ORDER BY "pgrst_root"."status" ASC
+)
+SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
+  false AS none_inserted
+FROM pgrst_body AS _t;
+```
+
+</details>
+<!-- sql:end -->
 
 ## Every field
 
