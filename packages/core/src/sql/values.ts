@@ -1,5 +1,4 @@
-import { EngineError } from "../errors";
-import { literal } from "../quote";
+import { cString, literal } from "../quote";
 
 /**
  * How a value from a filter gets into the SQL. `rest` writes it as a literal (`'paid'`), which is
@@ -24,8 +23,7 @@ export const bindFrom = (taken: number): Values => {
   return {
     bound,
     sql: (value) => {
-      if (value.includes("\0")) throw new EngineError("invalid_input", "Invalid value", "contains a NUL byte");
-      return `$${taken + bound.push(value)}`;
+      return `$${taken + bound.push(cString(value))}`;
     },
   };
 };

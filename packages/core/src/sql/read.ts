@@ -216,7 +216,7 @@ const buildEmbed = (
   const params = ctx.query.embeds.get(childPath.join("."));
   const toOne = relationship.kind === "m2o" || relationship.kind === "o2o";
   const child = relationship.to;
-  const cAlias = ctx.aliases.next("pgrst_c");
+  const cAlias = ctx.aliases.next(`${child.name}_`);
   const eAlias = ctx.aliases.next("pgrst_j");
   const inner = buildItems(ctx, item.items, child, cAlias, childPath);
   const hasCols = inner.cols.length > 0;

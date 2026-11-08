@@ -19,6 +19,7 @@ import {
   lookAhead,
   many,
   many1,
+  manyKeeping,
   map,
   noneOf,
   notFollowedBy,
@@ -76,8 +77,8 @@ const jsonIdx = before(
   bind(option("+", char("-")), () => many1(digit)),
   jsonEnd,
 );
-const jsonOperation = after(alt(tryP(string("->>")), tryP(string("->"))), alt(tryP(jsonIdx), tryP(jsonKeyName)));
-const jsonPath = many(jsonOperation);
+const jsonOperation = after(alt(tryP(string("->>")), tryP(string("->"))), alt(tryP(jsonIdx), jsonKeyName));
+const jsonPath = manyKeeping(jsonOperation);
 const field = lexeme(bind(fieldName, () => option([] as unknown[], jsonPath)));
 
 // ---------------------------------------------------------------------------

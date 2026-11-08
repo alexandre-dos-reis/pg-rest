@@ -22,7 +22,12 @@ export const parseError = (message: string, details?: string): EngineError =>
  * with the index of every character that is at depth 0 and outside quotes.
  * Returning `true` from `visit` stops the scan.
  */
-export const scanTopLevel = (s: string, visit: (index: number, ch: string) => boolean | void): void => {
+export const scanTopLevel = (
+  s: string,
+  visit: (index: number, ch: string) => boolean | void,
+  /** Read a quote with no closing one, and a `{` with no `}`, as the characters they are, and keep `{…}` whole (a logic tree's values). */
+  literal = false,
+): void => {
   let depth = 0;
   let quoted = false;
   for (let i = 0; i < s.length; i++) {
@@ -32,9 +37,16 @@ export const scanTopLevel = (s: string, visit: (index: number, ch: string) => bo
       else if (ch === '"') quoted = false;
       continue;
     }
-    if (ch === '"') {
+    if (ch === '"' && (!literal || closesQuote(s, i + 1))) {
       quoted = true;
       continue;
+    }
+    if (literal && ch === "{") {
+      const close = s.indexOf("}", i + 1);
+      if (close >= 0) {
+        i = close;
+        continue;
+      }
     }
     if (ch === "(") {
       depth++;
@@ -48,16 +60,29 @@ export const scanTopLevel = (s: string, visit: (index: number, ch: string) => bo
   }
 };
 
+/** Whether a quote opened before `from` is closed in `s`. */
+const closesQuote = (s: string, from: number): boolean => {
+  for (let i = from; i < s.length; i++) {
+    if (s[i] === "\\") i++;
+    else if (s[i] === '"') return true;
+  }
+  return false;
+};
+
 /** Split on `sep` at depth 0, outside quotes. */
-export const splitTopLevel = (s: string, sep: string): string[] => {
+export const splitTopLevel = (s: string, sep: string, literal = false): string[] => {
   const parts: string[] = [];
   let start = 0;
-  scanTopLevel(s, (i, ch) => {
-    if (ch === sep) {
-      parts.push(s.slice(start, i));
-      start = i + 1;
-    }
-  });
+  scanTopLevel(
+    s,
+    (i, ch) => {
+      if (ch === sep) {
+        parts.push(s.slice(start, i));
+        start = i + 1;
+      }
+    },
+    literal,
+  );
   parts.push(s.slice(start));
   return parts;
 };

@@ -75,7 +75,7 @@ export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = 
       }
       quantifier = modifier;
     } else if (FTS.has(op)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(modifier)) {
+      if (!/^[\p{L}\p{N}_ $]+$/u.test(modifier)) {
         throw parseError(`failed to parse filter (${expr})`, `"${modifier}" is not a valid text search configuration`);
       }
       lang = modifier;
@@ -130,7 +130,7 @@ export const parseLogic = (op: "and" | "or", negate: boolean, value: string): Lo
   }
   const inner = v.slice(1, -1);
   if (inner.trim() === "") throw parseError(`failed to parse logic tree (${value})`, "empty tree");
-  return { kind: "logic", op, negate, children: splitTopLevel(inner, ",").map(parseLogicItem) };
+  return { kind: "logic", op, negate, children: splitTopLevel(inner, ",", true).map(parseLogicItem) };
 };
 
 export const parseOrder = (input: string): OrderTerm[] => {
@@ -179,7 +179,9 @@ export const parseQuery = (
       // PostgREST's parser stops at the first thing it cannot continue with and ignores the rest.
       const end = checkSelect(v);
       if (end instanceof EngineError) throw end;
-      const used = v.slice(0, end).trim();
+      let used = v.slice(0, end).trim();
+      // a number ends a JSON path only before `,`, `.`, `->`, `::` or the end: before anything else it is a key
+      if (end < v.length && !/^(,|\.|->|::)/.test(v.slice(end))) used = used.replace(/(->>?)(-?\d+)$/, '$1"$2"');
       select = used === "" ? [{ kind: "star" }] : parseSelect(used);
     } else if (k === "on_conflict" || k === "columns") {
       // the names end up in the statement: they are read with PostgREST's grammar, which ignores what follows

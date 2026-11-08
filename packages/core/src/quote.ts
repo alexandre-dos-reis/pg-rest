@@ -1,11 +1,15 @@
 import { EngineError } from "./errors";
 
 /** Quote an SQL identifier: `a"b` → `"a""b"`. */
-export const quoteIdent = (name: string): string => {
-  if (name.includes("\0")) {
-    throw new EngineError("invalid_input", "Invalid identifier", "contains a NUL byte");
-  }
-  return `"${name.replace(/"/g, '""')}"`;
+export const quoteIdent = (name: string): string => `"${cString(name).replace(/"/g, '""')}"`;
+
+/**
+ * What the database sees of a text: it ends at the first NUL byte, as a C string does -- that is where
+ * PostgREST's driver cuts a name or a value, so that is where the library does. A NUL is never sent on.
+ */
+export const cString = (text: string): string => {
+  const nul = text.indexOf("\0");
+  return nul < 0 ? text : text.slice(0, nul);
 };
 
 export const quoteQualified = (schema: string, name: string): string => `${quoteIdent(schema)}.${quoteIdent(name)}`;
@@ -18,10 +22,8 @@ export const quoteQualified = (schema: string, name: string): string => `${quote
  * because some drivers (Bun.sql) re-encode string parameters as JSON when the
  * inferred type is json/jsonb.
  */
-export const literal = (value: string): string => {
-  if (value.includes("\0")) {
-    throw new EngineError("invalid_input", "Invalid value", "contains a NUL byte");
-  }
+export const literal = (text: string): string => {
+  const value = cString(text);
   let out = `'${value.replace(/'/g, "''")}'`;
   if (out.includes("\\")) out = `E${out.replace(/\\/g, "\\\\")}`;
   return out;

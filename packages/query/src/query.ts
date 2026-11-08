@@ -876,6 +876,12 @@ const columnsOf = (input: QueryInput): Select | undefined => {
  * must not be turned into one by `String()` (an object with its own `toString`).
  */
 const assertNames = (input: QueryInput): void => {
+  // a typed API does not cut a value where the database would: a NUL byte is refused
+  try {
+    if (JSON.stringify(input).includes("\\u0000")) throw bad("A NUL byte cannot be part of a query");
+  } catch (e) {
+    if (e instanceof EngineError) throw e;
+  }
   for (const [what, v] of [
     ["table", (input as SelectQuery).table],
     ["rpc", (input as RpcQuery).rpc],

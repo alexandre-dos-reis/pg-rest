@@ -24,10 +24,19 @@ export interface RpcCall {
   readonly relation: Relation;
 }
 
-const SINGLE_BODY_TYPES = new Set(["json", "jsonb", "text", "bytea"]);
+/** What a body is read as: JSON, or a raw body (`text/plain`, `text/xml`, `application/octet-stream`). */
+export type BodyType = "json" | "text" | "xml" | "bytea";
 
-export const isSingleUnnamedParam = (fn: FunctionDef): boolean =>
-  fn.args.length === 1 && fn.args[0]!.name === "" && SINGLE_BODY_TYPES.has(fn.args[0]!.type);
+const BODY_TYPES: Record<BodyType, ReadonlySet<string>> = {
+  json: new Set(["json", "jsonb"]),
+  text: new Set(["text"]),
+  xml: new Set(["xml"]),
+  bytea: new Set(["bytea"]),
+};
+
+/** A function that takes the whole body as its only, unnamed parameter. */
+export const isSingleUnnamedParam = (fn: FunctionDef, as: BodyType = "json"): boolean =>
+  fn.args.length === 1 && fn.args[0]!.name === "" && BODY_TYPES[as].has(fn.args[0]!.type);
 
 /** PostgREST's spelling used when more than one function fits: `schema.fn(a => integer, b => text)`. */
 const arrowSignature = (fn: FunctionDef): string =>
@@ -47,6 +56,13 @@ const functionHint = (
   provided: ReadonlySet<string>,
 ): string | null => {
   if (candidates.length > 0) {
+    // nothing was given and a function takes one unnamed parameter: PostgREST suggests its (empty) list of names
+    if (
+      provided.size === 0 &&
+      candidates.some((fn) => (Object.keys(BODY_TYPES) as BodyType[]).some((t) => isSingleUnnamedParam(fn, t)))
+    ) {
+      return `Perhaps you meant to call the function ${schema}.${name}()`;
+    }
     // same name, different parameters: suggest the signature sharing the most parameter names
     let best: { fn: FunctionDef; score: number } | undefined;
     for (const fn of candidates) {
@@ -87,6 +103,7 @@ export const resolveFunction = (
   provided: ReadonlySet<string>,
   hasBody: boolean,
   post = true,
+  bodyType: BodyType = "json",
 ): FunctionDef => {
   const candidates = cache.functions.get(relKey(schema, name)) ?? [];
   const names = [...provided].sort();
@@ -102,6 +119,17 @@ export const resolveFunction = (
       functionHint(cache, schema, name, candidates, provided),
     );
 
+  if (bodyType !== "json") {
+    // a raw body goes to a function that takes nothing else
+    const raw = candidates.filter((fn) => isSingleUnnamedParam(fn, bodyType));
+    if (raw.length === 1) return raw[0]!;
+    throw new EngineError(
+      "function_not_found",
+      `Could not find the function ${schema}.${name} in the schema cache`,
+      `Searched for the function ${schema}.${name} with a single unnamed ${bodyType} parameter, but no matches were found in the schema cache.`,
+      null,
+    );
+  }
   if (candidates.length === 0) throw notFound();
 
   const named = candidates.filter((fn) => {
@@ -109,7 +137,7 @@ export const resolveFunction = (
     for (const p of provided) if (!argNames.has(p)) return false;
     return fn.args.every((a) => a.hasDefault || provided.has(a.name));
   });
-  const single = hasBody ? candidates.filter(isSingleUnnamedParam) : [];
+  const single = hasBody ? candidates.filter((fn) => isSingleUnnamedParam(fn)) : [];
 
   const matches =
     provided.size === 0 && hasBody && single.length > 0
@@ -166,15 +194,17 @@ export const buildRpc = (
   fn: FunctionDef,
   provided: ReadonlyArray<string>,
   rawBody: boolean,
+  bodyType: BodyType = "json",
 ): RpcCall => {
   const fnRef = quoteQualified(fn.schema, fn.name);
   let args: string;
   let usesBody = false;
   let from = "";
 
-  if (rawBody && isSingleUnnamedParam(fn)) {
+  if (rawBody && isSingleUnnamedParam(fn, bodyType)) {
     const t = fn.args[0]!.type;
-    args = `($1::text)::${t}`;
+    // a binary body travels as hex: a text parameter would read its backslashes
+    args = bodyType === "bytea" ? `decode($1::text, 'hex')` : `($1::text)::${t}`;
     usesBody = true;
   } else {
     const used = fn.args.filter((a) => provided.includes(a.name));

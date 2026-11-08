@@ -102,7 +102,7 @@ export const buildInsert = (o: InsertOptions): string => {
   let conflict = "";
   if (o.resolution) {
     const keys = o.onConflict && o.onConflict.length > 0 ? o.onConflict : rel.pk;
-    checkColumns(rel, keys);
+    // the target is the database's to check (PostgREST forwards it: an unknown column is `42703`)
     const targetCols = keys.length ? ` (${keys.map(quoteIdent).join(", ")})` : "";
     if (o.resolution === "ignore-duplicates") {
       conflict = ` ON CONFLICT${targetCols} DO NOTHING`;

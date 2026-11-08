@@ -102,10 +102,14 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await t.db.adapter.query("DELETE FROM api.clients WHERE name = $1::text", [name]);
   });
 
-  test("NUL bytes are rejected, not forwarded", async () => {
-    const r = await t.get(`/clients?name=eq.${encodeURIComponent("a\u0000b")}`);
-    expect(r.status).toBeGreaterThanOrEqual(400);
-    expect(r.status).toBeLessThan(500);
+  test("a NUL byte ends a name or a value, as it does for PostgREST, and is never forwarded", async () => {
+    const cut = await t.get(`/clients?select=id&name=eq.${encodeURIComponent("Ada\u0000; DROP TABLE api.clients")}`);
+    const plain = await t.get("/clients?select=id&name=eq.Ada");
+    expect(cut.json()).toEqual(plain.json());
+    await intact();
+    // a typed call refuses it instead
+    const r = await t.api.query({ table: "clients", where: { name: "a\u0000b" } });
+    expect(r.error?.kind).toBe("invalid_query");
   });
 
   test("rpc arguments and headers are data", async () => {
