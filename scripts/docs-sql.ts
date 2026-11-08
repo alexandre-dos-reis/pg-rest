@@ -2,7 +2,8 @@
  * Writes, under every TypeScript example of `docs/query.md` that calls an operation, the SQL the
  * library runs for it. Nothing here is written by hand: each call is evaluated against the fixture
  * database through an adapter that records the statements, and the last one -- the statement
- * itself, after the transaction setup -- is what lands in the page.
+ * itself, after the transaction setup -- is what lands in the page, without the JSON envelope the
+ * engine wraps every statement in (see `withoutEnvelope`).
  *
  *   TEST_DATABASE_URL=postgres://postgres@localhost:5432/postgres bun scripts/docs-sql.ts          # rewrite
  *   TEST_DATABASE_URL=...                                         bun scripts/docs-sql.ts --check  # fail if stale
@@ -242,6 +243,29 @@ const recorder = (adapter: DbAdapter, log: Recorded[]): DbAdapter => {
   };
 };
 
+/**
+ * The statement without its envelope. Every statement ends with the same `SELECT count(*) ...
+ * FROM pgrst_body`, which turns the rows into JSON and carries the counts back; what a reader wants
+ * is `pgrst_body`, the query itself, so that is what is shown -- with what a write needs in front
+ * of it (`pgrst_source`, and `pgrst_ins` for an upsert). The total a `count` asks for is the one
+ * thing the envelope computes that is not constant, so it is kept as a comment.
+ */
+const withoutEnvelope = (text: string): { sql: string; total: string | undefined } => {
+  const tail = /\sSELECT count\(\*\)::text AS page_total, (.*) FROM pgrst_body AS _t$/;
+  const found = tail.exec(text);
+  if (!found) return { sql: text, total: undefined };
+  const head = text.slice(0, found.index);
+  const at = head.lastIndexOf("pgrst_body AS (");
+  if (at < 0 || !head.endsWith(")")) return { sql: text, total: undefined };
+  const body = head.slice(at + "pgrst_body AS (".length, -1);
+  const before = head.slice(0, at).replace(/,\s*$/, "").trim();
+  const total = /AS body, (.*?)::text AS total_result_set/.exec(found[1]!)?.[1];
+  return {
+    sql: before === "WITH" ? body : `${before} ${body}`,
+    total: total && total !== "NULL" ? total.replace(/^\((.*)\)$/, "$1") : undefined,
+  };
+};
+
 const literal = (p: string | null): string => {
   if (p === null) return "NULL";
   const shown = p.length > 80 ? `${p.slice(0, 77)}...` : p;
@@ -319,7 +343,9 @@ const main = async () => {
         continue;
       }
       const params = (statement.params ?? []).map((p, n) => `-- $${n + 1} = ${literal(p)}`);
-      statements.push([`-- ${labelOf(call, object)}`, `${prettify(statement.text)};`, ...params].join("\n"));
+      const { sql, total } = withoutEnvelope(statement.text);
+      const counted = total ? [`-- the total that \`count\` asks for: ${total}`] : [];
+      statements.push([`-- ${labelOf(call, object)}`, `${prettify(sql)};`, ...counted, ...params].join("\n"));
       produced++;
     }
     if (statements.length === 0) continue;

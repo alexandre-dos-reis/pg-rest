@@ -12,8 +12,10 @@ Under most examples a collapsed block shows **the SQL the library runs** for the
 written by hand: `bun run docs:sql` runs each call against the fixture database and records the statement. Each call is
 one transaction on one connection: a read starts with `SET TRANSACTION READ ONLY`, a `set_config` call applies the role,
 the claims and the `search_path` of the context, and then comes the one statement shown. Values are parameters (`$1`,
-listed under the statement), never part of the text, and the `count(*)` / `json_agg` at the end is the envelope that
-turns the rows into JSON, the same for every call. An example that depends on a variable (`ctx`, an earlier result) or
+listed under the statement), never part of the text. What is shown is the query itself (`pgrst_body`, with the
+`pgrst_source` of a write in front of it): the engine wraps it in the same envelope every time, a `count(*)` and a
+`json_agg` that turn the rows into JSON in the same statement, and leaves it out of these blocks (the total a `count`
+asks for is the one part of it that varies, and is given as a comment). An example that depends on a variable (`ctx`, an earlier result) or
 that is refused on purpose has no SQL.
 
 <!-- toc -->
@@ -144,13 +146,8 @@ const { data } = await pgRest.select<Array<{ id: number; name: string }>>({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."name"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."name"
+FROM "api"."clients" AS "pgrst_root";
 ```
 
 </details>
@@ -173,13 +170,8 @@ const { data } = await pgRest.select({ table: "clients", columns: ["id", "name"]
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."name"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."name"
+FROM "api"."clients" AS "pgrst_root";
 ```
 
 </details>
@@ -216,31 +208,16 @@ const star = await pgRest.select({ table: "profiles", columns: ["*"] });
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM "api"."clients" AS "pgrst_root";
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."name" AS "who"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."name" AS "who"
+FROM "api"."clients" AS "pgrst_root";
 
 -- select from api.profiles
-WITH pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM "api"."profiles" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM "api"."profiles" AS "pgrst_root";
 ```
 
 </details>
@@ -259,13 +236,8 @@ const moods = await pgRest.select({ table: "moods", columns: ["mood", "seen"] })
 
 ```sql
 -- select from api.moods
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."mood", "pgrst_root"."seen"
-  FROM "api"."moods" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."mood", "pgrst_root"."seen"
+FROM "api"."moods" AS "pgrst_root";
 ```
 
 </details>
@@ -304,98 +276,73 @@ const nested = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
-  FROM "api"."orders" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT to_jsonb(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."clients" AS "pgrst_c1"
-      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
-    ) AS _r
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+FROM "api"."orders" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT to_jsonb(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."clients" AS "pgrst_c1"
+    WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+  ) AS _r
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."total"
-      FROM "api"."orders" AS "pgrst_c1"
-      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."total"
+    FROM "api"."orders" AS "pgrst_c1"
+    WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", coalesce("pgrst_j2".j, '[]'::jsonb) AS "products"
-  FROM "api"."orders" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."products" AS "pgrst_c1" JOIN "api"."order_items" AS "pgrst_m3" ON "pgrst_m3"."product_id" = "pgrst_c1"."id"
-      WHERE "pgrst_m3"."order_id" = "pgrst_root"."id"
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", coalesce("pgrst_j2".j, '[]'::jsonb) AS "products"
+FROM "api"."orders" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."products" AS "pgrst_c1" JOIN "api"."order_items" AS "pgrst_m3" ON "pgrst_m3"."product_id" = "pgrst_c1"."id"
+    WHERE "pgrst_m3"."order_id" = "pgrst_root"."id"
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "recent_orders"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."total"
-      FROM "api"."recent_orders"("pgrst_root") AS "pgrst_c1"
-      WHERE TRUE
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "recent_orders"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."total"
+    FROM "api"."recent_orders"("pgrst_root") AS "pgrst_c1"
+    WHERE TRUE
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."id", coalesce("pgrst_j4".j, '[]'::jsonb) AS "order_items"
-      FROM "api"."orders" AS "pgrst_c1"
-      LEFT JOIN LATERAL (
-        SELECT jsonb_agg(_r) AS j
-        FROM (
-          SELECT "pgrst_c3"."qty"
-          FROM "api"."order_items" AS "pgrst_c3"
-          WHERE "pgrst_c3"."order_id" = "pgrst_c1"."id"
-        ) AS _r
-      ) AS "pgrst_j4" ON TRUE
-      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."id", coalesce("pgrst_j4".j, '[]'::jsonb) AS "order_items"
+    FROM "api"."orders" AS "pgrst_c1"
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(_r) AS j
+      FROM (
+        SELECT "pgrst_c3"."qty"
+        FROM "api"."order_items" AS "pgrst_c3"
+        WHERE "pgrst_c3"."order_id" = "pgrst_c1"."id"
+      ) AS _r
+    ) AS "pgrst_j4" ON TRUE
+    WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 ```
 
 </details>
@@ -459,126 +406,91 @@ const page = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
-  FROM "api"."orders" AS "pgrst_root" JOIN LATERAL (
-    SELECT to_jsonb(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."clients" AS "pgrst_c1"
-      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
-    ) AS _r
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
-
--- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_j2".j AS "who"
-  FROM "api"."orders" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT to_jsonb(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."clients" AS "pgrst_c1"
-      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
-    ) AS _r
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
-
--- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_j2"."name" AS "name"
-  FROM "api"."orders" AS "pgrst_root"
-  LEFT JOIN LATERAL (
+SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+FROM "api"."orders" AS "pgrst_root" JOIN LATERAL (
+  SELECT to_jsonb(_r) AS j
+  FROM (
     SELECT "pgrst_c1"."name"
     FROM "api"."clients" AS "pgrst_c1"
     WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
-
--- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", "pgrst_j2"."t" AS "t", "pgrst_j2"."status" AS "status"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT coalesce(jsonb_agg(_r."t"), '[]'::jsonb) AS "t", coalesce(jsonb_agg(_r."status"), '[]'::jsonb) AS "status"
-    FROM (
-      SELECT "pgrst_c1"."total" AS "t", "pgrst_c1"."status"
-      FROM "api"."orders" AS "pgrst_c1"
-      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
-
--- select from api.employees
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", "pgrst_j2".j AS "manager"
-  FROM "api"."employees" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT to_jsonb(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."employees" AS "pgrst_c1"
-      WHERE "pgrst_c1"."id" = "pgrst_root"."manager_id"
-    ) AS _r
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+  ) AS _r
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
-  FROM "api"."orders" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT to_jsonb(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."name"
-      FROM "api"."clients" AS "pgrst_c1"
-      WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
-    ) AS _r
-    LIMIT 1
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_j2".j AS "who"
+FROM "api"."orders" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT to_jsonb(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."clients" AS "pgrst_c1"
+    WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+  ) AS _r
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
+
+-- select from api.orders
+SELECT "pgrst_root"."id", "pgrst_j2"."name" AS "name"
+FROM "api"."orders" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT "pgrst_c1"."name"
+  FROM "api"."clients" AS "pgrst_c1"
+  WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."total"
-      FROM "api"."orders" AS "pgrst_c1"
-      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1
-      ORDER BY "pgrst_c1"."total" DESC
-      LIMIT 3
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", "pgrst_j2"."t" AS "t", "pgrst_j2"."status" AS "status"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT coalesce(jsonb_agg(_r."t"), '[]'::jsonb) AS "t", coalesce(jsonb_agg(_r."status"), '[]'::jsonb) AS "status"
+  FROM (
+    SELECT "pgrst_c1"."total" AS "t", "pgrst_c1"."status"
+    FROM "api"."orders" AS "pgrst_c1"
+    WHERE "pgrst_c1"."client_id" = "pgrst_root"."id"
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
+
+-- select from api.employees
+SELECT "pgrst_root"."name", "pgrst_j2".j AS "manager"
+FROM "api"."employees" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT to_jsonb(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."employees" AS "pgrst_c1"
+    WHERE "pgrst_c1"."id" = "pgrst_root"."manager_id"
+  ) AS _r
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
+
+-- select from api.orders
+SELECT "pgrst_root"."id", "pgrst_j2".j AS "clients"
+FROM "api"."orders" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT to_jsonb(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."name"
+    FROM "api"."clients" AS "pgrst_c1"
+    WHERE "pgrst_c1"."id" = "pgrst_root"."client_id"
+  ) AS _r
+  LIMIT 1
+) AS "pgrst_j2" ON TRUE;
+
+-- select from api.clients
+SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."total"
+    FROM "api"."orders" AS "pgrst_c1"
+    WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1
+    ORDER BY "pgrst_c1"."total" DESC
+    LIMIT 3
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 -- $1 = 'paid'
 ```
 
@@ -603,21 +515,16 @@ const dotted = await pgRest.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
-  FROM "api"."clients" AS "pgrst_root"
-  LEFT JOIN LATERAL (
-    SELECT jsonb_agg(_r) AS j
-    FROM (
-      SELECT "pgrst_c1"."total"
-      FROM "api"."orders" AS "pgrst_c1"
-      WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1 AND "pgrst_c1"."total" >= $2
-    ) AS _r
-  ) AS "pgrst_j2" ON TRUE
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", coalesce("pgrst_j2".j, '[]'::jsonb) AS "orders"
+FROM "api"."clients" AS "pgrst_root"
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(_r) AS j
+  FROM (
+    SELECT "pgrst_c1"."total"
+    FROM "api"."orders" AS "pgrst_c1"
+    WHERE "pgrst_c1"."client_id" = "pgrst_root"."id" AND "pgrst_c1"."status" = $1 AND "pgrst_c1"."total" >= $2
+  ) AS _r
+) AS "pgrst_j2" ON TRUE;
 -- $1 = 'paid'
 -- $2 = '100'
 ```
@@ -658,14 +565,9 @@ const nulls = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE "pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2 AND "pgrst_root"."total" < $3 AND "pgrst_root"."placed_at" < $4 AND "pgrst_root"."id" IN ($5, $6, $7)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE "pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2 AND "pgrst_root"."total" < $3 AND "pgrst_root"."placed_at" < $4 AND "pgrst_root"."id" IN ($5, $6, $7);
 -- $1 = 'paid'
 -- $2 = '100'
 -- $3 = '500'
@@ -675,14 +577,9 @@ FROM pgrst_body AS _t;
 -- $7 = '3'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL);
 ```
 
 </details>
@@ -717,14 +614,9 @@ const ranged = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE "pgrst_root"."status" <> $1 AND "pgrst_root"."total" > $2 AND "pgrst_root"."total" <= $3 AND "pgrst_root"."placed_at" >= $4 AND "pgrst_root"."client_id" IN ($5, $6)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE "pgrst_root"."status" <> $1 AND "pgrst_root"."total" > $2 AND "pgrst_root"."total" <= $3 AND "pgrst_root"."placed_at" >= $4 AND "pgrst_root"."client_id" IN ($5, $6);
 -- $1 = 'void'
 -- $2 = '10'
 -- $3 = '500'
@@ -733,14 +625,9 @@ FROM pgrst_body AS _t;
 -- $6 = '2'
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE "pgrst_root"."total" >= $1 AND "pgrst_root"."total" < $2
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE "pgrst_root"."total" >= $1 AND "pgrst_root"."total" < $2;
 -- $1 = '100'
 -- $2 = '500'
 ```
@@ -774,26 +661,16 @@ const regex = await pgRest.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."name" LIKE $1 AND "pgrst_root"."email" ILIKE $2
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."name" LIKE $1 AND "pgrst_root"."email" ILIKE $2;
 -- $1 = 'A%'
 -- $2 = '%@EXAMPLE.com'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."name" ~ $1 AND "pgrst_root"."email" ~* $2
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."name" ~ $1 AND "pgrst_root"."email" ~* $2;
 -- $1 = '^A.*a$'
 -- $2 = '@example\.com$'
 ```
@@ -841,26 +718,16 @@ const flags = await untyped.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL) AND "pgrst_root"."tags" IS NOT NULL
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."meta" IS NULL AND NOT ("pgrst_root"."email" IS NULL) AND "pgrst_root"."tags" IS NOT NULL;
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE "pgrst_root"."total" IS DISTINCT
-  FROM $1 AND "pgrst_root"."placed_at" IS DISTINCT
-  FROM $2
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE "pgrst_root"."total" IS DISTINCT
+FROM $1 AND "pgrst_root"."placed_at" IS DISTINCT
+FROM $2;
 -- $1 = '0'
 -- $2 = 'null'
 ```
@@ -895,25 +762,15 @@ const searches = await pgRest.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE to_tsvector("pgrst_root"."name") @@ to_tsquery($1)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE to_tsvector("pgrst_root"."name") @@ to_tsquery($1);
 -- $1 = 'ada & lovelace'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE to_tsvector("pgrst_root"."name") @@ plainto_tsquery($1) AND to_tsvector("pgrst_root"."email") @@ phraseto_tsquery($2) AND to_tsvector('english', "pgrst_root"."meta") @@ websearch_to_tsquery('english', 'ada -babbage')
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE to_tsvector("pgrst_root"."name") @@ plainto_tsquery($1) AND to_tsvector("pgrst_root"."email") @@ phraseto_tsquery($2) AND to_tsvector('english', "pgrst_root"."meta") @@ websearch_to_tsquery('english', 'ada -babbage');
 -- $1 = 'ada lovelace'
 -- $2 = 'ada lovelace'
 ```
@@ -959,47 +816,27 @@ const whole = await pgRest.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."tags" @> $1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."tags" @> $1;
 -- $1 = '{vip}'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."tags" <@ $1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."tags" <@ $1;
 -- $1 = '{vip,early,beta}'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."tags" && $1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."tags" && $1;
 -- $1 = '{vip,beta}'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."tags" = $1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."tags" = $1;
 -- $1 = '{vip,early}'
 ```
 
@@ -1037,14 +874,9 @@ const ranges = await untyped.select({
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."meta" @> '{"tier":"gold"}'
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."meta" @> '{"tier":"gold"}';
 ```
 
 </details>
@@ -1101,38 +933,23 @@ const everyone = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE NOT ("pgrst_root"."status" IN ($1, $2)) AND NOT ("pgrst_root"."client_id" = $3) AND NOT ("pgrst_root"."placed_at" IS NULL)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE NOT ("pgrst_root"."status" IN ($1, $2)) AND NOT ("pgrst_root"."client_id" = $3) AND NOT ("pgrst_root"."placed_at" IS NULL);
 -- $1 = 'paid'
 -- $2 = 'shipped'
 -- $3 = '2'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."name" LIKE ANY ($1)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."name" LIKE ANY ($1);
 -- $1 = '{A%,B%}'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."email" ILIKE ALL ($1)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."email" ILIKE ALL ($1);
 -- $1 = '{"%@example.com",ada%}'
 ```
 
@@ -1178,40 +995,25 @@ const inverted = await pgRest.select({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE ("pgrst_root"."status" = $1 OR "pgrst_root"."total" >= $2 OR ("pgrst_root"."status" = $3 AND "pgrst_root"."total" < $4))
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE ("pgrst_root"."status" = $1 OR "pgrst_root"."total" >= $2 OR ("pgrst_root"."status" = $3 AND "pgrst_root"."total" < $4));
 -- $1 = 'new'
 -- $2 = '400'
 -- $3 = 'paid'
 -- $4 = '50'
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE ("pgrst_root"."name" LIKE $1 AND "pgrst_root"."name" LIKE $2)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE ("pgrst_root"."name" LIKE $1 AND "pgrst_root"."name" LIKE $2);
 -- $1 = 'A%'
 -- $2 = '%a'
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  WHERE NOT ("pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2) AND ("pgrst_root"."client_id" = $3 OR NOT (("pgrst_root"."status" = $4 OR "pgrst_root"."status" = $5)))
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+WHERE NOT ("pgrst_root"."status" = $1 AND "pgrst_root"."total" >= $2) AND ("pgrst_root"."client_id" = $3 OR NOT (("pgrst_root"."status" = $4 OR "pgrst_root"."status" = $5)));
 -- $1 = 'paid'
 -- $2 = '100'
 -- $3 = '1'
@@ -1287,66 +1089,35 @@ const lean = await pgRest.select({ table: "clients", columns: ["name", "meta"], 
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  ORDER BY "pgrst_root"."total" DESC NULLS LAST, "pgrst_root"."placed_at" ASC, "pgrst_root"."id" ASC
-  LIMIT 10
-  OFFSET 20
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+ORDER BY "pgrst_root"."total" DESC NULLS LAST, "pgrst_root"."placed_at" ASC, "pgrst_root"."id" ASC
+LIMIT 10
+OFFSET 20;
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."id" = $1
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."id" = $1;
 -- $1 = '1'
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-  LIMIT 1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, (
-  SELECT count(*)
-  FROM "api"."orders" AS "pgrst_root"
-)::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root"
+LIMIT 1;
+-- the total that `count` asks for: SELECT count(*) FROM "api"."orders" AS "pgrst_root"
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root";
 
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."orders" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."orders" AS "pgrst_root";
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."name", "pgrst_root"."meta"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_strip_nulls(json_agg(_t)), '[]'::json)::text AS body,
-  NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name", "pgrst_root"."meta"
+FROM "api"."clients" AS "pgrst_root";
 ```
 
 </details>
@@ -1397,25 +1168,15 @@ const placed = await pgRest.insert({
 
 ```sql
 -- select from api.venues
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."label", "pgrst_root"."owner", "pgrst_root"."branches"
-  FROM "api"."venues" AS "pgrst_root"
-  WHERE "pgrst_root"."id" = $1
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."label", "pgrst_root"."owner", "pgrst_root"."branches"
+FROM "api"."venues" AS "pgrst_root"
+WHERE "pgrst_root"."id" = $1;
 -- $1 = '1'
 
 -- select from api.venues
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."venues" AS "pgrst_root"
-  WHERE "pgrst_root"."owner" = json_populate_record(null::"api"."contact", ('{"name":"Ada","home":{"city":"Paris","zip":"75001"},"tags":["music"]}')::json)
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."venues" AS "pgrst_root"
+WHERE "pgrst_root"."owner" = json_populate_record(null::"api"."contact", ('{"name":"Ada","home":{"city":"Paris","zip":"75001"},"tags":["music"]}')::json);
 
 -- insert into api.venues
 WITH pgrst_source AS (
@@ -1423,13 +1184,9 @@ WITH pgrst_source AS (
   SELECT "label", "owner"
   FROM json_populate_recordset(null::"api"."venues", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root"."owner"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."owner"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"label":"New hall","owner":{"name":"Barbara","home":{"city":"Brussels"}}}]'
 ```
 
@@ -1539,13 +1296,9 @@ WITH pgrst_source AS (
   SELECT "name", "email"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."name"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."name"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"Hopper","email":"grace@example.com"}]'
 
 -- insert into api.clients
@@ -1554,13 +1307,9 @@ WITH pgrst_source AS (
   SELECT "name"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"A"},{"name":"B"}]'
 
 -- insert into api.clients
@@ -1569,13 +1318,9 @@ WITH pgrst_source AS (
   SELECT "name"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"C","email":"c@example.com"}]'
 
 -- upsert into api.products
@@ -1590,20 +1335,9 @@ WITH pgrst_ins AS (
 ), pgrst_source AS (
   SELECT "id", "name", "price"
   FROM pgrst_ins
-), pgrst_body AS (
-  SELECT "pgrst_root"."name"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  (EXISTS (
-  SELECT 1
-  FROM pgrst_ins
-) AND NOT EXISTS (
-  SELECT 1
-  FROM pgrst_ins
-  WHERE pgrst_inserted
-)) AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."name"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"id":1,"name":"Keyboard mk2","price":130}]'
 
 -- update api.orders
@@ -1616,13 +1350,9 @@ WITH pgrst_source AS (
   ) AS _u
   WHERE "pgrst_root"."status" = $2
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."status"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."status"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '{"status":"shipped"}'
 -- $2 = 'paid'
 
@@ -1631,12 +1361,9 @@ WITH pgrst_source AS (
   DELETE FROM "api"."orders" AS "pgrst_root"
   WHERE "pgrst_root"."id" = $1
   RETURNING 1
-), pgrst_body AS (
-  SELECT *
-  FROM pgrst_source
 )
-SELECT count(*)::text AS page_total, ''::text AS body, NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT *
+FROM pgrst_source;
 -- $1 = '99'
 
 -- update api.orders
@@ -1649,13 +1376,9 @@ WITH pgrst_source AS (
   ) AS _u
   WHERE "pgrst_root"."status" = $2
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '{"status":"x"}'
 -- $2 = 'paid'
 ```
@@ -1719,13 +1442,9 @@ WITH pgrst_source AS (
   ) AS _u
   WHERE "pgrst_root"."id" = $2
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."status", "pgrst_root"."total"
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."status", "pgrst_root"."total"
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '{"status":"paid"}'
 -- $2 = '1'
 ```
@@ -1776,13 +1495,9 @@ WITH pgrst_source AS (
   SET "total" = ("pgrst_root"."total" + 10 + (- 2))
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.orders
@@ -1791,13 +1506,9 @@ WITH pgrst_source AS (
   SET "total" = (("pgrst_root"."total" * 3) / 2), "client_id" = (("pgrst_root"."client_id" + 1) % 5)
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '2'
 
 -- update api.products
@@ -1806,13 +1517,9 @@ WITH pgrst_source AS (
   SET "price" = ("pgrst_root"."price" ^ 2)
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 ```
 
@@ -1862,13 +1569,9 @@ WITH pgrst_source AS (
   SET "name" = ('Dr. ' || "pgrst_root"."name" || '!')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.clients
@@ -1877,13 +1580,9 @@ WITH pgrst_source AS (
   SET "tags" = (COALESCE("pgrst_root"."tags", '{}') || '{"vip"}')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.clients
@@ -1892,13 +1591,9 @@ WITH pgrst_source AS (
   SET "meta" = (COALESCE("pgrst_root"."meta", '{}') || '{"seen":true}')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.clients
@@ -1907,13 +1602,9 @@ WITH pgrst_source AS (
   SET "meta" = ("pgrst_root"."meta" - 'seen')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 ```
 
@@ -1973,13 +1664,9 @@ WITH pgrst_source AS (
   SET "name" = UPPER(BTRIM("pgrst_root"."name")), "created_at" = now()
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.orders
@@ -1988,13 +1675,9 @@ WITH pgrst_source AS (
   SET "total" = ROUND(("pgrst_root"."total" * 1.2), 2)
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.clients
@@ -2003,13 +1686,9 @@ WITH pgrst_source AS (
   SET "tags" = ARRAY_APPEND(COALESCE("pgrst_root"."tags", '{}'), 'vip')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.clients
@@ -2018,13 +1697,9 @@ WITH pgrst_source AS (
   SET "tags" = ARRAY_REMOVE("pgrst_root"."tags", 'vip')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 ```
 
@@ -2059,13 +1734,9 @@ WITH pgrst_source AS (
   SET "total" = GREATEST("pgrst_root"."total", 0), "status" = COALESCE(("pgrst_root"."client_id")::text, 'none')
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 
 -- update api.orders
@@ -2074,13 +1745,9 @@ WITH pgrst_source AS (
   SET "total" = LEAST(("pgrst_root"."total" * 2), 1000)
   WHERE "pgrst_root"."id" = $1
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '1'
 ```
 
@@ -2135,13 +1802,9 @@ WITH pgrst_source AS (
   ) AS _u
   WHERE "pgrst_root"."id" = $2
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '{"placed_at":"2026-01-01"}'
 -- $2 = '1'
 ```
@@ -2223,59 +1886,35 @@ const asText = await pgRest.rpc({ rpc: "ovl", args: { a: "one" } });
 
 ```sql
 -- call api.add
-WITH pgrst_body AS (
-  SELECT _f AS pgrst_scalar
-  FROM json_to_record(($1::text)::json) AS _args("a" integer, "b" integer)
-  CROSS JOIN LATERAL "api"."add"("a" := _args."a", "b" := _args."b") AS _f
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
-  NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT _f AS pgrst_scalar
+FROM json_to_record(($1::text)::json) AS _args("a" integer, "b" integer)
+CROSS JOIN LATERAL "api"."add"("a" := _args."a", "b" := _args."b") AS _f;
 -- $1 = '{"a":2,"b":3}'
 
 -- call api.greet
-WITH pgrst_body AS (
-  SELECT _f AS pgrst_scalar
-  FROM "api"."greet"() AS _f
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
-  NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT _f AS pgrst_scalar
+FROM "api"."greet"() AS _f;
 
 -- call api.greet
-WITH pgrst_body AS (
-  SELECT _f AS pgrst_scalar
-  FROM json_to_record(($1::text)::json) AS _args("name" text)
-  CROSS JOIN LATERAL "api"."greet"("name" := _args."name") AS _f
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null') AS body,
-  NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT _f AS pgrst_scalar
+FROM json_to_record(($1::text)::json) AS _args("name" text)
+CROSS JOIN LATERAL "api"."greet"("name" := _args."name") AS _f;
 -- $1 = '{"name":"Ada"}'
 
 -- call api.nothing
-WITH pgrst_body AS (
-  SELECT 1 AS pgrst_scalar
-  FROM "api"."nothing"() AS _f
-)
-SELECT count(*)::text AS page_total, ''::text AS body, NULL::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT 1 AS pgrst_scalar
+FROM "api"."nothing"() AS _f;
 
 -- call api.orders_by_status
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."total"
-  FROM (
-    SELECT _f.*
-    FROM json_to_record(($1::text)::json) AS _args("s" text)
-    CROSS JOIN LATERAL "api"."orders_by_status"("s" := _args."s") AS _f
-  ) AS "pgrst_root"
-  WHERE "pgrst_root"."total" >= $2
-  ORDER BY "pgrst_root"."total" DESC
-  LIMIT 5
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."total"
+FROM (
+  SELECT _f.*
+  FROM json_to_record(($1::text)::json) AS _args("s" text)
+  CROSS JOIN LATERAL "api"."orders_by_status"("s" := _args."s") AS _f
+) AS "pgrst_root"
+WHERE "pgrst_root"."total" >= $2
+ORDER BY "pgrst_root"."total" DESC
+LIMIT 5;
 -- $1 = '{"s":"paid"}'
 -- $2 = '100'
 ```
@@ -2326,32 +1965,18 @@ WITH pgrst_source AS (
   SELECT "body"
   FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"body":"mine"}]'
 
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."body"
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."body"
+FROM "api"."notes" AS "pgrst_root";
 
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."notes" AS "pgrst_root";
 ```
 
 </details>
@@ -2391,13 +2016,8 @@ const { data, error } = await pgQuery.select({ table: "notes", columns: ["body"]
 
 ```sql
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."body"
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."body"
+FROM "api"."notes" AS "pgrst_root";
 ```
 
 </details>
@@ -2434,22 +2054,12 @@ forgotten.error?.kind; // "no_context"
 
 ```sql
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."notes" AS "pgrst_root";
 
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM "api"."notes" AS "pgrst_root";
 ```
 
 </details>
@@ -2545,13 +2155,9 @@ WITH pgrst_source AS (
   SELECT "client_id", "total"
   FROM json_populate_recordset(null::"api"."orders", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"client_id":1,"total":42}]'
 ```
 
@@ -2595,16 +2201,10 @@ const { data, count } = await pgRest.transaction(async (tx) => {
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id", "pgrst_root"."name"
-  FROM "api"."clients" AS "pgrst_root"
-  LIMIT 10
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, (
-  SELECT count(*)
-  FROM "api"."clients" AS "pgrst_root"
-)::text AS total_result_set, false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id", "pgrst_root"."name"
+FROM "api"."clients" AS "pgrst_root"
+LIMIT 10;
+-- the total that `count` asks for: SELECT count(*) FROM "api"."clients" AS "pgrst_root"
 ```
 
 </details>
@@ -2654,13 +2254,9 @@ WITH pgrst_source AS (
   SELECT "name", "email"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"Ada","email":"a@b.c"}]'
 
 -- insert into api.clients
@@ -2669,13 +2265,9 @@ WITH pgrst_source AS (
   SELECT "name", "email"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"Dup","email":"a@b.c"}]'
 
 -- insert into api.notes
@@ -2684,13 +2276,9 @@ WITH pgrst_source AS (
   SELECT "body"
   FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"body":"gone"}]'
 
 -- insert into api.notes
@@ -2699,13 +2287,9 @@ WITH pgrst_source AS (
   SELECT "body"
   FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"body":"gone"}]'
 ```
 
@@ -2743,24 +2327,15 @@ WITH pgrst_source AS (
   SELECT "body"
   FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"body":"gone"}]'
 
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM "api"."notes" AS "pgrst_root"
-  WHERE "pgrst_root"."body" = $1
-)
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM "api"."notes" AS "pgrst_root"
+WHERE "pgrst_root"."body" = $1;
 -- $1 = 'nobody'
 ```
 
@@ -2802,13 +2377,9 @@ WITH pgrst_source AS (
   SELECT "name"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce((json_agg(_t) -> 0), 'null'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"Ada"}]'
 ```
 
@@ -2856,31 +2427,16 @@ await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root";
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root";
 
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root";
 ```
 
 </details>
@@ -2923,23 +2479,14 @@ WITH pgrst_source AS (
   SELECT "body"
   FROM json_populate_recordset(null::"api"."notes", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"body":"mine"}]'
 
 -- select from api.notes
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."notes" AS "pgrst_root"
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."notes" AS "pgrst_root";
 ```
 
 </details>
@@ -2989,13 +2536,9 @@ WITH pgrst_source AS (
   SELECT "name", "email"
   FROM json_populate_recordset(null::"api"."clients", ($1::text)::json)
   RETURNING "pgrst_root".*
-), pgrst_body AS (
-  SELECT "pgrst_root".*
-  FROM pgrst_source AS "pgrst_root"
 )
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root".*
+FROM pgrst_source AS "pgrst_root";
 -- $1 = '[{"name":"Dup","email":"ada@example.com"}]'
 ```
 
@@ -3110,14 +2653,9 @@ void pgRest.select({ table: "orders", columns: ["status", "total.sum()"] });
 
 ```sql
 -- select from api.clients
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."id"
-  FROM "api"."clients" AS "pgrst_root"
-  WHERE "pgrst_root"."meta" ->> 'tier' ILIKE $1
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."id"
+FROM "api"."clients" AS "pgrst_root"
+WHERE "pgrst_root"."meta" ->> 'tier' ILIKE $1;
 -- $1 = 'go%'
 ```
 
@@ -3142,15 +2680,10 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 
 ```sql
 -- select from api.orders
-WITH pgrst_body AS (
-  SELECT "pgrst_root"."status", sum("pgrst_root"."total") AS "sum"
-  FROM "api"."orders" AS "pgrst_root"
-  GROUP BY "pgrst_root"."status"
-  ORDER BY "pgrst_root"."status" ASC
-)
-SELECT count(*)::text AS page_total, coalesce(json_agg(_t), '[]'::json)::text AS body, NULL::text AS total_result_set,
-  false AS none_inserted
-FROM pgrst_body AS _t;
+SELECT "pgrst_root"."status", sum("pgrst_root"."total") AS "sum"
+FROM "api"."orders" AS "pgrst_root"
+GROUP BY "pgrst_root"."status"
+ORDER BY "pgrst_root"."status" ASC;
 ```
 
 </details>
