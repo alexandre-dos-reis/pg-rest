@@ -575,4 +575,32 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     // @ts-expect-error a nested scope takes no options either
     void (() => pgRest.transaction(async (tx) => tx.transaction(async () => 1, { readOnly: true })));
   });
+  test("a prepared query is checked against the database and types its result", async () => {
+    const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+      table: "orders",
+      select: ["id", "total"],
+      where: { status: a.status, total: { $gte: a.min } },
+      order: ["id"],
+      count: "exact" as const,
+    }));
+    const r = ok(await pgRest.run(paidOver({ status: "paid", min: 100 }), authed));
+    assertType<Equal<typeof r.data, Array<{ id: number; total: number }>>>();
+    assertType<Equal<typeof r.count, number>>();
+    expect(r.data).toEqual([{ id: 1, total: 250 }]);
+    expect(r.count).toBe(1);
+
+    // an argument has to be the type the call is declared with
+    // @ts-expect-error min is a number
+    void (() => paidOver({ status: "paid", min: "100" }));
+    // @ts-expect-error a prepared query is checked like any other: this column does not exist
+    void (() => pgRest.prepare((a: { s: string }) => ({ table: "orders", select: ["nope"], where: { status: a.s } })));
+
+    const inTx = ok(
+      await pgRest.transaction(async (tx) => (await tx.run(paidOver({ status: "paid", min: 0 }))).data, authed),
+    );
+    assertType<Equal<typeof inTx.data, Array<{ id: number; total: number }>>>();
+    const viaContext = ok(await pgRest.setContextQuery(() => authed).run(paidOver({ status: "new", min: 0 })));
+    // other tests of this file add orders: the fixture's own is the first
+    expect(viaContext.data[0]).toEqual({ id: 2, total: 40.5 });
+  });
 });

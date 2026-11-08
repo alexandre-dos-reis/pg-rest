@@ -5,11 +5,14 @@ import {
   type ContextSource,
   type QueryInput,
   type QueryResult,
+  type Prepared,
+  type PreparedArgs,
   type Transaction,
   type TransactionOptions,
   failedTransaction,
   noContextResult,
   noContextTransaction,
+  prepareQuery,
   resolveContextSource,
   runQuery,
   runTransaction,
@@ -55,6 +58,8 @@ export type {
   OperatorSpec,
   OperatorValue,
   Order,
+  Prepared,
+  PreparedArgs,
   QueryFailed,
   QueryInput,
   QueryOk,
@@ -100,6 +105,31 @@ export interface QueryInstance {
    * original under `cause`, so checking `error` is enough and no `try`/`catch` is needed.
    */
   query<T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+  /** Run a call of a prepared query (see {@link QueryInstance.prepare}), with this context. */
+  run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
+  /**
+   * Plan a select once and get back a function that fills in its values: each call is string
+   * concatenation and the statement for the driver, with no parsing and no planning. What it returns
+   * is run with `run`: on the instance, as `tx.run` in a transaction, or on a `setContextQuery` function.
+   *
+   * ```ts ignore
+   * const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+   *   table: "orders",
+   *   select: ["id", "total"],
+   *   where: { status: a.status, total: { $gte: a.min } },
+   *   order: ["total.desc"],
+   * }));
+   * const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
+   * ```
+   *
+   * `build` runs once, with a stand-in for each argument, so an argument is a **filter value and
+   * nothing else**: it cannot choose a column, an operator, a limit or the shape of the query, and
+   * `build` cannot branch on it. Preparing fails (it throws, at set-up time) for a query that does
+   * not follow that, a table that does not exist, or anything but a select. A call whose values change the SQL itself --
+   * `null`, a `*` wildcard, a composite -- is not an error: it builds the query object and runs it
+   * the ordinary way.
+   */
+  prepare<A extends PreparedArgs, T = unknown>(build: (args: A) => QueryInput): (args: A) => Prepared<T>;
   /**
    * {@link QueryInstance.query} with the context decided once: `source` is either a fixed
    * {@link RequestContext} or a function called at every call, so an `AsyncLocalStorage` entered by
@@ -164,7 +194,7 @@ const create = (options: QueryOptions): QueryInstance => {
   const cache = fromDescriptor(options.schema);
   const { adapter, config } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
 
-  const query = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
+  const query = async <T = unknown>(input: QueryInput | Prepared<T>, ctx?: RequestContext): Promise<QueryResult<T>> => {
     try {
       return (await runQuery({ db: adapter, config, cache }, input, ctx ?? {})) as QueryResult<T>;
     } catch (e) {
@@ -188,7 +218,10 @@ const create = (options: QueryOptions): QueryInstance => {
   const setContextQuery = (source: ContextSource): ContextQuery => {
     // The source is read per call, not once here: that is what makes an AsyncLocalStorage useful,
     // one bound `db` serving a different context for every request in flight.
-    const call = async <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>> => {
+    const call = async <T = unknown>(
+      input: QueryInput | Prepared<T>,
+      ctx?: RequestContext,
+    ): Promise<QueryResult<T>> => {
       let context = ctx;
       if (!context) {
         try {
@@ -221,11 +254,16 @@ const create = (options: QueryOptions): QueryInstance => {
       return transaction<A>(fn, { ...context, ...(scope ?? {}) });
     };
 
-    return Object.assign(call, { transaction: bound });
+    return Object.assign(call, { transaction: bound, run: call as ContextQuery["run"] });
   };
+
+  const prepare = <A extends PreparedArgs, T = unknown>(build: (args: A) => QueryInput): ((args: A) => Prepared<T>) =>
+    prepareQuery({ db: adapter, config, cache }, build) as (args: A) => Prepared<T>;
 
   return {
     query,
+    run: query as QueryInstance["run"],
+    prepare,
     setContextQuery,
     transaction,
     close: async () => {},
