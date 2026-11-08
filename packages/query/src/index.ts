@@ -3,6 +3,8 @@ import { type EngineOptions, createStaticEngine } from "@tsql/core/engine";
 import {
   type ContextQuery,
   type ContextSource,
+  type PreRequest,
+  type QueryConfig,
   type QueryInput,
   type QueryResult,
   type Prepared,
@@ -22,7 +24,8 @@ import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
-export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
+export type { RequestContext } from "@tsql/core/core";
+export type { PreRequest, PreRequestInfo } from "./query";
 export { describeErrorKind } from "./kinds";
 export type { ErrorKind as QueryErrorKind } from "./kinds";
 export { QueryError } from "./query";
@@ -83,6 +86,8 @@ export type { SchemaDescriptor } from "@tsql/core/schema";
  * here -- that is `@tsql/rest`.
  */
 export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
+  /** A SQL function (`"auth.check_request"`) or callback to run in each call's transaction, before its statement. */
+  readonly preRequest?: PreRequest;
   /**
    * The schema of the database, as generated at build time by `@tsql/query/types`. Nothing is read
    * from the catalog when the instance is created or while it runs, and the descriptor is not
@@ -192,7 +197,8 @@ export interface CreateQuery {
 
 const create = (options: QueryOptions): QueryInstance => {
   const cache = fromDescriptor(options.schema);
-  const { adapter, config } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
+  const { adapter, config: shared } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
+  const config: QueryConfig = { ...shared, preRequest: options.preRequest };
 
   const query = async <T = unknown>(input: QueryInput | Prepared<T>, ctx?: RequestContext): Promise<QueryResult<T>> => {
     try {

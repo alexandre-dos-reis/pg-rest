@@ -25,23 +25,12 @@ export interface RequestContext {
   readonly settings?: Readonly<Record<string, string>> | undefined;
 }
 
-export interface PreRequestInfo {
-  readonly role: string;
-  readonly claims: Readonly<Record<string, unknown>>;
-  readonly method: Method;
-  readonly path: string;
-  /** The HTTP request, when the call came through `handle()`. In-process `query()` calls have none. */
-  readonly request?: Request | undefined;
-}
-
 export interface CoreConfig {
   readonly schemas: ReadonlyArray<string>;
   /** Role for requests without one; `undefined` refuses anonymous access. */
   readonly anonymousRole: string | undefined;
   readonly maxRows?: number | undefined;
   readonly extraSearchPath: ReadonlyArray<string>;
-  /** SQL function (`"auth"."check"`) or callback run in the transaction before the request (db-pre-request). */
-  readonly preRequest?: string | ((session: DbSession, info: PreRequestInfo) => Promise<void>) | undefined;
 }
 
 export interface Env {
@@ -56,22 +45,23 @@ export interface Env {
 }
 
 /**
- * Where a call came from. `path` is what `preRequest` is told. The `request.*` settings of SQL
- * (`request.method`, `request.path`, `request.headers`, `request.cookies`) are PostgREST's HTTP
- * contract, so only `@tsql/rest` fills `http`; a call from `query()` has none and sets none of them.
+ * What a transport adds to one call, and that the engine does not interpret: settings to `set_config`
+ * after the identity, and something to run in the transaction before the statement. The `request.*`
+ * settings and `preRequest` are built by the packages (`@tsql/rest` from the HTTP request, `@tsql/query`
+ * from its own options); the engine only issues them, in the transaction, in this order.
  */
-export interface Caller {
-  readonly path: string;
-  /** The HTTP request, when there is one. Passed through to `preRequest`. */
-  readonly request?: Request | undefined;
-  /** What SQL reads as `request.headers` and `request.cookies`. Absent: the `request.*` settings are not set. */
-  readonly http?:
-    | {
-        readonly headers: Readonly<Record<string, string>>;
-        readonly cookies: Readonly<Record<string, string>>;
-      }
-    | undefined;
+export interface Call {
+  /** Transaction-local settings (`set_config(name, value, true)`), issued with the ones for the statement. */
+  readonly settings?: ReadonlyArray<readonly [string, string]> | undefined;
+  /** Run in the call's transaction after the settings and before the statement. A throw ends the call. */
+  readonly before?: ((session: DbSession) => Promise<void>) | undefined;
 }
+
+/** Who the database will see for a call: the role (or the anonymous one) and the claims. */
+export const identityOf = (env: Env, ctx: RequestContext): { role: string; claims: Record<string, unknown> } => {
+  const role = ctx.role ?? env.config.anonymousRole!;
+  return { role, claims: { role, ...(ctx.claims ?? {}) } };
+};
 
 /**
  * What a call comes to, before it is dressed for a transport: the status, the headers PostgREST's
@@ -184,21 +174,12 @@ const ctxEntries = (
   ctx: RequestContext,
   role: string,
   claims: Record<string, unknown>,
-  caller: Caller,
-  method: Method,
+  call: Call,
   schema: string,
   prefer: Preferences,
   part: "statement" | "both",
 ): Array<[string, string]> => {
-  const where: Array<[string, string]> = [];
-  if (caller.http) {
-    where.push(
-      ["request.method", method],
-      ["request.path", caller.path],
-      ["request.headers", JSON.stringify(caller.http.headers)],
-      ["request.cookies", JSON.stringify(caller.http.cookies)],
-    );
-  }
+  const where: Array<[string, string]> = call.settings ? call.settings.map(([k, v]) => [k, v]) : [];
   const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
   where.push(["search_path", searchPath]);
   if (prefer.timezone) where.push(["timezone", prefer.timezone]);
@@ -733,8 +714,7 @@ interface RawResult {
 export const execute = async (
   env: Env,
   ctx: RequestContext,
-  caller: Caller,
-  method: Method,
+  call: Call,
   schema: string,
   prefer: Preferences,
   format: OutputFormat,
@@ -742,15 +722,12 @@ export const execute = async (
   honoredTx: boolean,
   wantsPlan?: { readonly format: "json" | "text"; readonly options: ReadonlyArray<string> },
 ): Promise<Outcome> => {
-  const role = ctx.role ?? env.config.anonymousRole!;
-  const claims: Record<string, unknown> = { role, ...(ctx.claims ?? {}) };
+  const { role, claims } = identityOf(env, ctx);
   // Inside a scope the transaction is already open and already carries the identity: this call
   // only says where its own statement runs, and owns neither the boundary nor what READ ONLY and a
   // replay would decide for every other query in the same transaction.
   const session = env.session;
-  const setup = setConfigSql(
-    ctxEntries(env, ctx, role, claims, caller, method, schema, prefer, session ? "statement" : "both"),
-  );
+  const setup = setConfigSql(ctxEntries(env, ctx, role, claims, call, schema, prefer, session ? "statement" : "both"));
   const strict = prefer.handling === "strict";
   const rollback = (honoredTx && prefer.tx === "rollback") || wantsPlan !== undefined;
 
@@ -760,12 +737,7 @@ export const execute = async (
         if (plan.readOnly && !session) await s.query("SET TRANSACTION READ ONLY");
         await s.query(setup.sql, setup.params);
 
-        const pre = env.config.preRequest;
-        if (typeof pre === "string") {
-          await s.query(`SELECT ${pre.split(".").map(quoteIdent).join(".")}()`);
-        } else if (pre) {
-          await pre(s, { role, claims, method, path: caller.path, request: caller.request });
-        }
+        if (call.before) await call.before(s);
 
         let planned: number | undefined;
         if (plan.planned) {

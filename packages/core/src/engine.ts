@@ -23,8 +23,6 @@ export interface EngineOptions {
   readonly maxRows?: number;
   /** Appended to `search_path` after the selected schema. Default `["public"]`. */
   readonly extraSearchPath?: ReadonlyArray<string>;
-  /** A SQL function (`"auth.check_request"`) or callback to run before each request. */
-  readonly preRequest?: CoreConfig["preRequest"];
 }
 
 /** What an instance is built on: the database, the settings both entry points read, the schema cache. */
@@ -74,7 +72,6 @@ const build = (options: EngineOptions): Pick<Engine, "adapter" | "config"> => {
     anonymousRole: options.anonymousRole === false ? undefined : (options.anonymousRole ?? "anon"),
     maxRows: options.maxRows,
     extraSearchPath: options.extraSearchPath ?? ["public"],
-    preRequest: options.preRequest,
   };
 
   return { adapter, config };
