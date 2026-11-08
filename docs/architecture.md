@@ -7,11 +7,9 @@ feature or a fix in the core lands in both; what is only HTTP (content negotiati
 reaches `@tsql/query`, and what is only an extension of PostgREST never reaches `@tsql/rest`.
 
 ```
-                      ┌─ handleRequest ─ URL, headers, body, content negotiation
-                      │
-[key, value][] ──▶ parseQuery ──▶ ParsedQuery ──▶ planTable / planRpc ──▶ execute ──▶ Outcome
-                      │                              (SQL builders)      (one transaction)
-                      └─ query() ─ an object, rendered into the same parameters
+   rest:  [key, value][] ──▶ parseQuery (grammars) ─┐
+                                                    ├─▶ ParsedQuery ──▶ planTable / planRpc ──▶ execute ──▶ Outcome
+   query: an object ──────▶ toParsed ────────────────┘                    (SQL builders)      (one transaction)
 ```
 
 - [How each package consumes the core](#how-each-package-consumes-the-core)
@@ -32,10 +30,11 @@ status code, and it holds no PostgREST error code. Each package imports the step
         @tsql/rest                         packages/core                         @tsql/query
  ┌─────────────────────┐        ┌──────────────────────────────┐        ┌─────────────────────┐
  │ Request             │        │                              │        │ a query object      │
- │  └ http.ts, request │        │  parse/*   ParsedQuery       │        │  └ query.ts         │
- │     (route, Accept, │──────▶ │  planTable / planRpc (sql/*) │ ◀──────│     (rendered into  │
- │      Prefer, Range, │ params │  execute  ─▶ Outcome         │ params │      the same       │
- │      body, cookies) │ Caller │  schema cache, adapters      │ Caller │      parameters)    │
+ │  └ http.ts, request │        │  ParsedQuery (the IR)        │        │  └ query.ts         │
+ │     parseQuery:     │──────▶ │  planTable / planRpc (sql/*) │ ◀──────│     toParsed: built │
+ │     the grammar     │ parsed │  execute  ─▶ Outcome         │ parsed │     from the object,│
+ │     (route, Accept, │ Caller │  schema cache, adapters      │ Caller │     no text, no     │
+ │      Prefer, Range, │ format │                              │ format │     grammar)        │
  │                     │ format │                              │ format │                     │
  │ Response  ◀─ toResponse ◀──── Outcome {status, headers, text} ────▶ { data, count, error } │
  │ ApiError  ◀─ toApiError ◀──── EngineError(reason), DbQueryError ───▶ QueryError(kind)     │
@@ -47,7 +46,7 @@ What each side hands the core, and what it takes back:
 | | `@tsql/rest` | `@tsql/query` |
 | --- | --- | --- |
 | **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
-| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` and `rest`'s own readers | an object, built straight into a `ParsedQuery` by `query.ts` (`toParsed`); a shape it does not cover (a JSON path, a cast, an aggregate…) is rendered into the same `[key, value][]` and parsed, so the grammar stays the one definition |
+| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
 | **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
 | **Caller** | `{ path, request, http: { headers, cookies } }`: the `request.*` settings are set when `http` is given (`requestSettings`) | `{ path }` only: there is no request, so no `request.*` setting |
 | **Planning and execution** | `planTable` / `planRpc`, then `execute` | the same calls, on the same code |
@@ -67,7 +66,7 @@ checks it). And a feature that exists for one transport only is not in the core:
    target (`/table`, `/rpc/fn`, or the OpenAPI root), the schema (`Accept-Profile` / `Content-Profile`), the
    preferences (`Prefer`), the output format (`Accept`, including CSV, GeoJSON, custom media types and plans) and the
    range. The body is parsed for a write.
-2. **Parse the query** (`parse/*`). `parseQuery` turns the query parameters into a `ParsedQuery`: a `select` tree
+2. **Parse the query** (`rest/src/parse/*`). `parseQuery` turns the query parameters into a `ParsedQuery` (the engine's own input, defined in `core/src/parse/filter.ts`; `@tsql/query` builds one from its object instead): a `select` tree
    (columns, aliases, casts, JSON paths, aggregates, embedded resources with their hints and join type), the filters as
    a tree, order, paging, `on_conflict` and `columns`. The grammars follow PostgREST's Parsec ones, including where they
    stop and ignore the rest of a malformed value.
@@ -119,7 +118,8 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
 | `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
-| `packages/core/src/parse/*` | the query string: `select`, filters and logic trees, fields and JSON paths, request headers, and the parser combinators the grammars are written with |
+| `packages/core/src/parse/*` | what the engine takes in, without any syntax of its own: `ParsedQuery` and its parts (`filter.ts`), the hand-written readers of a column, a `select` item and an order term (`field.ts`, `select.ts`), the operator vocabulary (`syntax.ts`) and the request types |
+| `packages/rest/src/parse/*` | PostgREST's query string: the Parsec-style combinators (`parsec.ts`), the grammars that give its error messages (`grammar.ts`) and `parseQuery` (`query-string.ts`) |
 | `packages/core/src/sql/*` | SQL generation: `read`, `write`, `rpc`, `filters`, `statement`, and `expression` (the computed `set`) |
 | `packages/core/src/schema.ts` | introspection (`pg_catalog`), the cache, and relationship resolution |
 | `packages/core/src/service.ts` | the schema store (serialised reloads) |

@@ -1,15 +1,8 @@
-import { EngineError } from "../errors";
 import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "./field";
-import { type SelectItem, parseSelect } from "./select";
-import { checkFilter, checkLogicTree, checkOrder, checkSelect } from "./grammar";
-import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER, scanList } from "./syntax";
+import type { SelectItem } from "./select";
+import type { OPERATORS_ORDER } from "./syntax";
 
 export type Operator = (typeof OPERATORS_ORDER)[number];
-
-const OPERATORS: ReadonlySet<string> = new Set(OPERATORS_ORDER);
-const QUANTIFIABLE: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
-const FTS: ReadonlySet<string> = new Set(FTS_ORDER);
-const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);
 
 export interface Filter {
   readonly kind: "filter";
@@ -54,7 +47,7 @@ export interface NodeParams {
   readonly presence: EmbedPresence[];
 }
 
-const emptyParams = (): NodeParams => ({ filters: [], order: [], presence: [] });
+export const emptyParams = (): NodeParams => ({ filters: [], order: [], presence: [] });
 
 export interface ParsedQuery {
   readonly select: SelectItem[];
@@ -66,124 +59,11 @@ export interface ParsedQuery {
 }
 
 // ---------------------------------------------------------------------------
-// values
-// ---------------------------------------------------------------------------
-
-const parseList = (raw: string, where: string): string[] => {
-  const t = raw.trim();
-  if (!t.startsWith("(") || !t.endsWith(")")) {
-    throw parseError(`failed to parse filter (${where})`, "expected a list in parentheses, like (a,b,c)");
-  }
-  const inner = t.slice(1, -1);
-  if (inner.trim() === "") return [];
-  return splitTopLevel(inner, ",").map((v) => unquote(v));
-};
-
-/**
- * Parse `[not.]op[(modifier)].value`, the right-hand side of a filter.
- * `unquoteValue` is true inside and()/or() trees where values may be quoted.
- */
-export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = false): Filter => {
-  if (!unquoteValue) {
-    const bad = checkFilter(expr);
-    if (bad) throw bad;
-  }
-  let rest = expr;
-  let negate = false;
-  if (rest.startsWith("not.")) {
-    negate = true;
-    rest = rest.slice(4);
-  }
-  const dot = rest.indexOf(".");
-  if (dot < 0) throw parseError(`failed to parse filter (${expr})`);
-  const opToken = rest.slice(0, dot);
-  const rawValue = rest.slice(dot + 1);
-
-  const m = /^([a-z]+)(?:\(([^)]*)\))?$/.exec(opToken);
-  if (!m || !OPERATORS.has(m[1]!)) {
-    throw parseError(`failed to parse filter (${expr})`, `unknown operator "${opToken}"`);
-  }
-  const op = m[1]! as Operator;
-  const modifier = m[2];
-
-  let quantifier: "any" | "all" | undefined;
-  let lang: string | undefined;
-  if (modifier !== undefined) {
-    if (QUANTIFIABLE.has(op)) {
-      if (modifier !== "any" && modifier !== "all") {
-        throw parseError(`failed to parse filter (${expr})`, `"${modifier}" is not a valid quantifier, use any or all`);
-      }
-      quantifier = modifier;
-    } else if (FTS.has(op)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(modifier)) {
-        throw parseError(`failed to parse filter (${expr})`, `"${modifier}" is not a valid text search configuration`);
-      }
-      lang = modifier;
-    } else {
-      throw parseError(`failed to parse filter (${expr})`, `operator ${op} does not take a modifier`);
-    }
-  }
-
-  let value: string | string[] = unquoteValue ? unquote(rawValue) : rawValue;
-  if (op === "in") {
-    // PostgREST stops at the closing parenthesis and ignores what follows.
-    const end = unquoteValue ? undefined : scanList(rawValue, 0);
-    value = parseList(typeof end === "number" ? rawValue.slice(0, end) : rawValue, expr);
-  } else if (op === "is") {
-    const prefix = unquoteValue ? undefined : IS_VALUES_ORDER.find((w) => rawValue.startsWith(w));
-    const v = (prefix ?? String(value)).toLowerCase();
-    if (!IS_VALUES.has(v)) {
-      throw parseError(`failed to parse filter (${expr})`, "is only accepts null, not_null, true, false and unknown");
-    }
-    value = v;
-  }
-
-  return {
-    kind: "filter",
-    field,
-    negate,
-    op,
-    ...(quantifier ? { quantifier } : {}),
-    ...(lang ? { lang } : {}),
-    value,
-  };
-};
-
-const parseLogicItem = (raw: string): FilterNode => {
-  const item = raw.trim();
-  const m = /^(not\.)?(and|or)\(/.exec(item);
-  if (m) {
-    if (!item.endsWith(")")) throw parseError("Unbalanced parentheses in logic tree", `in "${item}"`);
-    const inner = item.slice(m[0].length - 1); // keep "(...)"
-    return parseLogic(m[2] as "and" | "or", Boolean(m[1]), inner);
-  }
-  const dot = item.indexOf(".");
-  if (dot < 0) throw parseError(`failed to parse logic tree (${item})`);
-  return parseOperatorExpr(parseField(item.slice(0, dot)), item.slice(dot + 1), true);
-};
-
-/** Parse `(a.eq.1,or(b.eq.2,c.eq.3))` into a {@link Logic} node. */
-export const parseLogic = (op: "and" | "or", negate: boolean, value: string): Logic => {
-  const v = value.trim();
-  if (!v.startsWith("(") || !v.endsWith(")")) {
-    throw parseError(`failed to parse logic tree (${value})`, "expected a list in parentheses");
-  }
-  const inner = v.slice(1, -1);
-  if (inner.trim() === "") throw parseError(`failed to parse logic tree (${value})`, "empty tree");
-  return { kind: "logic", op, negate, children: splitTopLevel(inner, ",").map(parseLogicItem) };
-};
-
-// ---------------------------------------------------------------------------
 // order / pagination
 // ---------------------------------------------------------------------------
 
-export const parseOrder = (input: string): OrderTerm[] => {
-  const bad = checkOrder(input);
-  if (bad) throw bad;
-  return parseOrderTerms(input);
-};
-
-const parseOrderTerms = (input: string): OrderTerm[] =>
+/** The terms of an order list (`total.desc,client(name).nullslast`), without the grammar's check. */
+export const parseOrderTerms = (input: string): OrderTerm[] =>
   splitTopLevel(input, ",").map((raw) => {
     const tokens = raw.trim().split(".");
     let nulls: "first" | "last" | undefined;
@@ -209,129 +89,23 @@ const parseOrderTerms = (input: string): OrderTerm[] =>
   });
 
 /** PostgREST ignores a `limit`/`offset` that is not an integer; a negative limit is refused later. */
-const parseCount = (name: "limit" | "offset", v: string): number | undefined => {
+export const parseCount = (name: "limit" | "offset", v: string): number | undefined => {
   const ok = name === "limit" ? /^-?\d+$/.test(v) : /^\d+$/.test(v);
   return ok ? Number(v) : undefined;
 };
 
-// ---------------------------------------------------------------------------
-// query string
-// ---------------------------------------------------------------------------
-
-const walkEmbeds = (items: ReadonlyArray<SelectItem>, prefix: string[], known: Map<string, string>) => {
+/**
+ * The embedded resources a select names, by dotted path (`orders.items`). PostgREST 16 still accepts
+ * the original table name of an aliased embed (`select=a:orders(*)&orders.id=eq.1`), so both spellings
+ * map to the alias path.
+ */
+export const walkEmbeds = (items: ReadonlyArray<SelectItem>, prefix: string[], known: Map<string, string>): void => {
   for (const it of items) {
     if (it.kind !== "embed") continue;
     const name = it.alias ?? it.target;
     const canonical = [...prefix, name].join(".");
     known.set(canonical, canonical);
-    // PostgREST 16 still accepts the original table name for aliased embeds
-    // (legacy target names), so `select=a:orders(*)&orders.id=eq.1` works.
     if (it.alias) known.set([...prefix, it.target].join("."), canonical);
     walkEmbeds(it.items, [...prefix, name], known);
   }
-};
-
-const RESERVED_TERMINALS = new Set(["limit", "offset", "order", "and", "or"]);
-
-/** Parse everything PostgREST reads from the query string, except function arguments. */
-export const parseQuery = (
-  params: ReadonlyArray<readonly [string, string]>,
-  opts: { readonly allowFilterKey?: (key: string) => boolean } = {},
-): ParsedQuery => {
-  let select: SelectItem[] = [{ kind: "star" }];
-  let onConflict: string[] | undefined;
-  let columns: string[] | undefined;
-  for (const [k, v] of params) {
-    if (k === "select") {
-      // PostgREST's parser stops at the first thing it cannot continue with and ignores the rest.
-      const end = checkSelect(v);
-      if (end instanceof EngineError) throw end;
-      const used = v.slice(0, end).trim();
-      select = used === "" ? [{ kind: "star" }] : parseSelect(used);
-    } else if (k === "on_conflict") onConflict = splitTopLevel(v, ",").map(unquote).filter(Boolean);
-    else if (k === "columns") columns = splitTopLevel(v, ",").map(unquote).filter(Boolean);
-  }
-
-  const known = new Map<string, string>();
-  walkEmbeds(select, [], known);
-
-  const root = emptyParams();
-  const embeds = new Map<string, NodeParams>();
-  const paramsFor = (path: string[], key: string): NodeParams => {
-    if (path.length === 0) return root;
-    const joined = path.join(".");
-    const canonical = known.get(joined);
-    if (!canonical) {
-      throw new EngineError(
-        "not_embedded",
-        `'${joined}' is not an embedded resource in this request`,
-        null,
-        `Verify that '${joined}' is included in the 'select' query parameter.`,
-      );
-    }
-    let p = embeds.get(canonical);
-    if (!p) {
-      p = emptyParams();
-      embeds.set(canonical, p);
-    }
-    void key;
-    return p;
-  };
-
-  for (const [key, value] of params) {
-    if (key === "select" || key === "on_conflict" || key === "columns") continue;
-    if (opts.allowFilterKey && !opts.allowFilterKey(key)) continue;
-
-    const parts = key.split(".");
-    const last = parts[parts.length - 1]!;
-
-    if (RESERVED_TERMINALS.has(last)) {
-      let path = parts.slice(0, -1);
-      if (last === "and" || last === "or") {
-        const negate = path[path.length - 1] === "not";
-        if (negate) path = path.slice(0, -1);
-        const used = checkLogicTree(negate ? `not.${last}` : last, value);
-        if (used instanceof EngineError) throw used;
-        paramsFor(path, key).filters.push(parseLogic(last, negate, value.slice(0, used)));
-      } else if (last === "order") {
-        paramsFor(path, key).order.push(...parseOrder(value));
-      } else if (last === "limit") {
-        const n = parseCount("limit", value);
-        if (n !== undefined) paramsFor(path, key).limit = n;
-      } else {
-        const n = parseCount("offset", value);
-        if (n !== undefined) paramsFor(path, key).offset = n;
-      }
-      continue;
-    }
-
-    // A filter on a column, or `embed=is.null` on an embedded resource itself.
-    const embedPath = parts.join(".");
-    if (known.has(embedPath)) {
-      const m = /^(not\.)?is\.null$/.exec(value);
-      if (!m) {
-        throw new EngineError(
-          "invalid_embed_filter",
-          "Embedded resource filter only accepts is.null or not.is.null",
-          null,
-          null,
-        );
-      }
-      paramsFor(parts.slice(0, -1), key).presence.push({
-        embed: known.get(embedPath)!.split(".").pop()!,
-        present: Boolean(m[1]),
-      });
-      continue;
-    }
-    const path = parts.slice(0, -1);
-    paramsFor(path, key).filters.push(parseOperatorExpr(parseField(last), value));
-  }
-
-  return {
-    select,
-    root,
-    embeds,
-    ...(onConflict ? { onConflict } : {}),
-    ...(columns ? { columns } : {}),
-  };
 };

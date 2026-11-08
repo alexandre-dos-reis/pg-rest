@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createPgRest, QueryError, type QueryInput, type RequestContext } from "./support/pgrest";
 import { createTestDb, hasDb } from "./support/db";
 import { authed, makeApi, type TestApi } from "./support/api";
-import { toParams } from "../packages/query/src/query";
+import {} from "../packages/query/src/query";
+import { toParams } from "./support/render";
 
 /** The query string the object describes, as `handle()` would receive it. */
 const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as Array<[string, string]>).toString();

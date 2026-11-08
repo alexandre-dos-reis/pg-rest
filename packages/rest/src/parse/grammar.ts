@@ -1,7 +1,7 @@
 /**
  * PostgREST v16's query-string parsers (`PostgREST.ApiRequest.QueryParams`), ported on top of `parsec.ts`
  * so that syntax errors read exactly like PostgREST's. They only validate: the structures the rest of the
- * library works with come from the hand-written parsers in this directory.
+ * library works with come from the hand-written parsers in `@tsql/core/parse`.
  */
 import {
   after,
@@ -34,8 +34,8 @@ import {
   tryP,
   zero,
 } from "./parsec";
-import { EngineError } from "../errors";
-import { FTS_ORDER, IS_VALUES_ORDER, QUANTIFIABLE_ORDER, SINGLE_VALUE_ORDER } from "./syntax";
+import { EngineError } from "@tsql/core/errors";
+import { FTS_ORDER, IS_VALUES_ORDER, QUANTIFIABLE_ORDER, SINGLE_VALUE_ORDER } from "@tsql/core/parse/syntax";
 
 const ws = many(oneOf(" \t"));
 const lexeme = <T>(p: P<T>): P<T> => before(after(ws, p), ws);
