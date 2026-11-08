@@ -67,10 +67,10 @@ try {
   assert.equal((await call("/clients?select=id&email=eq.fine@x")).body.length, 0);
 
   // query(): the same plumbing, without an HTTP request
-  const rows = await api.select({ table: "clients", select: ["name"], order: ["id"], limit: 1 });
+  const rows = await api.select({ table: "clients", columns: ["name"], order: ["id"], limit: 1 });
   assert.deepEqual(rows.data, [{ name: "Ada" }]);
   assert.deepEqual(
-    (await api.select({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
+    (await api.select({ table: "notes", columns: ["body"] }, { role: "authenticated", claims: { sub: "alice" } })).data,
     [{ body: "hi" }],
   );
   const failed: any = await api.select({ table: "cients" });

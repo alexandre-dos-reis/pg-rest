@@ -243,7 +243,8 @@ export interface NodeFields {
 
 /** An embedded resource, with its own columns, filters, order and paging. */
 export interface Embed extends NodeFields {
-  readonly select?: Select | undefined;
+  /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
+  readonly columns?: Select | undefined;
   /** Drop parent rows that have no match (`!inner`). */
   readonly inner?: boolean | undefined;
   /** Merge the embedded columns into the parent row (`...rel(*)`). */
@@ -254,13 +255,15 @@ export interface Embed extends NodeFields {
   readonly as?: string | undefined;
 }
 
-/** What a write returns: the affected rows, or nothing. */
-export type QueryReturning = "representation" | "minimal";
+/**
+ * What a write returns: the affected rows (`"representation"`, the default), nothing (`"minimal"`), or
+ * the affected rows with only these columns and embeds -- the `RETURNING` of the statement.
+ */
+export type QueryReturning = "representation" | "minimal" | Select;
 
 interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
-  readonly select?: Select | undefined;
   /** Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
@@ -277,6 +280,8 @@ interface Common extends NodeFields {
 export interface SelectQuery extends Common {
   readonly table: string;
   readonly action?: "select" | undefined;
+  /** The columns to return, and the resources to embed. Defaults to all of them. */
+  readonly columns?: Select | undefined;
 }
 
 /** Insert rows, or upsert them with `action: "upsert"`. */
@@ -308,10 +313,11 @@ export interface DeleteQuery extends Common {
   readonly returning?: QueryReturning | undefined;
 }
 
-/** Call a function, like `POST /rpc/name`. `select`, `where` and `order` apply to its result. */
+/** Call a function, like `POST /rpc/name`. `columns`, `where` and `order` apply to its result. */
 export interface RpcQuery extends Common {
   readonly rpc: string;
   readonly args?: Readonly<Record<string, unknown>> | undefined;
+  readonly columns?: Select | undefined;
 }
 
 export type QueryInput = SelectQuery | InsertQuery | UpdateQuery | DeleteQuery | RpcQuery;
@@ -831,7 +837,7 @@ const selectOf = (
       continue;
     }
     for (const [relation, spec] of Object.entries(item)) {
-      const embed: Embed = isEmbed(spec) ? spec : { select: spec };
+      const embed: Embed = isEmbed(spec) ? spec : { columns: spec };
       if (embed.spread && embed.as) throw bad(`'${relation}' is spread, so it cannot be renamed`);
       const here = [...path, embed.as ?? relation];
       embeds.push({ node: embed, path: here });
@@ -842,17 +848,29 @@ const selectOf = (
         ...(embed.hint ? { hint: embed.hint } : {}),
         join: embed.inner ? "inner" : "left",
         spread: Boolean(embed.spread),
-        items: selectOf(embed.select ?? ["*"], here, embeds),
+        items: selectOf(embed.columns ?? ["*"], here, embeds),
       });
     }
   }
   return out;
 };
 
+/**
+ * The columns a call asks for: `columns` on a read or a function call, and on a write the list
+ * `returning` may be. (An insert's own `columns` is something else: the columns it inserts.)
+ */
+const columnsOf = (input: QueryInput): Select | undefined => {
+  if (isRpc(input)) return input.columns;
+  if (input.action === undefined || input.action === "select") return (input as SelectQuery).columns;
+  const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
+  return asked === undefined || typeof asked === "string" ? undefined : asked;
+};
+
 /** `input` as the engine's parsed form: what a query string with the same meaning parses to. */
 export const toParsed = (input: QueryInput): ParsedQuery => {
   const embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }> = [];
-  const select: SelectItem[] = input.select?.length ? selectOf(input.select, [], embeds) : [{ kind: "star" }];
+  const listed = columnsOf(input);
+  const select: SelectItem[] = listed?.length ? selectOf(listed, [], embeds) : [{ kind: "star" }];
   const known = new Map<string, string>();
   walkEmbeds(select, [], known);
   const built: Built = { known, nodes: new Map(), root: emptyParams() };
@@ -912,12 +930,13 @@ const writes = (input: QueryInput): boolean => {
 
 /**
  * Unlike HTTP, a write defaults to returning its rows: a function that gives nothing back
- * is of little use in a program. `returning: "minimal"` gives nothing back.
+ * is of little use in a program. `returning: "minimal"` gives nothing back, and a list of columns
+ * gives back the rows with only those.
  */
 const returningOf = (input: QueryInput): "representation" | "minimal" | undefined => {
   if (!writes(input)) return undefined;
   const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
-  return asked ?? "representation";
+  return typeof asked === "string" ? asked : "representation";
 };
 
 const preferencesOf = (input: QueryInput): SqlPreferences => ({
@@ -1320,7 +1339,7 @@ export interface TransactionOptions extends RequestContext {
  * `error`, so the promise that does not reject is still there -- it is the scope's now.
  *
  * ```ts ignore
- * const { data, count } = await tx.select({ table: "todos", select: ["id"], count: "exact" });
+ * const { data, count } = await tx.select({ table: "todos", columns: ["id"], count: "exact" });
  * ```
  *
  * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint

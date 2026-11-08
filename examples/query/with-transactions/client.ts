@@ -8,13 +8,13 @@ export const pgRest = createQuery<DatabasePgRest>({ ...pgRestOptions, schema });
 
 /** The two rows this example moves money between, read outside any scope. */
 export const balances = async (): Promise<string> => {
-  const { data, error } = await pgRest.select({ table: "accounts", select: ["id", "balance"], order: ["id"] });
+  const { data, error } = await pgRest.select({ table: "accounts", columns: ["id", "balance"], order: ["id"] });
   if (error) throw error;
   return data.map((a) => `${a.id} ${a.balance}`).join(", ");
 };
 
 export const ledgerCount = async (): Promise<number> => {
-  const { count, error } = await pgRest.select({ table: "ledger", select: ["id"], count: "exact" });
+  const { count, error } = await pgRest.select({ table: "ledger", columns: ["id"], count: "exact" });
   if (error) throw error;
   return count;
 };

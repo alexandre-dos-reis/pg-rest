@@ -75,7 +75,7 @@ type Flatten<T> = T extends object ? { [K in keyof T]: T[K] } & {} : T;
 
 /**
  * One item of a `select`. Columns, `alias:column`, `*`, and embedded resources as
- * `{ relation: [...] }` or `{ relation: { select, inner, limit, ... } }`.
+ * `{ relation: [...] }` or `{ relation: { columns, inner, limit, ... } }`.
  *
  * The other string forms of a `select` -- casts, JSON paths, aggregates -- are not described here: they
  * change the type of the value or invent a column, and parsing them from a string literal would
@@ -94,7 +94,7 @@ type SelectList<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
 /** An embedded resource: its columns, or an object with its own filters and paging. */
 type EmbedOptions<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = {
   /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
-  readonly select?: SelectList<Db, S, T>;
+  readonly columns?: SelectList<Db, S, T>;
   /** `!inner`: drop the parent rows that have no match here. A to-one embed stops being nullable. */
   readonly inner?: boolean;
   /** Which relationship to follow, when more than one leads here: a foreign key name, or a table. */
@@ -226,7 +226,7 @@ type SpreadOf<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, 
   : SpreadRow<Db, S, T, Spec>;
 
 type SpreadRow<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>, Spec> = Spec extends {
-  select: infer Items;
+  columns: infer Items;
 }
   ? Selected<Db, S, T, Items>
   : Row<Db, S, T>;
@@ -236,7 +236,7 @@ type Arrayed<R> = { [K in keyof R]: R[K][] };
 type EmbedOf<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>, Rel, Spec> =
   Spec extends ReadonlyArray<unknown>
     ? Shaped<Rel, Spec, Selected<Db, S, T, Spec>>
-    : Spec extends { select: infer Items }
+    : Spec extends { columns: infer Items }
       ? Shaped<Rel, Spec, Selected<Db, S, T, Items>>
       : Shaped<Rel, Spec, Row<Db, S, T>>;
 
@@ -439,26 +439,18 @@ type AtSchema<Db extends AnyDatabase, S extends Schema<Db>> = S extends Db["defa
   : { readonly schema: S };
 
 /**
- * What a read of one relation may say. `table` is what restricts everything below: `select`, `where`
+ * What any operation on one relation may say. `table` is what restricts everything below: `where`
  * and `order` only accept this relation's columns. Each operation has its own union with one member
  * per table: were several members to carry the same `table` value, TypeScript could not pick one
- * from the discriminant, and the editor would offer every table's columns inside `select` and `where`.
+ * from the discriminant, and the editor would offer every table's columns inside `columns` and `where`.
  */
-type TableRead<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
+type TableBase<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
   AtSchema<Db, S> & {
     /**
-     * The table or view to read or write. It is what restricts everything below: `select`, `where`
+     * The table or view to read or write. It is what restricts everything below: `columns`, `where`
      * and `order` only accept this relation's columns, and `rows`/`set` its writable ones.
      */
     readonly table: T;
-    /**
-     * The columns to return, and the resources to embed. A string is a column (`"title"`) or a
-     * renamed one (`"name:title"`); `"*"` takes them all; `{ tags: ["label"] }` embeds a related
-     * resource, and `{ tags: { select, inner, where, order, limit, as, spread } }` is its long form.
-     *
-     * `data` is inferred from exactly this: pick two columns and the rows have two keys.
-     */
-    readonly select?: SelectList<Db, S, T>;
     /**
      * Which rows, by column. A plain value means `eq` (and `null` means `is.null`), and
      * `{ $gte: 3, $lt: 9 }` names the operators; `$not`, `$any` and `$all` modify one.
@@ -470,14 +462,30 @@ type TableRead<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db,
     readonly order?: ReadonlyArray<Order<Db, S, T>>;
   };
 
-/** Whether a write answers with the rows it touched (the default) or with nothing. */
-interface Returning {
-  readonly returning?: "representation" | "minimal";
+/** A read of one relation. */
+type TableRead<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> & {
+  /**
+   * The columns to return, and the resources to embed. A string is a column (`"title"`) or a
+   * renamed one (`"name:title"`); `"*"` takes them all; `{ tags: ["label"] }` embeds a related
+   * resource, and `{ tags: { columns, inner, where, order, limit, as, spread } }` is its long form.
+   *
+   * `data` is inferred from exactly this: pick two columns and the rows have two keys.
+   */
+  readonly columns?: SelectList<Db, S, T>;
+};
+
+/**
+ * What a write answers with: its rows (`"representation"`, the default), nothing (`"minimal"`), or
+ * its rows with only these columns and embeds, like the `RETURNING` of the statement. `data` is
+ * inferred from the list.
+ */
+interface Returning<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> {
+  readonly returning?: "representation" | "minimal" | SelectList<Db, S, T>;
 }
 
 /** An insert of one row or several. */
-type TableInsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableRead<Db, S, T> &
-  Returning & {
+type TableInsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T> & {
     /**
      * What to insert: one object or many. Generated and `GENERATED ALWAYS AS IDENTITY` columns are
      * absent, and a column with a default or a nullable one is optional.
@@ -496,15 +504,15 @@ type TableUpsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<D
 };
 
 /** An update of the rows `where` matches. */
-type TableUpdate<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableRead<Db, S, T> &
-  Returning & {
+type TableUpdate<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T> & {
     /** The columns to change. The rows are the ones `where` matches. */
     readonly set: SetOf<Relations<Db, S>[T]["update"]>;
   };
 
 /** A delete of the rows `where` matches. */
-type TableDelete<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableRead<Db, S, T> &
-  Returning;
+type TableDelete<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T>;
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
   AtSchema<Db, S> & {
@@ -519,7 +527,7 @@ type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions
      * A function's result is a row like any other, so it takes the same three. These apply to the
      * rows it returns, not to its arguments -- and a scalar function has no columns to ask for.
      */
-    readonly select?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
+    readonly columns?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
     /** Filters on the rows the function returned, by their column. */
     readonly where?: WhereOf<Functions<Db, S>[F][number]["returns"], never>;
     /** How to sort the rows the function returned. */
@@ -726,16 +734,30 @@ type Signatures<Db extends AnyDatabase, Q> = Q extends { rpc: infer F }
 
 /** One row of the answer, before `single` decides whether it comes alone. */
 type RowOut<Db extends AnyDatabase, Q> = Q extends { rpc: string }
-  ? Q extends { select: infer Items }
+  ? Q extends { columns: infer Items }
     ? PickedFrom<Signatures<Db, Q>["returns"], Items>
     : Signatures<Db, Q>["returns"]
   : Q extends { table: infer T }
     ? T extends Table<Db, SchemaIn<Db, Q>>
-      ? Q extends { select: infer Items }
-        ? Selected<Db, SchemaIn<Db, Q>, T, Items>
-        : Row<Db, SchemaIn<Db, Q>, T>
+      ? TableRowOut<Db, Q, T>
       : never
     : never;
+
+/**
+ * A table's row: the list a read names in `columns`, or the one a write names in `returning`. An insert
+ * has a `columns` of its own -- the columns it inserts -- which says nothing about the answer.
+ */
+type TableRowOut<Db extends AnyDatabase, Q, T extends Table<Db, SchemaIn<Db, Q>>> = Q extends {
+  returning: infer R;
+}
+  ? R extends ReadonlyArray<unknown>
+    ? Selected<Db, SchemaIn<Db, Q>, T, R>
+    : Row<Db, SchemaIn<Db, Q>, T>
+  : Q extends { rows: unknown }
+    ? Row<Db, SchemaIn<Db, Q>, T>
+    : Q extends { columns: infer Items }
+      ? Selected<Db, SchemaIn<Db, Q>, T, Items>
+      : Row<Db, SchemaIn<Db, Q>, T>;
 
 /**
  * What `data` holds: the rows, one object with `single`, and `null` for a write that was asked to
@@ -758,15 +780,15 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
 
 /**
  * The six operations typed by a generated database type: `table` and `rpc` are the ones that exist,
- * `select` and `where` only name real columns and relationships, `rows` and `set` its writable
- * columns, and `data` is inferred from the `select`, nesting included.
+ * `columns` and `where` only name real columns and relationships, `rows` and `set` its writable
+ * columns, and `data` is inferred from the `columns`, nesting included.
  *
  * `Mode` and `Ctx` are what {@link Operations} takes: how a failure comes back, and what follows the input.
  */
 export interface TypedOperations<Db extends AnyDatabase, Mode extends "result" | "ok", Ctx extends unknown[]> {
   /**
-   * Read rows. `select`, `where` and `order` take this relation's columns and the resources a
-   * foreign key leads to; `data` is inferred from the `select`.
+   * Read rows. `columns`, `where` and `order` take this relation's columns and the resources a
+   * foreign key leads to; `data` is inferred from the `columns`.
    *
    * The optional `ctx` is who is asking -- `{ role, claims, settings }` -- applied with `set_config`,
    * so row level security and privileges work as they do over HTTP. They are the database's business:
@@ -779,7 +801,7 @@ export interface TypedOperations<Db extends AnyDatabase, Mode extends "result" |
    * @example
    * const { data, error } = await pgRest.select({
    *   table: "todos",
-   *   select: ["id", "title", { tags: ["label"] }],
+   *   columns: ["id", "title", { tags: ["label"] }],
    *   where: { done: false },
    *   limit: 10,
    * });
@@ -792,7 +814,7 @@ export interface TypedOperations<Db extends AnyDatabase, Mode extends "result" |
   ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
   /**
    * Insert one row or several. `rows` is required and takes the relation's writable columns; the
-   * rows come back unless `returning: "minimal"`.
+   * rows come back unless `returning: "minimal"`; `returning: ["id"]` returns only those columns.
    *
    * @example
    * const { data } = await pgRest.insert({ table: "todos", rows: { title: "ship it" }, single: true });
@@ -877,7 +899,7 @@ export interface TypedQueryInstance<Db extends AnyDatabase>
    * @example
    * const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
    *   table: "orders",
-   *   select: ["id", "total"],
+   *   columns: ["id", "total"],
    *   where: { status: a.status, total: { $gte: a.min } },
    * }));
    * const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
@@ -894,7 +916,7 @@ export interface TypedQueryInstance<Db extends AnyDatabase>
    * @example
    * const store = new AsyncLocalStorage<RequestContext>();
    * const db = pgRest.setContextQuery(() => store.getStore());
-   * const { data, error } = await db.select({ table: "todos", select: ["id", "title"] });
+   * const { data, error } = await db.select({ table: "todos", columns: ["id", "title"] });
    * // data: Array<{ id: number; title: string }>
    */
   setContextQuery(source: ContextSource): TypedContextQuery<Db>;

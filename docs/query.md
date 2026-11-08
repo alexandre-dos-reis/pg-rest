@@ -126,7 +126,7 @@ const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const { data } = await pgRest.select<Array<{ id: number; name: string }>>({
   table: "clients",
-  select: ["id", "name"],
+  columns: ["id", "name"],
 });
 ```
 
@@ -137,7 +137,7 @@ import type { Database } from "./db.generated.ts";
 
 const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
-const { data } = await pgRest.select({ table: "clients", select: ["id", "name"] });
+const { data } = await pgRest.select({ table: "clients", columns: ["id", "name"] });
 // data: Array<{ id: number; name: string }>
 ```
 
@@ -154,44 +154,44 @@ const all = await pgRest.select({ table: "clients" });
 // all.data: Array<{ id: number; name: string; email: string | null; meta: unknown; tags: string[] | null; created_at: string }>
 
 // some of them, and a renamed one
-const some = await pgRest.select({ table: "clients", select: ["id", "who:name"] });
+const some = await pgRest.select({ table: "clients", columns: ["id", "who:name"] });
 // some.data: Array<{ id: number; who: string }>
 
 // `*` is the whole row, and can sit beside an embed
-const star = await pgRest.select({ table: "profiles", select: ["*"] });
+const star = await pgRest.select({ table: "profiles", columns: ["*"] });
 // star.data: Array<{ client_id: number; bio: string | null }>
 ```
 
 An enum column is a union of its labels, so the compiler knows the three values:
 
 ```ts
-const moods = await pgRest.select({ table: "moods", select: ["mood", "seen"] });
+const moods = await pgRest.select({ table: "moods", columns: ["mood", "seen"] });
 // moods.data: Array<{ mood: "sad" | "ok" | "happy"; seen: Array<"sad" | "ok" | "happy"> | null }>
 ```
 
 ### Embedded resources
 
-A foreign key in either direction, a junction table, or a computed relationship — all of them are a key of `select`:
+A foreign key in either direction, a junction table, or a computed relationship — all of them are a key of `columns`:
 
 ```ts
 // to-one (orders.client_id -> clients): an object, or null when there is no match
-const toOne = await pgRest.select({ table: "orders", select: ["id", { clients: ["name"] }] });
+const toOne = await pgRest.select({ table: "orders", columns: ["id", { clients: ["name"] }] });
 // toOne.data: Array<{ id: number; clients: { name: string } | null }>
 
 // to-many (clients <- orders): an array
-const toMany = await pgRest.select({ table: "clients", select: ["name", { orders: ["total"] }] });
+const toMany = await pgRest.select({ table: "clients", columns: ["name", { orders: ["total"] }] });
 // toMany.data: Array<{ name: string; orders: Array<{ total: number }> }>
 
 // many-to-many, through order_items
-const m2m = await pgRest.select({ table: "orders", select: ["id", { products: ["name"] }] });
+const m2m = await pgRest.select({ table: "orders", columns: ["id", { products: ["name"] }] });
 
 // a computed relationship is addressed by the function's name
-const computed = await pgRest.select({ table: "clients", select: ["name", { recent_orders: ["total"] }] });
+const computed = await pgRest.select({ table: "clients", columns: ["name", { recent_orders: ["total"] }] });
 
 // nested, as deep as you like
 const nested = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["id", { order_items: ["qty"] }] } }],
+  columns: ["name", { orders: { columns: ["id", { order_items: ["qty"] }] } }],
 });
 // nested.data: Array<{ name: string; orders: Array<{ id: number; order_items: Array<{ qty: number }> }> }>
 ```
@@ -202,35 +202,35 @@ The long form adds the embed's own filters, order and paging — and four modifi
 // `inner` drops the parent rows without a match, so the embed stops being nullable
 const inner = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], inner: true } }],
+  columns: ["id", { clients: { columns: ["name"], inner: true } }],
 });
 // inner.data: Array<{ id: number; clients: { name: string } }>
 
 // `as` renames it, in the result and in the type
 const renamed = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { as: "who", select: ["name"] } }],
+  columns: ["id", { clients: { as: "who", columns: ["name"] } }],
 });
 // renamed.data: Array<{ id: number; who: { name: string } | null }>
 
 // `spread` merges the columns into the parent row instead of nesting them
 const spreadOne = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], spread: true } }],
+  columns: ["id", { clients: { columns: ["name"], spread: true } }],
 });
 // spreadOne.data: Array<{ id: number; name: string }>
 
 // spreading a to-many turns each column into an array of its values
 const spreadMany = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["t:total", "status"], spread: true } }],
+  columns: ["name", { orders: { columns: ["t:total", "status"], spread: true } }],
 });
 // spreadMany.data: Array<{ name: string; t: number[]; status: string[] }>
 
 // a to-one can be addressed by its foreign key column, which is how a self-reference is reached
 const manager = await pgRest.select({
   table: "employees",
-  select: ["name", { manager_id: { select: ["name"], as: "manager" } }],
+  columns: ["name", { manager_id: { columns: ["name"], as: "manager" } }],
 });
 // manager.data: Array<{ name: string; manager: { name: string } | null }>
 
@@ -238,13 +238,13 @@ const manager = await pgRest.select({
 // resource (the error is `invalid_embed`, and its `details` list them)
 const hinted = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], hint: "orders_client_id_fkey" } }],
+  columns: ["id", { clients: { columns: ["name"], hint: "orders_client_id_fkey" } }],
 });
 
 // the embed's own where / order / limit / offset
 const page = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["total"], where: { status: "paid" }, order: ["total.desc"], limit: 3 } }],
+  columns: ["name", { orders: { columns: ["total"], where: { status: "paid" }, order: ["total.desc"], limit: 3 } }],
 });
 ```
 
@@ -255,7 +255,7 @@ which knows its columns:
 ```ts
 const dotted = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: ["total"] }],
+  columns: ["name", { orders: ["total"] }],
   where: { "orders.status": "paid", "orders.total": { $gte: 100 } },
 });
 ```
@@ -267,7 +267,7 @@ A plain value means `eq`, `null` means `is.null`, and an object names the operat
 ```ts
 const filters = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: "paid", //                   eq
     total: { $gte: 100, $lt: 500 }, //   several operators, ANDed
@@ -279,7 +279,7 @@ const filters = await pgRest.select({
 // null is a NULL test, whichever way you write it
 const nulls = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     meta: null, //                       is.null
     email: { $not: null }, //           not.is.null (same as { $not: { $eq: null } })
@@ -294,7 +294,7 @@ Every operator, by what it works on. A `$` key is an operator; the table at the 
 ```ts
 const comparison = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: { $neq: "void" }, //            <>
     total: { $gt: 10, $lte: 500 }, //       > and <=, ANDed
@@ -305,7 +305,7 @@ const comparison = await pgRest.select({
 
 const ranged = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: { total: { $gte: 100, $lt: 500 } }, //   100 <= total < 500
 });
 ```
@@ -316,7 +316,7 @@ regular expression:
 ```ts
 const text = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     name: { $like: "A*" }, //                 LIKE 'A%'
     email: { $ilike: "*@EXAMPLE.com" }, //    ILIKE '%@EXAMPLE.com'
@@ -325,7 +325,7 @@ const text = await pgRest.select({
 
 const regex = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $match: "^A.*a$" }, email: { $imatch: "@example\\.com$" } }, //  ~ and ~*
 });
 ```
@@ -338,7 +338,7 @@ const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const nulls = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     meta: null, //                           IS NULL
     email: { $neq: null }, //                IS NOT NULL
@@ -349,7 +349,7 @@ const nulls = await pgRest.select({
 // $isdistinct is a null-safe <>: it never answers NULL
 const distinct = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: { total: { $isdistinct: 0 }, placed_at: { $isdistinct: null } },
 });
 
@@ -370,13 +370,13 @@ query; each takes a text, or `{ query, config }`:
 ```ts
 const search = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $fts: "ada & lovelace" } }, //                           to_tsquery
 });
 
 const searches = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     name: { $plfts: "ada lovelace" }, //                                    plainto_tsquery
     email: { $phfts: "ada lovelace" }, //                                   phraseto_tsquery
@@ -390,7 +390,7 @@ const searches = await pgRest.select({
 ```ts
 const arrays = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     tags: { $cs: ["vip"] }, //               @>  contains every one of these
   },
@@ -398,7 +398,7 @@ const arrays = await pgRest.select({
 
 const more = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     tags: { $cd: ["vip", "early", "beta"] }, //   <@  is contained in these
   },
@@ -406,13 +406,13 @@ const more = await pgRest.select({
 
 const overlap = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { tags: { $ov: ["vip", "beta"] } }, //   &&  shares at least one
 });
 
 const whole = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { tags: { $eq: ["vip", "early"] } }, //  = the whole array, in order
 });
 ```
@@ -425,7 +425,7 @@ const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const json = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { meta: { $cs: '{"tier":"gold"}' } }, //   @>  the jsonb contains this
 });
 
@@ -450,7 +450,7 @@ const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const paths = await untyped.select({
   table: "venues",
-  select: ["id"],
+  columns: ["id"],
   where: {
     "meta->>tier": { $in: ["gold", "silver"] },
     "owner->home->>city": { $ilike: "ly*" },
@@ -466,7 +466,7 @@ and `$ov` do the job:
 ```ts
 const negated = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: { $not: { $in: ["paid", "shipped"] } }, //   NOT IN
     client_id: { $not: 2 }, //                            <> 2 (a plain value is an eq)
@@ -476,13 +476,13 @@ const negated = await pgRest.select({
 
 const quantified = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $any: { $like: ["A*", "B*"] } } }, //   LIKE ANY ('A%', 'B%')
 });
 
 const everyone = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { email: { $all: { $ilike: ["*@example.com", "ada*"] } } }, //   ILIKE ALL
 });
 ```
@@ -493,7 +493,7 @@ on one column, and `$not` inverts the AND of what is inside it:
 ```ts
 const logic = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     $or: [
       { status: "new" }, //                    status = 'new'
@@ -506,13 +506,13 @@ const logic = await pgRest.select({
 // an object cannot repeat a key, so two $like on one column go through $and
 const both = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { $and: [{ name: { $like: "A*" } }, { name: { $like: "*a" } }] },
 });
 
 const inverted = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     $not: { status: "paid", total: { $gte: 100 } }, //                     NOT (status = 'paid' AND total >= 100)
     $or: [{ client_id: 1 }, { $not: { $or: [{ status: "new" }, { status: "void" }] } }], //   groups nest
@@ -549,7 +549,7 @@ An array is not a condition by itself: write `{ $eq: [...] }` to compare a colum
 ```ts
 const sorted = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   order: [
     { column: "total", desc: true, nulls: "last" }, // the object form
     "placed_at.asc", //                               or the string form
@@ -560,23 +560,23 @@ const sorted = await pgRest.select({
 });
 
 // `single` gives the object itself -- and a `not_single_row` error when there is not exactly one row
-const one = await pgRest.select({ table: "clients", select: ["name"], where: { id: 1 }, single: true });
+const one = await pgRest.select({ table: "clients", columns: ["name"], where: { id: 1 }, single: true });
 // one.data: { name: string }
 
 // `count` fills `count` with the number of matching rows, ignoring limit/offset
-const counted = await pgRest.select({ table: "orders", select: ["id"], limit: 1, count: "exact" });
+const counted = await pgRest.select({ table: "orders", columns: ["id"], limit: 1, count: "exact" });
 // counted.count: number -- on a typed instance the mode decides the type, so there is nothing to test for
 
 // "planned" asks the planner, which can have no usable number: that one stays optional
-const guessed = await pgRest.select({ table: "orders", select: ["id"], count: "planned" });
+const guessed = await pgRest.select({ table: "orders", columns: ["id"], count: "planned" });
 // guessed.count: number | undefined
 
 // and no `count` asked for is no count at all
-const plain = await pgRest.select({ table: "orders", select: ["id"] });
+const plain = await pgRest.select({ table: "orders", columns: ["id"] });
 // plain.count: undefined
 
 // `stripNulls` leaves the null fields out
-const lean = await pgRest.select({ table: "clients", select: ["name", "meta"], stripNulls: true });
+const lean = await pgRest.select({ table: "clients", columns: ["name", "meta"], stripNulls: true });
 ```
 
 ### Composite types
@@ -590,7 +590,7 @@ against than it looks.
 // the whole value, as the object Postgres returns
 const venue = await pgRest.select({
   table: "venues",
-  select: ["label", "owner", "branches"],
+  columns: ["label", "owner", "branches"],
   where: { id: 1 },
   single: true,
 });
@@ -599,7 +599,7 @@ const venue = await pgRest.select({
 // filtering by a whole value: the fields may come in any order
 const byOwner = await pgRest.select({
   table: "venues",
-  select: ["id"],
+  columns: ["id"],
   where: { owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music"] } },
 });
 
@@ -607,13 +607,13 @@ const byOwner = await pgRest.select({
 // NULL. For one field, use its path -- on an instance created without a type argument, like any
 // other JSON path (see "What the typed path does not describe")
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
-const byName = await untyped.select({ table: "venues", select: ["id"], where: { "owner->>name": "Ada" } });
+const byName = await untyped.select({ table: "venues", columns: ["id"], where: { "owner->>name": "Ada" } });
 
 // writing one: the fields left out are NULL
 const placed = await pgRest.insert({
   table: "venues",
   rows: { label: "New hall", owner: { name: "Barbara", home: { city: "Brussels" } } },
-  select: ["owner"],
+  returning: ["owner"],
 });
 // placed.data: [{ owner: { name: "Barbara", home: { city: "Brussels", zip: null }, tags: null } }]
 ```
@@ -626,7 +626,7 @@ const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const fields = await untyped.select({
   table: "venues",
-  select: ["id", "owner->>name", "owner->home->>city", "city:branches->0->>city"],
+  columns: ["id", "owner->>name", "owner->home->>city", "city:branches->0->>city"],
   where: { "owner->home->>city": "Lyon" },
   order: ["owner->>name.desc"],
 });
@@ -643,15 +643,16 @@ Two things to know:
 
 ## Writing
 
-`action` says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`: a function
-that gives nothing back is of little use in a program.
+The method says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`: a function
+that gives nothing back is of little use in a program. `returning` also takes a list, the same one `columns` takes on a
+read -- `returning: ["id", "name"]` -- and `data` is typed from it.
 
 ```ts
 // insert one, and get it back
 const created = await pgRest.insert({
   table: "clients",
   rows: { name: "Hopper", email: "grace@example.com" },
-  select: ["id", "name"],
+  returning: ["id", "name"],
 });
 // created.data: Array<{ id: number; name: string }>
 
@@ -659,7 +660,7 @@ const created = await pgRest.insert({
 const bulk = await pgRest.insert({
   table: "clients",
   rows: [{ name: "A" }, { name: "B" }],
-  select: ["id"],
+  returning: ["id"],
 });
 
 // only these columns, whatever else the payload carries (and a uniform bulk insert)
@@ -681,7 +682,7 @@ const upserted = await pgRest.upsert({
   table: "products",
   rows: { id: 1, name: "Keyboard mk2", price: 130 },
   onConflict: ["id"],
-  select: ["name"],
+  returning: ["name"],
 });
 
 // update the rows `where` matches
@@ -689,7 +690,7 @@ const patched = await pgRest.update({
   table: "orders",
   set: { status: "shipped" },
   where: { status: "paid" },
-  select: ["id", "status"],
+  returning: ["id", "status"],
 });
 
 // delete, and say nothing back
@@ -746,7 +747,7 @@ const computed = await pgRest.update({
     placed_at: { $default: true }, //                       = DEFAULT
   },
   where: { id: 1 },
-  select: ["id", "status", "total"],
+  returning: ["id", "status", "total"],
 });
 ```
 
@@ -815,7 +816,7 @@ const removed = await pgRest.update({
 ```
 
 **Functions**: `$coalesce`, `$greatest` and `$least` take a list; `$cast` takes an expression and a type, from the same
-allowlist as a `select` cast. The other functions are a fixed list too, and a name is never taken from the input:
+allowlist as a column cast. The other functions are a fixed list too, and a name is never taken from the input:
 
 | function                                  | SQL                                    | on          |
 | ----------------------------------------- | -------------------------------------- | ----------- |
@@ -918,7 +919,7 @@ const reset = await pgRest.update({
 | `$coalesce` `$greatest` `$least`                       | the functions of the same name                         |
 | `$lower` `$upper` `$trim` `$length` `$abs` `$round`    | the functions, see above                               |
 | `$now` `$arrayAppend` `$arrayRemove`                   | `now()`, `array_append`, `array_remove`                |
-| `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a `select` cast        |
+| `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a column cast        |
 | `{ $default: true }`                                   | `DEFAULT`, as a whole assignment                       |
 
 Nothing is raw SQL: a column is checked against the schema, a type against an allowlist, a value is escaped, and an
@@ -958,11 +959,11 @@ const hi = await pgRest.rpc({ rpc: "greet", args: { name: "Ada" } });
 const nothing = await pgRest.rpc({ rpc: "nothing" });
 // nothing.data: null
 
-// a set-returning function answers with rows, and takes the same select/where/order as a table
+// a set-returning function answers with rows, and takes the same columns/where/order as a table
 const paid = await pgRest.rpc({
   rpc: "orders_by_status",
   args: { s: "paid" },
-  select: ["id", "total"],
+  columns: ["id", "total"],
   where: { total: { $gte: 100 } },
   order: ["total.desc"],
   limit: 5,
@@ -982,11 +983,11 @@ void pgRest.rpc({ rpc: "nope" });
 void pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } });
 
 // @ts-expect-error a scalar function has no columns to select
-void pgRest.rpc({ rpc: "greet", select: ["anything"] });
+void pgRest.rpc({ rpc: "greet", columns: ["anything"] });
 ```
 
 A function declared `RETURNS TABLE(…)` is the one gap: the catalog does not carry its output columns, and neither does
-the request path, so its result is `Record<string, unknown>` and any `select` is accepted.
+the request path, so its result is `Record<string, unknown>` and any `columns` is accepted.
 
 ## Who is asking
 
@@ -1000,10 +1001,10 @@ const ctx = { role: "authenticated", claims: { sub: user.id, email: user.email }
 await pgRest.insert({ table: "notes", rows: { body: "mine" } }, ctx);
 
 // the same query as somebody else returns nothing: the policy filtered it out
-const mine = await pgRest.select({ table: "notes", select: ["body"] }, ctx);
+const mine = await pgRest.select({ table: "notes", columns: ["body"] }, ctx);
 
 // extra settings reach SQL as current_setting('app.tenant')
-await pgRest.select({ table: "notes", select: ["id"] }, { ...ctx, settings: { "app.tenant": "acme" } });
+await pgRest.select({ table: "notes", columns: ["id"] }, { ...ctx, settings: { "app.tenant": "acme" } });
 ```
 
 Without a context the query runs as the anonymous role (`anon` by default, `anonymousRole: false` to refuse it
@@ -1031,7 +1032,7 @@ app.use(async (c, next) => {
 });
 
 // anywhere below, however deep, with no ctx to pass
-const { data, error } = await pgQuery.select({ table: "notes", select: ["body"] });
+const { data, error } = await pgQuery.select({ table: "notes", columns: ["body"] });
 ```
 
 ```ts ignore
@@ -1052,7 +1053,7 @@ Two rules, and the second is the reason this is safe to reach for:
 const db = pgRest.setContextQuery(() => store.getStore());
 
 // a context passed to the call wins over the source: one administrative query without leaving the scope
-await db.select({ table: "notes", select: ["id"] }, { role: "admin" });
+await db.select({ table: "notes", columns: ["id"] }, { role: "admin" });
 
 // a source that gives nothing -- the store was never entered -- is an error, not the anonymous role
 const forgotten = await db.select({ table: "notes" });
@@ -1076,7 +1077,7 @@ once and gives back a function of the values; a call of it is run with `run()`:
 ```ts
 const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
   table: "orders",
-  select: ["id", "total", { clients: ["name"] }],
+  columns: ["id", "total", { clients: ["name"] }],
   where: { status: a.status, total: { $gte: a.min } },
   order: ["id"],
 }));
@@ -1152,7 +1153,7 @@ therefore the *success*: `data` is not null and `count` is the number the query 
 const { data, count } = await pgRest.transaction(async (tx) => {
   const { data: rows, count: total } = await tx.select({
     table: "clients",
-    select: ["id", "name"],
+    columns: ["id", "name"],
     count: "exact",
     limit: 10,
   });
@@ -1250,20 +1251,20 @@ first:
 
 ```ts
 // READ ONLY for all of it: a write inside is refused by PostgreSQL (25006 -> 405)
-await pgRest.transaction(async (tx) => tx.select({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   readOnly: true,
 });
 
 // the isolation level, as PostgreSQL spells it. Both go in one `SET TRANSACTION`, first thing
-await pgRest.transaction(async (tx) => tx.select({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   isolationLevel: "serializable",
   readOnly: true,
 });
 
 // replaying a serialization failure means replaying *your callback*, so it is asked for
-await pgRest.transaction(async (tx) => tx.select({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   isolationLevel: "serializable",
   retry: {
@@ -1297,7 +1298,7 @@ await pgQuery.transaction(async (tx) => tx.insert({ table: "notes", rows: { body
 // `readOnly`, `isolationLevel` and `retry` alone leave the ambient context in place; naming a role
 // replaces it for the whole scope, which is the per-call override moved to the granularity
 // set_config works at
-await pgQuery.transaction(async (tx) => tx.select({ table: "notes", select: ["id"] }), { role: "admin" });
+await pgQuery.transaction(async (tx) => tx.select({ table: "notes", columns: ["id"] }), { role: "admin" });
 ```
 
 What a scope is not is a transaction **your** application opened: here pg-rest owns the `BEGIN`, the `COMMIT` and the
@@ -1391,7 +1392,7 @@ Every kind, and what it means:
 
 | `kind`              | when                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
+| `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `columns` or `order`, a filter on a resource that is not embedded |
 | `invalid_payload`   | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write          |
 | `undefined_object`  | no table, view or function by that name — a typo (read the `hint`), or a migration the generated schema has not seen                 |
 | `invalid_embed`     | no relationship between two resources, or more than one, which needs a `hint`                                                        |
@@ -1414,25 +1415,25 @@ error. `describeErrorKind(kind)` gives a kind's wording, for a log line.
 
 ## What the typed path does not describe
 
-Three string forms of a `select` change or invent a column, and reading them back out of a string literal would cost
+Three string forms of a column change or invent a column, and reading them back out of a string literal would cost
 more than it gives. A JSON path in a `where` is the exception, because a filter does not change the result: it is
 accepted on its column, with a value checked no further than its shape.
 
 ```ts
 // @ts-expect-error a cast
-void pgRest.select({ table: "orders", select: ["total::text"] });
+void pgRest.select({ table: "orders", columns: ["total::text"] });
 
 // @ts-expect-error a JSON path, in a select
-void pgRest.select({ table: "clients", select: ["tier:meta->>tier"] });
+void pgRest.select({ table: "clients", columns: ["tier:meta->>tier"] });
 
 // a JSON path in a filter is fine: it names a column, and the column is checked
-void pgRest.select({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } });
+void pgRest.select({ table: "clients", columns: ["id"], where: { "meta->>tier": { $ilike: "go*" } } });
 
 // @ts-expect-error ... but not on a column that does not exist
-void pgRest.select({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } });
+void pgRest.select({ table: "clients", columns: ["id"], where: { "nope->>tier": "gold" } });
 
 // @ts-expect-error an aggregate
-void pgRest.select({ table: "orders", select: ["status", "total.sum()"] });
+void pgRest.select({ table: "orders", columns: ["status", "total.sum()"] });
 ```
 
 They work on an instance created without a type argument, where the input is loose:
@@ -1442,7 +1443,7 @@ const loose = createQuery({ db: nodePostgresAdapter(pool), schema });
 
 const { data } = await loose.select<Array<{ status: string; sum: number }>>({
   table: "orders",
-  select: ["status", "total.sum()"],
+  columns: ["status", "total.sum()"],
   order: ["status"],
 });
 ```
@@ -1454,8 +1455,7 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 | `table`           | the relation to read or write. Restricts everything else                                                  |
 | `rpc`             | the function to call, instead of `table`                                                                  |
 | `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
-| `action`          | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"`                                  |
-| `select`          | columns, `"alias:column"`, `"*"`, and embedded resources                                                  |
+| `columns`         | on a read or an `rpc`: columns, `"alias:column"`, `"*"`, and embedded resources                             |
 | `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
@@ -1467,9 +1467,9 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 | `rows`            | the payload of an `insert` or `upsert`: one object or many                                                |
 | `set`             | the columns an `update` changes: values, or `$` expressions and `$default`                              |
 | `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
-| `columns`         | insert only these, whatever else `rows` carries                                                           |
+| `columns`         | on an `insert` or `upsert`: insert only these, whatever else `rows` carries                               |
 | `missing`         | a column absent from `rows`: its `"default"` or `"null"`                                                  |
-| `returning`       | `"representation"` (the default here) or `"minimal"`                                                      |
+| `returning`       | on a write: `"representation"` (the default here), `"minimal"`, or a list of columns like `columns` takes |
 | `args`            | a function's arguments, by name                                                                           |
 
 ### What comes back

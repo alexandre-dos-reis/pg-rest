@@ -2,13 +2,17 @@
 // It is not part of `@tsql/query` any more -- the library builds the parsed form directly -- but it is
 // the oracle of `tests/query-direct.test.ts`, and the spelling `docs/query.md` explains each field with.
 import type {
+  DeleteQuery,
   Embed,
   Filter,
   FilterValue,
+  InsertQuery,
   NodeFields,
   Order,
   QueryInput,
   Select,
+  SelectQuery,
+  UpdateQuery,
   Where,
 } from "../../packages/query/src/query";
 import {
@@ -101,12 +105,12 @@ const renderSelect = (items: Select, path: ReadonlyArray<string>, out: Params): 
     if (typeof item === "string") return item;
     return Object.entries(item)
       .map(([relation, spec]) => {
-        const embed: Embed = isEmbed(spec) ? spec : { select: spec };
+        const embed: Embed = isEmbed(spec) ? spec : { columns: spec };
         // filters address an embed by its alias when it has one, like the query string
         const name = embed.as ?? relation;
         const mods = `${embed.hint ? `!${embed.hint}` : ""}${embed.inner ? "!inner" : ""}`;
         const head = `${embed.spread ? "..." : ""}${embed.as ? `${embed.as}:` : ""}${relation}${mods}`;
-        const inner = renderSelect(embed.select ?? ["*"], [...path, name], out);
+        const inner = renderSelect(embed.columns ?? ["*"], [...path, name], out);
         pushNode(embed, [...path, name], out);
         return `${head}(${inner})`;
       })
@@ -115,13 +119,22 @@ const renderSelect = (items: Select, path: ReadonlyArray<string>, out: Params): 
   return parts.join(",");
 };
 
+/** The `columns` of a read or a function call, and the list a write's `returning` may be. */
+const columnsOf = (input: QueryInput): Select | undefined => {
+  if ("rpc" in input) return input.columns;
+  if (input.action === undefined || input.action === "select") return (input as SelectQuery).columns;
+  const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
+  return typeof asked === "object" ? asked : undefined;
+};
+
 /** Everything the query string would carry, built from the object instead of parsed from a URL. */
 export const toParams = (input: QueryInput): Params => {
   const out: Params = [];
   // embedded resources push their own parameters while the select string is built, so collect
   // them aside and keep `select` first, where a reader expects it
   const embedded: Params = [];
-  if (input.select) out.push(["select", renderSelect(input.select, [], embedded)]);
+  const listed = columnsOf(input);
+  if (listed) out.push(["select", renderSelect(listed, [], embedded)]);
   out.push(...embedded);
   pushNode(input, [], out);
   if ("action" in input && (input.action === "insert" || input.action === "upsert")) {

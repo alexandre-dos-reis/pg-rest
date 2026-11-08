@@ -4,13 +4,13 @@
 import { pgRest } from "./client.ts";
 
 // @ts-expect-error no such table ("todos" exists)
-void pgRest.select({ table: "todoz", select: ["id"] });
+void pgRest.select({ table: "todoz", columns: ["id"] });
 
 // @ts-expect-error no such column
-void pgRest.select({ table: "todos", select: ["titel"] });
+void pgRest.select({ table: "todos", columns: ["titel"] });
 
 // @ts-expect-error no such relationship (tags is one, todoz is not)
-void pgRest.select({ table: "todos", select: [{ todoz: ["label"] }] });
+void pgRest.select({ table: "todos", columns: [{ todoz: ["label"] }] });
 
 // @ts-expect-error `done` is a boolean
 void pgRest.select({ table: "todos", where: { done: "false" } });
@@ -28,7 +28,7 @@ void pgRest.insert({ table: "todos", rows: { id: 42, title: "nope" } });
 void pgRest.select({ table: "todos", order: ["dew.desc"] });
 
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
-void pgRest.select({ table: "todos", select: ["id"], limitt: 10 });
+void pgRest.select({ table: "todos", columns: ["id"], limitt: 10 });
 
 // @ts-expect-error `floor` is an int: a field of a composite type is checked like any other value
 void pgRest.select({ table: "todos", where: { at: { floor: "2" } } });

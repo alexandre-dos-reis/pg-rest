@@ -146,12 +146,12 @@ describe.skipIf(!hasDb)("hostile input", () => {
   // query() builds the query parameters itself, so a value must never be able to end up read as syntax.
   test("query(): hostile values stay values, hostile column names are refused", async () => {
     for (const p of PAYLOADS) {
-      expect((await t.api.select({ table: "clients", select: ["id"], where: { name: p } })).data).toEqual([]);
+      expect((await t.api.select({ table: "clients", columns: ["id"], where: { name: p } })).data).toEqual([]);
       expect(
-        (await t.api.select({ table: "clients", select: ["id"], where: { name: { $in: [p, "x"] } } })).data,
+        (await t.api.select({ table: "clients", columns: ["id"], where: { name: { $in: [p, "x"] } } })).data,
       ).toEqual([]);
       expect(
-        (await t.api.select({ table: "clients", select: ["id"], where: { $or: [{ name: p }, { email: p }] } })).data,
+        (await t.api.select({ table: "clients", columns: ["id"], where: { $or: [{ name: p }, { email: p }] } })).data,
       ).toEqual([]);
       // a column name is an identifier: it is checked against the schema, never interpolated
       const key = await t.api.select({ table: "clients", where: { [p]: 1 } });
@@ -180,11 +180,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
   test("query(): a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x, (y)`;
     const created = await t.api.insert<Array<{ name: string }>>(
-      { table: "clients", rows: { name }, select: ["name"] },
+      { table: "clients", rows: { name }, returning: ["name"] },
       { role: "authenticated" },
     );
     expect(created.data).toEqual([{ name }]);
-    const found = await t.api.select({ table: "clients", select: ["name"], where: { name } });
+    const found = await t.api.select({ table: "clients", columns: ["name"], where: { name } });
     expect(found.data).toEqual([{ name }]);
     await t.db.adapter.query("DELETE FROM api.clients WHERE name = $1::text", [name]);
   });

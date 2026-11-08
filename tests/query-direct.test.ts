@@ -11,12 +11,12 @@ const viaString = (input: QueryInput) => parseQuery(toParams(input));
 // what the string parses to: that is what keeps `query` and `rest` one engine.
 const same: Array<[string, unknown]> = [
   ["bare table", { table: "orders" }],
-  ["empty select", { table: "orders", select: [] }],
-  ["columns", { table: "orders", select: ["id", "total", "*"] }],
-  ["aliased column", { table: "orders", select: ["t:total"] }],
-  ["cast", { table: "orders", select: ["total::text"] }],
-  ["json path", { table: "orders", select: ["data->a", "meta->>tier"] }],
-  ["aggregate", { table: "orders", select: ["count()", "total.sum()", "s:total.avg()"] }],
+  ["empty select", { table: "orders", columns: [] }],
+  ["columns", { table: "orders", columns: ["id", "total", "*"] }],
+  ["aliased column", { table: "orders", columns: ["t:total"] }],
+  ["cast", { table: "orders", columns: ["total::text"] }],
+  ["json path", { table: "orders", columns: ["data->a", "meta->>tier"] }],
+  ["aggregate", { table: "orders", columns: ["count()", "total.sum()", "s:total.avg()"] }],
   ["equality", { table: "orders", where: { status: "paid", id: 1, ok: true, gone: null } }],
   ["operators", { table: "orders", where: { total: { $gte: 100, $lt: 500 }, name: { $ilike: "a%" } } }],
   ["not", { table: "orders", where: { total: { $not: { $gt: 5 } } } }],
@@ -38,22 +38,22 @@ const same: Array<[string, unknown]> = [
   ["order by a related column", { table: "orders", order: ["client(name).desc", "data->a.asc"] }],
   ["paging", { table: "orders", limit: 10, offset: 20 }],
   ["paging that is not a count is ignored", { table: "orders", limit: 1.5, offset: -1 }],
-  ["embed", { table: "orders", select: ["id", { clients: { select: ["name"], inner: true } }] }],
+  ["embed", { table: "orders", columns: ["id", { clients: { columns: ["name"], inner: true } }] }],
   [
     "embed shorthand, alias, hint, spread",
     {
       table: "orders",
-      select: [{ clients: ["name"] }, { c2: { select: ["*"], hint: "fk", spread: true } }, { c3: { as: "buyer" } }],
+      columns: [{ clients: ["name"] }, { c2: { columns: ["*"], hint: "fk", spread: true } }, { c3: { as: "buyer" } }],
     },
   ],
   [
     "embed with its own filters",
     {
       table: "orders",
-      select: [
+      columns: [
         {
           items: {
-            select: ["id", { product: { select: ["name"], where: { name: { $like: "a%" } } } }],
+            columns: ["id", { product: { columns: ["name"], where: { name: { $like: "a%" } } } }],
             where: { qty: { $gt: 1 } },
             order: ["id.desc"],
             limit: 5,
@@ -63,31 +63,31 @@ const same: Array<[string, unknown]> = [
       ],
     },
   ],
-  ["empty embed", { table: "orders", select: [{ clients: { select: [] } }] }],
+  ["empty embed", { table: "orders", columns: [{ clients: { columns: [] } }] }],
   [
     "a filter through the path of an embed",
-    { table: "orders", select: [{ clients: ["id"] }], where: { "clients.name": "a" } },
+    { table: "orders", columns: [{ clients: ["id"] }], where: { "clients.name": "a" } },
   ],
   [
     "a filter through the alias, and through the table name of an aliased one",
-    { table: "orders", select: [{ clients: { as: "buyer" } }], where: { "buyer.id": 1, "clients.name": "a" } },
+    { table: "orders", columns: [{ clients: { as: "buyer" } }], where: { "buyer.id": 1, "clients.name": "a" } },
   ],
   [
     "presence of an embed",
     {
       table: "orders",
-      select: [{ clients: ["id"] }, { items: ["id"] }],
+      columns: [{ clients: ["id"] }, { items: ["id"] }],
       where: { clients: null, items: { $not: null } },
     },
   ],
   [
     "insert",
-    { table: "orders", action: "insert", rows: { a: 1 }, select: ["id"], onConflict: ["id"], columns: ["a", "b"] },
+    { table: "orders", action: "insert", rows: { a: 1 }, returning: ["id"], onConflict: ["id"], columns: ["a", "b"] },
   ],
   ["upsert odd columns", { table: "orders", action: "upsert", rows: { a: 1 }, columns: ["a b"] }],
   ["update", { table: "orders", action: "update", set: { a: 1 }, where: { id: 1 } }],
   ["delete", { table: "orders", action: "delete", where: { id: { $in: [1, 2] } } }],
-  ["rpc", { rpc: "f", args: { a: 1 }, where: { x: 1 }, select: ["a"] }],
+  ["rpc", { rpc: "f", args: { a: 1 }, where: { x: 1 }, columns: ["a"] }],
 ];
 
 // What the string route refuses, `toParsed` refuses too -- in `query`'s own words.
@@ -98,11 +98,11 @@ const refused: Array<[string, unknown]> = [
   ["an empty $not", { table: "orders", where: { $not: {} } }],
   ["a quantifier on an operator that has none", { table: "orders", where: { a: { $any: { $in: [1] } } } }],
   ["a bad text search configuration", { table: "orders", where: { a: { $fts: { query: "x", config: "no good" } } } }],
-  ["a spread that is renamed", { table: "orders", select: [{ c: { as: "x", spread: true } }] }],
+  ["a spread that is renamed", { table: "orders", columns: [{ c: { as: "x", spread: true } }] }],
   ["a filter through something that is not embedded", { table: "orders", where: { "nope.x": 1 } }],
   [
     "a filter on an embed that is not a null test",
-    { table: "orders", select: [{ clients: ["id"] }], where: { clients: 1 } },
+    { table: "orders", columns: [{ clients: ["id"] }], where: { clients: 1 } },
   ],
 ];
 
@@ -132,7 +132,7 @@ describe("query -> ParsedQuery, directly", () => {
   });
 
   test("a hint is a name, whatever it is called", () => {
-    const p = toParsed({ table: "t", select: [{ clients: { hint: "inner" } }] });
+    const p = toParsed({ table: "t", columns: [{ clients: { hint: "inner" } }] });
     expect(p.select[0]).toMatchObject({ kind: "embed", hint: "inner", join: "left" });
   });
 

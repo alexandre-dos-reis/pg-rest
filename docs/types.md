@@ -75,7 +75,7 @@ export type Database = {
 | `insert` | what a write accepts: a generated or `GENERATED ALWAYS AS IDENTITY` column is **absent**, one with a default or a nullable one is optional. `never` when the relation cannot be written |
 | `update` | the same, all optional |
 | `pk`, `insertable`, `updatable`, `deletable` | the primary key, and what `pg_relation_is_updatable` says the relation accepts |
-| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the query path uses**, so a `select` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the query will need one (an `invalid_embed` error otherwise) |
+| `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the query path uses**, so a `columns` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the query will need one (an `invalid_embed` error otherwise) |
 | `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, or `null` for `void` |
 | enums | the labels, as a union — `"sad" \| "ok" \| "happy"`, and `("sad" \| "ok")[]` for an array of them |
 | composite types | a named type per [composite type](https://www.postgresql.org/docs/current/rowtypes.html) the schema reaches, nesting included — see [below](#composite-types) |
@@ -123,9 +123,9 @@ Only the composite types the module actually mentions are declared, so a `noUnus
 const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 ```
 
-From there, `table` and `rpc` are the ones that exist, `select`, `where` and `order` only name real columns and
+From there, `table` and `rpc` are the ones that exist, `columns`, `where` and `order` only name real columns and
 relationships, the payload of a write is the relation's insert or update shape, and `data` is inferred from the
-`select` — see [`query.md`](query.md) for the whole surface. The inference follows what the runtime actually answers:
+`columns` (or, on a write, `returning`) — see [`query.md`](query.md) for the whole surface. The inference follows what the runtime actually answers:
 
 | in the query | in `data` |
 | --- | --- |
@@ -151,7 +151,7 @@ string from outside and cannot be typed.
 
 ## In your editor
 
-The table restricts the columns in the completion list too, not only when the compiler runs: inside `select` on `tags`,
+The table restricts the columns in the completion list too, not only when the compiler runs: inside `columns` on `tags`,
 you are offered that table's columns and nothing from `todos`. Each property carries its documentation, and hovering
 `select` explains the whole shape.
 
@@ -161,7 +161,7 @@ when the discriminant picks **exactly one** member of the union, so each operati
 
 Hovering a property you have already written shows its *inferred* type and no documentation: the parameter is the
 inferred query, so there is no declared property for the editor to point at. That is the price of inferring `data` from
-the `select`.
+the `columns` (or, on a write, the `returning` list).
 
 ## What it cannot describe
 
@@ -178,7 +178,7 @@ Three more gaps, each for a reason:
 - **`RETURNS TABLE(…)` functions** give `Record<string, unknown>`: the catalog does not carry their output columns, and
   neither does the request path (it builds a relation with no columns). The types are as precise as the runtime, not
   more.
-- **Casts, JSON paths and aggregates** in a `select` — `total::text`, `meta->>tier`, `total.sum()` — change or invent a
+- **Casts, JSON paths and aggregates** in `columns` — `total::text`, `meta->>tier`, `total.sum()` — change or invent a
   column, and reading that back out of a string literal would cost more than it gives. They are compile errors on a
   typed instance and work as always on an untyped one. A JSON path in a `where` (`"meta->>tier"`) is accepted on a real
   column, since a filter does not change the result; its value is only checked for shape.

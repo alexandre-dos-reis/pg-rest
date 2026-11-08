@@ -191,7 +191,7 @@ HTTP.
 ```ts ignore
 const pgRest = await createQuery({ db: nodePostgresAdapter(pool), debug: true });
 
-const { data, error, debug } = await pgRest.select({ table: "todos", select: ["id", { tags: ["label"] }] });
+const { data, error, debug } = await pgRest.select({ table: "todos", columns: ["id", { tags: ["label"] }] });
 debug?.sql; //      the statement, as the builders wrote it
 debug?.params; //   the values, in order -- nothing is interpolated, which is the point
 debug?.parsed; //   the ParsedQuery: the select tree, the filter tree, order, paging

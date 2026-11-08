@@ -56,7 +56,7 @@ const pgRest = await createQuery<DatabasePgRest>(options);
 
 const { data: todos, error } = await pgRest.select({
   table: "todos", //                                  only a relation of the exposed schema
-  select: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
+  columns: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
   where: { done: false }, //                          its own columns, with the right value type
   order: [{ column: "priority", desc: true }],
   limit: 10,
@@ -126,7 +126,7 @@ void pgRest.insert({ table: "todos", rows: { id: 42, title: "nope" } });
 void pgRest.select({ table: "todos", where: { at: { floor: "2" } } });
 
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
-void pgRest.select({ table: "todos", select: ["id"], limitt: 10 });
+void pgRest.select({ table: "todos", columns: ["id"], limitt: 10 });
 ```
 
 Not everything can be described: casts (`total::text`), JSON paths (`meta->>tier`) and aggregates (`total.sum()`) change

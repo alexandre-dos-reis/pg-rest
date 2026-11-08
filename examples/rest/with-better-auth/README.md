@@ -53,7 +53,7 @@ app.get("/dashboard", async (c) => {
   const { data: todos, error } = await pgRest.select(
     {
       table: "todos",
-      select: ["id", "title", "done", { tags: ["label"] }],
+      columns: ["id", "title", "done", { tags: ["label"] }],
       where: { done: false },
       order: [{ column: "created", desc: true }],
       limit: 10,

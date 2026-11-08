@@ -5,7 +5,7 @@ import { close, pgRest } from "./client.ts";
 
 const { data: todos, count, error } = await pgRest.select({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
-  select: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there
+  columns: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there
   where: { done: false }, //                     this table's columns too, each with its own value type
   order: [{ column: "priority", desc: true }], //  a column again, so a typo is an error and not a silently unordered answer
   limit: 10, //                                  plain numbers: limit, offset
@@ -22,14 +22,14 @@ for (const todo of todos) console.log(`  ${todo.title} (${todo.priority}) ${todo
 // completion offers id, todo_id, label and * : the three columns of `tags`, and nothing from `todos`.
 const { data: labels } = await pgRest.select({
   table: "tags",
-  select: ["label", { todos: ["title"] }], //     `done` would be an error: it is a column of todos, not of tags
+  columns: ["label", { todos: ["title"] }], //     `done` would be an error: it is a column of todos, not of tags
   order: ["id"], //                              a bare column name works too, as does "id.desc"
 });
 console.log("tags:", labels);
 
 const { data: urgent } = await pgRest.select({
   table: "todos",
-  select: ["title"],
+  columns: ["title"],
   where: { priority: { $in: ["high"] } }, //      an enum is a union of its labels: "urgent" would not compile
 });
 console.log("high priority:", urgent);
@@ -37,7 +37,7 @@ console.log("high priority:", urgent);
 const { data: created, error: createFailed } = await pgRest.insert({
   table: "todos", //                           "select" (the default) | "insert" | "upsert" | "update" | "delete"
   rows: { title: "Generated types", priority: "high" }, //  the insert shape: `title` is required, `id` is generated and absent
-  select: ["id", "priority"], //                 what a write gives back, when it gives anything
+  returning: ["id", "priority"], //                 what a write gives back, when it gives anything
 });
 // created: Array<{ id: number; priority: "low" | "normal" | "high" }>
 console.log(`created ${createFailed ? createFailed.kind : "ok"}:`, created);
@@ -46,7 +46,7 @@ console.log(`created ${createFailed ? createFailed.kind : "ok"}:`, created);
 // compared may leave some out -- the ones left out are NULL, as they would be in a row literal.
 const { data: placed } = await pgRest.select({
   table: "todos",
-  select: ["title", "at"], //                    `at` is api.place: { room: string | null; floor: number | null }
+  columns: ["title", "at"], //                    `at` is api.place: { room: string | null; floor: number | null }
   where: { at: { room: "Lab", floor: 2 } }, //   the whole value; `{ room: "Lab" }` would compare floor against NULL
 });
 if (placed?.[0]) console.log(`in ${placed[0].at?.room} on floor ${placed[0].at?.floor}:`, placed[0].title);
@@ -55,22 +55,22 @@ const { data: moved } = await pgRest.update({
   table: "todos",
   set: { at: { room: "Lab", floor: 3 } }, //     a nested object is the composite value
   where: { title: "Try pg-rest" },
-  select: ["at"],
+  returning: ["at"],
 });
 console.log("moved:", moved);
-// Reaching a single field (`select: ["at->>room"]`, `where: { "at->>floor": 3 }`) works at runtime
+// Reaching a single field (`columns: ["at->>room"]`, `where: { "at->>floor": 3 }`) works at runtime
 // and is not described by the types, like any other JSON path: use an untyped instance for those.
 
 const { data: open } = await pgRest.rpc({
   rpc: "open_todos", //                          the functions of the schema, instead of `table`
-  select: ["title"], //                          its result is a row like any other: todos', here
+  columns: ["title"], //                          its result is a row like any other: todos', here
 });
 // open: Array<{ title: string }>
 console.log("rpc open_todos:", open);
 
 const one = await pgRest.select({
   table: "todos",
-  select: ["title", { tags: { as: "some", select: ["label"] } }],
+  columns: ["title", { tags: { as: "some", columns: ["label"] } }],
   where: { id: 1 },
   single: true, //                               one object instead of an array (`not_single_row` if there is not exactly one)
 });

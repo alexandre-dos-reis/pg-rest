@@ -18,7 +18,7 @@ const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as
 
 describe("input -> query string", () => {
   test("select, filters, order and paging", () => {
-    expect(qs({ table: "clients", select: ["id", "name"], limit: 10 })).toBe("select=id%2Cname&limit=10");
+    expect(qs({ table: "clients", columns: ["id", "name"], limit: 10 })).toBe("select=id%2Cname&limit=10");
     expect(qs({ table: "orders", where: { status: "paid", total: { $gte: 100 } } })).toBe(
       "status=eq.paid&total=gte.100",
     );
@@ -107,23 +107,23 @@ describe("input -> query string", () => {
   });
 
   test("embeds carry their own modifiers, filters and paging", () => {
-    expect(qs({ table: "clients", select: ["name", { orders: ["total"] }] })).toBe("select=name%2Corders%28total%29");
+    expect(qs({ table: "clients", columns: ["name", { orders: ["total"] }] })).toBe("select=name%2Corders%28total%29");
     expect(
       qs({
         table: "clients",
-        select: [
+        columns: [
           "name",
-          { orders: { select: ["total"], inner: true, where: { status: "paid" }, order: ["total"], limit: 1 } },
+          { orders: { columns: ["total"], inner: true, where: { status: "paid" }, order: ["total"], limit: 1 } },
         ],
       }),
     ).toBe("select=name%2Corders%21inner%28total%29&orders.status=eq.paid&orders.order=total&orders.limit=1");
     // an alias is also the path its filters use
-    expect(qs({ table: "clients", select: [{ orders: { as: "o", select: ["id"], where: { id: 1 } } }] })).toBe(
+    expect(qs({ table: "clients", columns: [{ orders: { as: "o", columns: ["id"], where: { id: 1 } } }] })).toBe(
       "select=o%3Aorders%28id%29&o.id=eq.1",
     );
-    expect(qs({ table: "orders", select: [{ clients: { hint: "client_id", spread: true, select: ["name"] } }] })).toBe(
-      "select=...clients%21client_id%28name%29",
-    );
+    expect(
+      qs({ table: "orders", columns: [{ clients: { hint: "client_id", spread: true, columns: ["name"] } }] }),
+    ).toBe("select=...clients%21client_id%28name%29");
   });
 
   test("a bad operator is refused before touching the database", () => {
@@ -141,7 +141,7 @@ describe.skipIf(!hasDb)("query()", () => {
   test("the $ operators and groups select the right rows", async () => {
     // orders: 1 paid 250, 2 new 40.50, 3 paid 99.99, 4 shipped 500
     const ids = async (where: object) => {
-      const r = await t.api.select({ table: "orders", select: ["id"], where, order: ["id"] } as never);
+      const r = await t.api.select({ table: "orders", columns: ["id"], where, order: ["id"] } as never);
       if (r.error) throw new Error(r.error.summary);
       return (r.data as Array<{ id: number }>).map((o) => o.id);
     };
@@ -177,7 +177,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
   describe("reads", () => {
     test("the shape the question started with", async () => {
-      const r = await t.api.select<Array<{ id: number }>>({ table: "orders", select: ["id"], limit: 10 });
+      const r = await t.api.select<Array<{ id: number }>>({ table: "orders", columns: ["id"], limit: 10 });
       expect(r.data).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
       expect(r.error).toBeNull();
       expect(r.count).toBeUndefined();
@@ -186,7 +186,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("filters, order, paging and count", async () => {
       const r = await t.api.select<Array<{ total: number }>>({
         table: "orders",
-        select: ["total"],
+        columns: ["total"],
         where: { status: "paid" },
         order: [{ column: "total", desc: true }],
         limit: 1,
@@ -199,7 +199,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("single gives one object", async () => {
       const r = await t.api.select<{ name: string }>({
         table: "clients",
-        select: ["name"],
+        columns: ["name"],
         where: { id: 1 },
         single: true,
       });
@@ -207,14 +207,14 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("stripNulls", async () => {
-      const r = await t.api.select({ table: "clients", select: ["name", "meta"], where: { id: 3 }, stripNulls: true });
+      const r = await t.api.select({ table: "clients", columns: ["name", "meta"], where: { id: 3 }, stripNulls: true });
       expect(r.data).toEqual([{ name: "Grace" }]);
     });
 
     test("embeds, aliases and embedded filters", async () => {
       const r = await t.api.select({
         table: "clients",
-        select: ["name", { orders: { as: "paid", select: ["total"], where: { status: "paid" }, inner: true } }],
+        columns: ["name", { orders: { as: "paid", columns: ["total"], where: { status: "paid" }, inner: true } }],
         order: ["id"],
       });
       expect(r.data).toEqual([
@@ -226,7 +226,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("or groups", async () => {
       const r = await t.api.select<Array<{ id: number }>>({
         table: "orders",
-        select: ["id"],
+        columns: ["id"],
         where: { $or: [{ status: "new" }, { total: { $gte: 400 } }] },
         order: ["id"],
       });
@@ -234,7 +234,7 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("another exposed schema", async () => {
-      const r = await t.api.select({ table: "things", schema: "v2", select: ["label"], order: ["id"] });
+      const r = await t.api.select({ table: "things", schema: "v2", columns: ["label"], order: ["id"] });
       expect(r.data).toEqual([{ label: "one" }, { label: "two" }]);
     });
   });
@@ -242,7 +242,7 @@ describe.skipIf(!hasDb)("query()", () => {
   describe("writes", () => {
     test("insert returns its rows, unlike HTTP, and returning: minimal restores that", async () => {
       const inserted = await t.api.insert<Array<{ id: number; name: string }>>(
-        { table: "clients", rows: { name: "Hopper" }, select: ["id", "name"] },
+        { table: "clients", rows: { name: "Hopper" }, returning: ["id", "name"] },
         authed(),
       );
       expect(inserted.data).toEqual([{ id: expect.any(Number), name: "Hopper" }]);
@@ -260,20 +260,20 @@ describe.skipIf(!hasDb)("query()", () => {
           table: "products",
           rows: { id: 90, name: "Pad mk2", price: 6 },
           onConflict: ["id"],
-          select: ["name"],
+          returning: ["name"],
         },
         authed(),
       );
       expect(up.data).toEqual([{ name: "Pad mk2" }]);
 
       const patched = await t.api.update<Array<{ price: number }>>(
-        { table: "products", set: { price: 7 }, where: { id: 90 }, select: ["price"] },
+        { table: "products", set: { price: 7 }, where: { id: 90 }, returning: ["price"] },
         authed(),
       );
       expect(patched.data).toEqual([{ price: 7 }]);
 
       const deleted = await t.api.delete<Array<{ id: number }>>(
-        { table: "products", where: { id: 90 }, select: ["id"] },
+        { table: "products", where: { id: 90 }, returning: ["id"] },
         authed(),
       );
       expect(deleted.data).toEqual([{ id: 90 }]);
@@ -284,8 +284,13 @@ describe.skipIf(!hasDb)("query()", () => {
       const { error } = await t.api.update({ table: "orders", set: { status: "x" }, maxAffected: 1 }, authed());
       expect(error?.kind).toBe("too_many_affected");
       expect(
-        (await t.api.select<Array<{ status: string }>>({ table: "orders", select: ["status"], where: { status: "x" } }))
-          .data,
+        (
+          await t.api.select<Array<{ status: string }>>({
+            table: "orders",
+            columns: ["status"],
+            where: { status: "x" },
+          })
+        ).data,
       ).toEqual([]);
     });
   });
@@ -297,7 +302,7 @@ describe.skipIf(!hasDb)("query()", () => {
       const rows = await t.api.rpc({
         rpc: "orders_by_status",
         args: { s: "paid" },
-        select: ["total"],
+        columns: ["total"],
         order: [{ column: "total", desc: true }],
       });
       expect(rows.data).toEqual([{ total: 250 }, { total: 99.99 }]);
@@ -323,9 +328,9 @@ describe.skipIf(!hasDb)("query()", () => {
     test("the role and claims reach RLS, exactly like handle()", async () => {
       await t.api.insert({ table: "notes", rows: { body: "mine" } }, authed("alice"));
       expect(
-        (await t.api.select<Array<{ body: string }>>({ table: "notes", select: ["body"] }, authed("alice"))).data,
+        (await t.api.select<Array<{ body: string }>>({ table: "notes", columns: ["body"] }, authed("alice"))).data,
       ).toEqual([{ body: "mine" }]);
-      expect((await t.api.select({ table: "notes", select: ["body"] }, authed("bob"))).data).toEqual([]);
+      expect((await t.api.select({ table: "notes", columns: ["body"] }, authed("bob"))).data).toEqual([]);
     });
 
     test("extra settings are applied", async () => {
@@ -340,7 +345,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
   describe("errors", () => {
     test("the error is a QueryError carrying the reason and the input", async () => {
-      const input: QueryInput = { table: "cients", select: ["id"] };
+      const input: QueryInput = { table: "cients", columns: ["id"] };
       const { data, count, error: e } = await exec(t.api, input);
       expect(data).toBeNull();
       expect(count).toBeUndefined();
@@ -368,7 +373,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
       // the query object itself
       expect(await kindOf({ table: "orders", where: { total: { $nope: 1 } as never } })).toBe("invalid_query");
-      expect(await kindOf({ table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } })).toBe(
+      expect(await kindOf({ table: "clients", columns: ["name"], where: { "orders.total": { $gte: 1 } } })).toBe(
         "invalid_query",
       );
       // the schema cache
@@ -420,7 +425,7 @@ describe.skipIf(!hasDb)("query()", () => {
       const none = await t.api.select({ table: "clients", where: { id: 999 }, single: true });
       expect(none.error?.kind).toBe("not_single_row");
 
-      const embed = await t.api.select({ table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } });
+      const embed = await t.api.select({ table: "clients", columns: ["name"], where: { "orders.total": { $gte: 1 } } });
       expect(embed.error?.kind).toBe("invalid_query");
     });
 
@@ -436,7 +441,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("a success is error: null, a failure is data: null", async () => {
       const okq = await t.api.select<Array<{ id: number }>>({
         table: "orders",
-        select: ["id"],
+        columns: ["id"],
         limit: 2,
         order: ["id"],
         count: "exact",
@@ -452,7 +457,7 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("narrowing on error leaves data usable", async () => {
-      const r = await t.api.select<Array<{ name: string }>>({ table: "clients", select: ["name"], where: { id: 1 } });
+      const r = await t.api.select<Array<{ name: string }>>({ table: "clients", columns: ["name"], where: { id: 1 } });
       if (r.error) throw r.error;
       // a type error here would fail the typecheck, which is half the point of the shape
       const names: string[] = r.data.map((row) => row.name);
@@ -464,7 +469,7 @@ describe.skipIf(!hasDb)("query()", () => {
       const operator = await t.api.select({ table: "orders", where: { total: { $nope: 1 } as never } });
       expect(operator.error?.kind).toBe("invalid_query");
       // refused by the schema
-      expect((await t.api.select({ table: "clients", select: ["nope"] })).error?.kind).toBe("undefined_object");
+      expect((await t.api.select({ table: "clients", columns: ["nope"] })).error?.kind).toBe("undefined_object");
       // refused by Postgres (privileges), and by the response shaping
       expect((await t.api.delete({ table: "clients", where: { id: 1 } })).error?.sqlState).toBe("42501");
       expect((await t.api.select({ table: "clients", where: { id: 999 }, single: true })).error?.kind).toBe(
@@ -489,7 +494,7 @@ describe.skipIf(!hasDb)("query()", () => {
       });
       broken = true;
 
-      const r = await api.select({ table: "clients", select: ["id"] });
+      const r = await api.select({ table: "clients", columns: ["id"] });
       expect(r.data).toBeNull();
       expect(r.error).toBeInstanceOf(QueryError);
       expect(r.error).toMatchObject({ kind: "internal", message: "Internal error", details: null, hint: null });
@@ -507,7 +512,7 @@ describe.skipIf(!hasDb)("query()", () => {
       const db = t.api.setContextQuery(() => store.getStore());
       const deep = async () => {
         await Promise.resolve();
-        return db.select({ table: "clients", select: ["name"], where: { id: 1 } });
+        return db.select({ table: "clients", columns: ["name"], where: { id: 1 } });
       };
       const r = await store.run(authed(), () => deep());
       expect(r.data).toEqual([{ name: "Ada" }]);
@@ -525,7 +530,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
     test("a fixed context needs no store", async () => {
       const db = t.api.setContextQuery(authed());
-      expect((await db.select({ table: "clients", select: ["name"], where: { id: 1 } })).data).toEqual([
+      expect((await db.select({ table: "clients", columns: ["name"], where: { id: 1 } })).data).toEqual([
         { name: "Ada" },
       ]);
     });
@@ -535,7 +540,7 @@ describe.skipIf(!hasDb)("query()", () => {
         await Promise.resolve();
         return authed();
       });
-      expect((await db.select({ table: "clients", select: ["name"], where: { id: 1 } })).data).toEqual([
+      expect((await db.select({ table: "clients", columns: ["name"], where: { id: 1 } })).data).toEqual([
         { name: "Ada" },
       ]);
     });
@@ -569,7 +574,7 @@ describe.skipIf(!hasDb)("query()", () => {
     });
 
     test("it answers exactly like query() with the same context", async () => {
-      const input: SelectInput = { table: "orders", select: ["id", "total"], order: ["id"], count: "exact" };
+      const input: SelectInput = { table: "orders", columns: ["id", "total"], order: ["id"], count: "exact" };
       const db = t.api.setContextQuery(() => store.getStore());
       const bound = await store.run(authed(), () => db.select(input));
       expect(bound).toEqual(await t.api.select(input, authed()));
@@ -580,29 +585,29 @@ describe.skipIf(!hasDb)("query()", () => {
     const cases: Array<[string, QueryInput, string]> = [
       [
         "columns and paging",
-        { table: "orders", select: ["id", "total"], limit: 2, offset: 1, order: ["id"] },
+        { table: "orders", columns: ["id", "total"], limit: 2, offset: 1, order: ["id"] },
         "/orders?select=id,total&limit=2&offset=1&order=id",
       ],
       [
         "filters",
-        { table: "orders", select: ["id"], where: { status: "paid", total: { $gte: 100 } } },
+        { table: "orders", columns: ["id"], where: { status: "paid", total: { $gte: 100 } } },
         "/orders?select=id&status=eq.paid&total=gte.100",
       ],
       [
         "in and is",
-        { table: "clients", select: ["id"], where: { id: { $in: [1, 3] }, meta: null } },
+        { table: "clients", columns: ["id"], where: { id: { $in: [1, 3] }, meta: null } },
         "/clients?select=id&id=in.(1,3)&meta=is.null",
       ],
       [
         "array containment",
-        { table: "clients", select: ["name"], where: { tags: { $cs: ["vip"] } }, order: ["id"] },
+        { table: "clients", columns: ["name"], where: { tags: { $cs: ["vip"] } }, order: ["id"] },
         "/clients?select=name&tags=cs.{vip}&order=id",
       ],
       [
         "or group",
         {
           table: "orders",
-          select: ["id"],
+          columns: ["id"],
           where: { $or: [{ status: "new" }, { total: { $gte: 400 } }] },
           order: ["id"],
         },
@@ -612,31 +617,31 @@ describe.skipIf(!hasDb)("query()", () => {
         "embed with its own paging",
         {
           table: "clients",
-          select: ["name", { orders: { select: ["total"], order: [{ column: "total", desc: true }], limit: 1 } }],
+          columns: ["name", { orders: { columns: ["total"], order: [{ column: "total", desc: true }], limit: 1 } }],
           order: ["id"],
         },
         "/clients?select=name,orders(total)&orders.order=total.desc&orders.limit=1&order=id",
       ],
       [
         "aggregate",
-        { table: "orders", select: ["status", "total.sum()"], order: ["status"] },
+        { table: "orders", columns: ["status", "total.sum()"], order: ["status"] },
         "/orders?select=status,total.sum()&order=status",
       ],
       [
         "json path",
-        { table: "clients", select: ["name", "tier:meta->>tier"], order: ["id"] },
+        { table: "clients", columns: ["name", "tier:meta->>tier"], order: ["id"] },
         "/clients?select=name,tier:meta->>tier&order=id",
       ],
       [
         "rpc with a select",
-        { rpc: "orders_by_status", args: { s: "paid" }, select: ["id"], order: ["id"] },
+        { rpc: "orders_by_status", args: { s: "paid" }, columns: ["id"], order: ["id"] },
         "/rpc/orders_by_status?s=paid&select=id&order=id",
       ],
       ["unknown table", { table: "nope" }, "/nope"],
-      ["unknown column", { table: "clients", select: ["nope"] }, "/clients?select=nope"],
+      ["unknown column", { table: "clients", columns: ["nope"] }, "/clients?select=nope"],
       [
         "undeclared embed filter",
-        { table: "clients", select: ["name"], where: { "orders.total": { $gte: 1 } } },
+        { table: "clients", columns: ["name"], where: { "orders.total": { $gte: 1 } } },
         "/clients?select=name&orders.total=gte.1",
       ],
     ];

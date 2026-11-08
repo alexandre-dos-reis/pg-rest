@@ -34,7 +34,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
 
   const paid = (a: { status: string; min: number }): SelectInput => ({
     table: "orders",
-    select: ["id", "total", { clients: { select: ["name"], inner: true } }],
+    columns: ["id", "total", { clients: { columns: ["name"], inner: true } }],
     where: { status: a.status, total: { $gte: a.min } },
     order: ["id"],
   });
@@ -81,7 +81,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("it works in a transaction and on a context query", async () => {
     const find = q.prepare((a: { status: string }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { status: a.status },
       order: ["id"],
     }));
@@ -90,22 +90,22 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     const db2 = q.setContextQuery(() => authed);
     expect((await db2.run(find({ status: "new" }))).data).toEqual([{ id: 2 }]);
     // a failure inside the scope rolls it back like any other query's
-    const failing = q.prepare((a: { s: string }) => ({ table: "orders", select: ["nope"], where: { status: a.s } }));
+    const failing = q.prepare((a: { s: string }) => ({ table: "orders", columns: ["nope"], where: { status: a.s } }));
     const out = await q.transaction(async (tx) => tx.run(failing({ s: "paid" })), authed);
     expect(out.error?.kind).toBe("undefined_object");
   });
 
   test("a failure names the query that ran", async () => {
-    const failing = q.prepare((a: { s: string }) => ({ table: "orders", select: ["nope"], where: { status: a.s } }));
+    const failing = q.prepare((a: { s: string }) => ({ table: "orders", columns: ["nope"], where: { status: a.s } }));
     const r = await q.run(failing({ s: "paid" }), authed);
     expect(r.error?.kind).toBe("undefined_object");
-    expect(r.error?.input).toEqual({ table: "orders", select: ["nope"], where: { status: "paid" } });
+    expect(r.error?.input).toEqual({ table: "orders", columns: ["nope"], where: { status: "paid" } });
   });
 
   test("count, paging and the single row", async () => {
     const page = q.prepare((a: { status: string }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { status: a.status },
       order: ["id"],
       limit: 1,
@@ -116,7 +116,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     expect(r.count).toBe(2);
     const one = q.prepare((a: { id: number }) => ({
       table: "orders",
-      select: ["id", "status"],
+      columns: ["id", "status"],
       where: { id: a.id },
       single: true as const,
     }));
@@ -127,13 +127,13 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("filters inside groups and `in` lists take their values from the arguments", async () => {
     const find = q.prepare((a: { a: string; b: string; id: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { $or: [{ status: a.a }, { status: a.b, id: a.id }] },
       order: ["id"],
     }));
     const direct = (a: { a: string; b: string; id: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { $or: [{ status: a.a }, { status: a.b, id: a.id }] },
       order: ["id"],
     });
@@ -144,7 +144,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     expect((await q.run(find(args), authed)).data).toEqual([{ id: 2 }, { id: 3 }]);
     const inList = q.prepare((a: { x: number; y: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { id: { $in: [a.x, a.y] } },
       order: ["id"],
     }));
@@ -154,7 +154,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("set-up refuses what a prepared query cannot be", () => {
     // an argument that is not a filter value
     expect(() => q.prepare((a: { c: string }) => ({ table: "orders", where: { [a.c]: 1 } }))).toThrow("filter values");
-    expect(() => q.prepare((a: { c: string }) => ({ table: "orders", select: [a.c] }))).toThrow();
+    expect(() => q.prepare((a: { c: string }) => ({ table: "orders", columns: [a.c] }))).toThrow();
     expect(() => q.prepare((a: { n: number }) => ({ table: "orders", limit: a.n }))).toThrow();
     // an argument that never reaches the SQL
     expect(() =>
@@ -218,8 +218,8 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   };
 
   test("the text depends on the shape of the query, not on its values", async () => {
-    const a = await lastOf({ table: "orders", select: ["id"], where: { status: "paid", total: { $gte: 100 } } });
-    const b = await lastOf({ table: "orders", select: ["id"], where: { status: "new", total: { $gte: 5 } } });
+    const a = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid", total: { $gte: 100 } } });
+    const b = await lastOf({ table: "orders", columns: ["id"], where: { status: "new", total: { $gte: 5 } } });
     expect(a.text).toBe(b.text);
     expect(a.text).not.toContain("'paid'");
     expect(a.params).toEqual(["paid", "100"]);
@@ -227,7 +227,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   });
 
   test("a value is never part of the SQL", async () => {
-    const r = await lastOf({ table: "clients", select: ["id"], where: { name: "x' OR 1=1 --" } });
+    const r = await lastOf({ table: "clients", columns: ["id"], where: { name: "x' OR 1=1 --" } });
     expect(r.text).not.toContain("OR 1=1");
     expect(r.params).toEqual(["x' OR 1=1 --"]);
     expect(r.result.data).toEqual([]);
@@ -236,7 +236,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   test("in lists, groups, quantifiers, text search and embeds bind too", async () => {
     const r = await lastOf({
       table: "orders",
-      select: ["id", { clients: { select: ["name"], where: { name: { $like: "A*" } } } }],
+      columns: ["id", { clients: { columns: ["name"], where: { name: { $like: "A*" } } } }],
       where: { $or: [{ id: { $in: [1, 2] } }, { status: { $any: { $eq: ["paid", "new"] } } }] },
     });
     expect(r.text).not.toMatch(/'(paid|new|A%)'/);
@@ -260,22 +260,22 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   });
 
   test("json and jsonb columns keep a literal, a text path is bound", async () => {
-    const j = await lastOf({ table: "clients", select: ["id"], where: { meta: { $cs: { tier: "gold" } } } });
+    const j = await lastOf({ table: "clients", columns: ["id"], where: { meta: { $cs: { tier: "gold" } } } });
     expect(j.params ?? []).toEqual([]);
     expect(j.text).toContain("tier");
     expect(j.result.data).toEqual([{ id: 1 }]);
-    const t = await lastOf({ table: "clients", select: ["id"], where: { "meta->>tier": "silver" } });
+    const t = await lastOf({ table: "clients", columns: ["id"], where: { "meta->>tier": "silver" } });
     expect(t.params).toEqual(["silver"]);
     expect(t.result.data).toEqual([{ id: 2 }]);
-    const p = await lastOf({ table: "clients", select: ["id"], where: { "meta->tier": '"gold"' } });
+    const p = await lastOf({ table: "clients", columns: ["id"], where: { "meta->tier": '"gold"' } });
     expect(p.params ?? []).toEqual([]);
     expect(p.result.data).toEqual([{ id: 1 }]);
   });
 
   test("counts and plans work with bound values", async () => {
-    const c = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, limit: 1, count: "exact" });
+    const c = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid" }, limit: 1, count: "exact" });
     expect((c.result as { count: number }).count).toBe(2);
-    const e = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, count: "planned" });
+    const e = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid" }, count: "planned" });
     expect(e.result.error).toBeNull();
   });
 

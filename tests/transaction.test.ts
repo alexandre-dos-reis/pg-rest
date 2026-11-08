@@ -21,7 +21,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
   });
 
   const names = async (): Promise<string[]> => {
-    const r = await t!.api.select<Array<{ name: string }>>({ table: "clients", select: ["name"] });
+    const r = await t!.api.select<Array<{ name: string }>>({ table: "clients", columns: ["name"] });
     if (r.error) throw r.error;
     return r.data.map((c) => c.name);
   };
@@ -143,7 +143,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
         seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
       try {
-        await tx.select({ table: "clients", select: ["id"] });
+        await tx.select({ table: "clients", columns: ["id"] });
       } catch (e) {
         seen.push((e as QueryError).sqlState ?? (e as QueryError).kind);
       }
@@ -231,7 +231,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(async (tx) => {
       await tx.insert({ table: "notes", rows: { body: "mine" } });
-      const theirs = await tx.select<Array<{ owner: string }>>({ table: "notes", select: ["owner"] });
+      const theirs = await tx.select<Array<{ owner: string }>>({ table: "notes", columns: ["owner"] });
       return theirs.data.map((n) => n.owner);
     }, authed("u-7"));
 
@@ -257,7 +257,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     const r = await t.api.transaction(async (tx) => {
       const { count } = await tx.select<Array<unknown>, number>({
         table: "clients",
-        select: ["id"],
+        columns: ["id"],
         count: "exact",
         limit: 1,
       });
@@ -272,7 +272,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(
       async (tx) => {
-        await tx.select<Array<unknown>>({ table: "clients", select: ["id"] });
+        await tx.select<Array<unknown>>({ table: "clients", columns: ["id"] });
         await tx.insert({ table: "clients", rows: { name: "No" } });
         return "unreachable";
       },
@@ -328,7 +328,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     const scope = (name: string) =>
       t!.api.transaction(
         async (tx) => {
-          await tx.select<Array<unknown>>({ table: "clients", select: ["id"] });
+          await tx.select<Array<unknown>>({ table: "clients", columns: ["id"] });
           if (++read === 2) bothRead!();
           await everyoneRead;
           await tx.insert({ table: "clients", rows: { name } });

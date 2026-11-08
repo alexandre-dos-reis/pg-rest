@@ -5,7 +5,7 @@ Two things carry the weight: Postgres decides what a caller may do, and request 
 ## The caller is a role and some claims
 
 ```ts
-await pgRest.select({ table: "notes", select: ["body"] }, { role: "authenticated", claims: { sub: user.id } });
+await pgRest.select({ table: "notes", columns: ["body"] }, { role: "authenticated", claims: { sub: user.id } });
 ```
 
 Inside the request's transaction, pg-rest issues one statement that sets them with `set_config(…, true)`

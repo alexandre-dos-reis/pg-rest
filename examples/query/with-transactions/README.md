@@ -76,7 +76,7 @@ mentions no role, no claims and no user id; nothing is threaded through its sign
 
 ```ts
 const move = async (tx: Tx, t: Transfer): Promise<number> => {
-  const { data: accounts } = await tx.select({ table: "accounts", select: ["id", "balance"], where: { … } });
+  const { data: accounts } = await tx.select({ table: "accounts", columns: ["id", "balance"], where: { … } });
   //    ^ Array<{ id: string; balance: number }> -- typed, and not `| null`
   …
 };

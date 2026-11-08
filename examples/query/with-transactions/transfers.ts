@@ -27,7 +27,7 @@ export interface Transfer {
 const move = async (tx: Tx, t: Transfer): Promise<number> => {
   const { data: accounts } = await tx.select({
     table: "accounts",
-    select: ["id", "balance"],
+    columns: ["id", "balance"],
     where: { id: { $in: [t.payer, t.payee] } },
   });
   const payer = accounts.find((a) => a.id === t.payer);
@@ -94,8 +94,8 @@ export const dryRun = (t: Transfer) =>
 export const report = () =>
   pgQuery.transaction(
     async (tx) => {
-      const { data: accounts } = await tx.select({ table: "accounts", select: ["balance"] });
-      const { data: moved } = await tx.select({ table: "ledger", select: ["amount"] });
+      const { data: accounts } = await tx.select({ table: "accounts", columns: ["balance"] });
+      const { data: moved } = await tx.select({ table: "ledger", columns: ["amount"] });
       return {
         held: accounts.reduce((n, a) => n + a.balance, 0),
         moved: moved.reduce((n, l) => n + l.amount, 0),

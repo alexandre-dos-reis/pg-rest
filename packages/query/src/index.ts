@@ -138,7 +138,7 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
    * ```ts ignore
    * const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
    *   table: "orders",
-   *   select: ["id", "total"],
+   *   columns: ["id", "total"],
    *   where: { status: a.status, total: { $gte: a.min } },
    *   order: ["total.desc"],
    * }));

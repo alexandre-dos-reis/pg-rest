@@ -93,7 +93,7 @@ without the server on the other end: no second process to run, and the pool stay
 const { data, error } = await pgRest.select(
   {
     table: "todos",
-    select: ["id", "title", { tags: ["label"] }],
+    columns: ["id", "title", { tags: ["label"] }],
     where: { done: false },
     order: [{ column: "priority", desc: true }],
     limit: 10,
@@ -136,7 +136,7 @@ const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 const { data, count, error } = await pgRest.select({
   table: "todos", //                             only a relation that exists
-  select: ["id", "title", { tags: ["label"] }], //  only real columns and relationships
+  columns: ["id", "title", { tags: ["label"] }], //  only real columns and relationships
   where: { done: false }, //                     only its own columns, with the right value type
   order: [{ column: "priority", desc: true }], //  a column again: a typo is an error, not a silently unordered answer
   limit: 10, //                                  plain numbers: limit, offset
