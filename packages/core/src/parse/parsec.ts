@@ -12,6 +12,8 @@ const MESSAGE = 3;
 interface Msg {
   readonly k: number;
   readonly s: string;
+  /** `s` is one character that still has to be shown (Haskell `show`): done when reporting, not on every failed try. */
+  readonly raw?: true;
 }
 export interface PErr {
   /** Offset in the input. */
@@ -25,15 +27,19 @@ export type P<T> = (s: string, i: number) => Reply<T>;
 
 const unknown = (pos: number): PErr => ({ pos, msgs: [] });
 const mergeError = (e1: PErr, e2: PErr): PErr => {
-  if (e2.msgs.length === 0 && e1.msgs.length > 0) return e1;
-  if (e1.msgs.length === 0 && e2.msgs.length > 0) return e2;
-  if (e1.pos === e2.pos) return { pos: e1.pos, msgs: [...e1.msgs, ...e2.msgs] };
+  const n1 = e1.msgs.length;
+  const n2 = e2.msgs.length;
+  if (n2 === 0 && n1 > 0) return e1;
+  if (n1 === 0 && n2 > 0) return e2;
+  if (e1.pos === e2.pos) return n1 === 0 ? e1 : { pos: e1.pos, msgs: e1.msgs.concat(e2.msgs) };
   return e1.pos > e2.pos ? e1 : e2;
 };
-const setExpect = (e: PErr, label: string): PErr => ({
-  pos: e.pos,
-  msgs: [...e.msgs.filter((m) => m.k !== EXPECT), ...(label ? [{ k: EXPECT, s: label }] : [])],
-});
+const setExpect = (e: PErr, label: string): PErr => {
+  const out: Msg[] = [];
+  for (const m of e.msgs) if (m.k !== EXPECT) out.push(m);
+  if (label) out.push({ k: EXPECT, s: label });
+  return { pos: e.pos, msgs: out };
+};
 
 const showChar = (c: string): string => `'${c}'`;
 /** Haskell `show` of a one-character string. */
@@ -62,8 +68,10 @@ export const unexpected =
 
 const codePointAt = (s: string, i: number): string | undefined => {
   if (i >= s.length) return undefined;
-  const cp = s.codePointAt(i)!;
-  return String.fromCodePoint(cp);
+  const code = s.charCodeAt(i);
+  // outside the surrogate range a code unit is the whole character
+  if (code < 0xd800 || code > 0xdfff) return s[i]!;
+  return String.fromCodePoint(s.codePointAt(i)!);
 };
 
 /** Consume one character satisfying `f`. */
@@ -72,7 +80,7 @@ export const satisfy =
   (s, i) => {
     const c = codePointAt(s, i);
     if (c === undefined) return { ok: false, consumed: false, err: { pos: i, msgs: [{ k: SYS_UNEXPECT, s: "" }] } };
-    if (!f(c)) return { ok: false, consumed: false, err: { pos: i, msgs: [{ k: SYS_UNEXPECT, s: showStr1(c) }] } };
+    if (!f(c)) return { ok: false, consumed: false, err: { pos: i, msgs: [{ k: SYS_UNEXPECT, s: c, raw: true }] } };
     const j = i + c.length;
     return { ok: true, consumed: true, v: c, i: j, err: unknown(j) };
   };
@@ -95,7 +103,7 @@ export const oneOf = (cs: string): P<string> => satisfy((x) => cs.includes(x));
 export const noneOf = (cs: string): P<string> => satisfy((x) => !cs.includes(x));
 export const anyChar: P<string> = satisfy(() => true);
 export const letter: P<string> = label(
-  satisfy((c) => /\p{L}/u.test(c)),
+  satisfy((c) => (c < "\x80" ? (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") : /\p{L}/u.test(c))),
   "letter",
 );
 export const digit: P<string> = label(
@@ -104,10 +112,9 @@ export const digit: P<string> = label(
 );
 
 /** Parsec's `string`: fails after consuming when only a prefix matches (wrap in `tryP` to backtrack). */
-export const string =
-  (w: string): P<string> =>
-  (s, i) => {
-    const expect: Msg = { k: EXPECT, s: showStr(w) };
+export const string = (w: string): P<string> => {
+  const expect: Msg = { k: EXPECT, s: showStr(w) };
+  return (s, i) => {
     for (let k = 0; k < w.length; k++) {
       const c = codePointAt(s, i + k);
       if (c === undefined) {
@@ -115,13 +122,14 @@ export const string =
         return { ok: false, consumed: k > 0, err };
       }
       if (c !== w[k]) {
-        const err: PErr = { pos: i, msgs: [{ k: SYS_UNEXPECT, s: showStr1(c) }, expect] };
+        const err: PErr = { pos: i, msgs: [{ k: SYS_UNEXPECT, s: c, raw: true }, expect] };
         return { ok: false, consumed: k > 0, err };
       }
     }
     const j = i + w.length;
     return { ok: true, consumed: w.length > 0, v: w, i: j, err: unknown(j) };
   };
+};
 
 // ---------------------------------------------------------------------------
 // combinators
@@ -140,19 +148,21 @@ export const bind =
     const r = p(s, i);
     if (!r.ok) return r;
     const q = f(r.v)(s, r.i);
-    if (r.consumed) {
-      if (q.consumed) return q;
-      return q.ok
-        ? { ...q, consumed: true, err: mergeError(r.err, q.err) }
-        : { ok: false, consumed: true, err: mergeError(r.err, q.err) };
-    }
     if (q.consumed) return q;
-    return q.ok
-      ? { ...q, err: mergeError(r.err, q.err) }
-      : { ok: false, consumed: false, err: mergeError(r.err, q.err) };
+    const err = mergeError(r.err, q.err);
+    return q.ok ? { ok: true, consumed: r.consumed, v: q.v, i: q.i, err } : { ok: false, consumed: r.consumed, err };
   };
 
-export const map = <A, B>(p: P<A>, f: (a: A) => B): P<B> => bind(p, (a) => pure(f(a)));
+/** `bind(p, (a) => pure(f(a)))` without building a parser for the result on every success. */
+export const map =
+  <A, B>(p: P<A>, f: (a: A) => B): P<B> =>
+  (s, i) => {
+    const r = p(s, i);
+    if (!r.ok) return r;
+    // what merging with `pure`'s empty error at the end of `p` leaves
+    const err = r.err.msgs.length > 0 || r.err.pos >= r.i ? r.err : unknown(r.i);
+    return { ok: true, consumed: r.consumed, v: f(r.v), i: r.i, err };
+  };
 /** `p <* q` */
 export const before = <A, B>(p: P<A>, q: P<B>): P<A> => bind(p, (a) => map(q, () => a));
 /** `p *> q` */
@@ -191,9 +201,24 @@ export const many =
       pos = r.i;
     }
   };
-export const many1 = <T>(p: P<T>): P<T[]> => bind(p, (x) => map(many(p), (xs) => [x, ...xs]));
-export const sepBy1 = <T, S>(p: P<T>, sep: P<S>): P<T[]> =>
-  bind(p, (x) => map(many(after(sep, p)), (xs) => [x, ...xs]));
+export const many1 = <T>(p: P<T>): P<T[]> => {
+  const rest = many(p);
+  return bind(p, (x) =>
+    map(rest, (xs) => {
+      xs.unshift(x);
+      return xs;
+    }),
+  );
+};
+export const sepBy1 = <T, S>(p: P<T>, sep: P<S>): P<T[]> => {
+  const rest = many(after(sep, p));
+  return bind(p, (x) =>
+    map(rest, (xs) => {
+      xs.unshift(x);
+      return xs;
+    }),
+  );
+};
 export const sepBy = <T, S>(p: P<T>, sep: P<S>): P<T[]> => alt(sepBy1(p, sep), pure([] as T[]));
 export const option = <T>(d: T, p: P<T>): P<T> => alt(p, pure(d));
 export const optionMaybe = <T>(p: P<T>): P<T | undefined> => option<T | undefined>(undefined, p);
@@ -242,7 +267,7 @@ const commasOr = (xs: string[]): string =>
 /** Parsec's `showErrorMessages "or" "unknown parse error" "expecting" "unexpected" "end of input"`. */
 export const showMessages = (msgs: ReadonlyArray<Msg>): string => {
   if (msgs.length === 0) return "unknown parse error";
-  const sorted = [...msgs].sort((a, b) => a.k - b.k); // stable
+  const sorted = msgs.map((m): Msg => (m.raw ? { k: m.k, s: showStr1(m.s) } : m)).sort((a, b) => a.k - b.k); // stable
   const sys = sorted.filter((m) => m.k === SYS_UNEXPECT);
   const unex = sorted.filter((m) => m.k === UNEXPECT);
   const expect = sorted.filter((m) => m.k === EXPECT);
