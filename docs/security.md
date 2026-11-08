@@ -39,7 +39,7 @@ Three consequences worth stating plainly:
 
 ## Request values never become SQL
 
-Values arrive as parameters — always text, with an explicit `$n::text` cast — or as escaped literals. Identifiers are
+Values arrive as parameters — always text; the JSON body of a write and the arguments of a function with an explicit `$n::text` cast, and `query()`'s filter values as bound parameters of the type they are compared with — or, over HTTP, as escaped literals. Identifiers are
 quoted through one module, cast targets must match a strict type allowlist, and a GUC name must be dotted.
 `tests/security.test.ts` throws SQL injection payloads at filters, identifiers, casts, write payloads, `on_conflict`,
 `columns`, RPC arguments, headers and cookies, and asserts the data is still there afterwards — through `handle()` and

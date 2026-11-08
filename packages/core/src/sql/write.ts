@@ -3,6 +3,7 @@ import type { FilterNode } from "../parse/filter";
 import { quoteIdent, quoteQualified } from "../quote";
 import type { Relation } from "../schema";
 import { whereSql } from "./filters";
+import { type Values, inlined } from "./values";
 import { ROOT_ALIAS } from "./read";
 
 export type JsonObject = Record<string, unknown>;
@@ -145,6 +146,7 @@ export interface UpdateOptions {
   readonly clauses?: ReadonlyArray<string> | undefined;
   readonly filters: ReadonlyArray<FilterNode>;
   readonly returning: Returning;
+  readonly values?: Values | undefined;
 }
 
 /** `UPDATE … SET … RETURNING …`, or `null` when the payload sets no columns. */
@@ -156,7 +158,7 @@ export const buildUpdate = (o: UpdateOptions): string | null => {
   if (cols.length === 0 && clauses.length === 0) return null;
   const table = quoteQualified(rel.schema, rel.name);
   const set = [...cols.map((c) => `${quoteIdent(c)} = _u.${quoteIdent(c)}`), ...clauses].join(", ");
-  const where = whereSql(o.filters, ROOT_ALIAS, rel);
+  const where = whereSql(o.filters, ROOT_ALIAS, rel, o.values ?? inlined);
   // the JSON body is `$1`, and only a statement that reads it may mention it
   const from = cols.length ? ` FROM (SELECT * FROM json_populate_record(null::${table}, ($1::text)::json)) AS _u` : "";
   return (
@@ -169,10 +171,11 @@ export interface DeleteOptions {
   readonly rel: Relation;
   readonly filters: ReadonlyArray<FilterNode>;
   readonly returning: Returning;
+  readonly values?: Values | undefined;
 }
 
 export const buildDelete = (o: DeleteOptions): string => {
-  const where = whereSql(o.filters, ROOT_ALIAS, o.rel);
+  const where = whereSql(o.filters, ROOT_ALIAS, o.rel, o.values ?? inlined);
   return (
     `DELETE FROM ${quoteQualified(o.rel.schema, o.rel.name)} AS ${quoteIdent(ROOT_ALIAS)}` +
     `${where.length ? ` WHERE ${where.join(" AND ")}` : ""} RETURNING ${returningSql(o.rel, o.returning)}`
