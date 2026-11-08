@@ -1,9 +1,17 @@
 import { PgRestError } from "./errors";
 import { parseError } from "@tsql/core/parse/field";
-import type {
-  Method,
-  Preferences,
-} from "@tsql/core/parse/request"; /** A custom media type the target can answer with (see `media.ts`). */
+import type { Preferences } from "@tsql/core/parse/request";
+
+export type Method = "GET" | "HEAD" | "POST" | "PATCH" | "PUT" | "DELETE" | "OPTIONS";
+
+/** The `Prefer` header: what the engine takes ({@link Preferences}), plus what only HTTP has. */
+export interface Prefer extends Preferences {
+  readonly tx?: "commit" | "rollback";
+  /** Preferences that were present but not understood. */
+  readonly invalid: ReadonlyArray<string>;
+}
+
+/** A custom media type the target can answer with (see `media.ts`). */
 export interface MediaChoice {
   readonly mediaType: string;
   /** `Content-Type` of the response. */
@@ -95,8 +103,8 @@ const PREFERENCE_VALUES: Record<string, ReadonlyArray<string>> = {
 };
 
 /** Parse one or more `Prefer` header values (comma separated tokens). */
-export const parsePrefer = (header: string | null): Preferences => {
-  const out: { -readonly [K in keyof Preferences]: Preferences[K] } = { invalid: [] };
+export const parsePrefer = (header: string | null): Prefer => {
+  const out: { -readonly [K in keyof Prefer]: Prefer[K] } = { invalid: [] };
   const invalid: string[] = [];
   if (!header) return out;
   for (const raw of header.split(",")) {

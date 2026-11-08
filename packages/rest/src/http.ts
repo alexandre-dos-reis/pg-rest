@@ -2,7 +2,6 @@ import {
   type Call,
   type CoreConfig,
   type Env,
-  type Outcome,
   type Plan,
   type QueryParams,
   type RequestContext,
@@ -15,8 +14,8 @@ import {
 } from "@tsql/core/core";
 import type { DbSession } from "@tsql/core/adapter";
 import { quoteIdent } from "@tsql/core/quote";
+import type { Operation } from "@tsql/core/parse/request";
 import { PgRestError } from "./errors";
-import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
 import { parseQuery } from "./parse/query-string";
@@ -29,9 +28,11 @@ import {
   parsePrefer,
   parseRange,
   parseTarget,
+  type Method,
   type Negotiated,
 } from "./request";
 import { toEngineFormat } from "./render";
+import { type Outcome, RESPONSE_SETTINGS, buildOutcome, withApplied } from "./outcome";
 
 /** What `preRequest` is told about the request it runs for. */
 export interface PreRequestInfo {
@@ -92,6 +93,22 @@ const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Met
       else await pre(session, { role, claims, method, path, request });
     },
   };
+};
+
+/** What a method does to a table. */
+const operationOf = (method: Method): Operation => {
+  switch (method) {
+    case "POST":
+      return "insert";
+    case "PATCH":
+      return "update";
+    case "PUT":
+      return "put";
+    case "DELETE":
+      return "delete";
+    default:
+      return "read";
+  }
 };
 
 const JSON_CT = "application/json; charset=utf-8";
@@ -258,6 +275,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   const qp: QueryParams = {
     params,
     bare: bareKeys(url.search),
+    read: RESPONSE_SETTINGS,
     parse: (options) =>
       parseQuery(options?.skip ? params.filter(([k, v]) => !options.skip!(k, v)) : params, {
         allowFilterKey: options?.allowFilterKey,
@@ -265,12 +283,27 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   };
   let plan: Plan;
   if (target.type === "table") {
-    plan = planTable(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
+    plan = planTable(env, operationOf(method), schema, target.name, qp, prefer, engineFormat, range, body);
   } else {
-    plan = planRpc(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") {
+      throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
+    }
+    plan = planRpc(env, method === "POST", schema, target.name, qp, prefer, engineFormat, range, body);
   }
 
   const call = callOf(env, ctx, request, method, url.pathname);
-  const outcome = await execute(env, ctx, call, schema, prefer, engineFormat, plan, honoredTx, wantsPlan);
+  let result;
+  try {
+    result = await execute(env, ctx, call, schema, prefer, engineFormat, plan, {
+      rollback: honoredTx && prefer.tx === "rollback",
+      explain: wantsPlan,
+    });
+  } catch (e) {
+    throw withApplied(e, prefer, honoredTx);
+  }
+  // an EXPLAIN is its text, whatever the format it describes
+  const outcome: Outcome = wantsPlan
+    ? { status: 200, headers: {}, text: result.body }
+    : buildOutcome(env, prefer, plan, result, honoredTx);
   return toResponse(outcome, method, format, plan, wantsPlan);
 };

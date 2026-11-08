@@ -2,7 +2,7 @@ import type { DbAdapter, DbSession } from "./adapter";
 import { DbQueryError, EngineError } from "./errors";
 import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
-import { type Method, type OutputFormat, type Preferences } from "./parse/request";
+import { type Operation, type OutputFormat, type Preferences } from "./parse/request";
 import { literal, quoteIdent } from "./quote";
 import { getRelation, type Relation, type SchemaCache } from "./schema";
 import { buildRead } from "./sql/read";
@@ -63,18 +63,6 @@ export const identityOf = (env: Env, ctx: RequestContext): { role: string; claim
   return { role, claims: { role, ...(ctx.claims ?? {}) } };
 };
 
-/**
- * What a call comes to, before it is dressed for a transport: the status, the headers PostgREST's
- * logic decides (`Content-Range`, `Location`, `Preference-Applied`, whatever a function put in
- * `response.headers`), and the body. `@tsql/rest` makes a `Response` of it and adds what is only
- * HTTP (`Content-Type`, `Vary`); `@tsql/query` reads the count and the rows out of it.
- */
-export interface Outcome {
-  readonly status: number;
-  readonly headers: Record<string, string>;
-  readonly text: string;
-}
-
 /** What a request's query parameters turn into, once they are parsed: see {@link QueryParams.parse}. */
 export interface ParseOptions {
   /** Leave out the parameters this says yes to (a bare `?a` a function reads as an argument). */
@@ -99,6 +87,12 @@ export interface QueryParams {
    */
   readonly bind?: boolean | undefined;
   /**
+   * Settings (`current_setting(name, true)`) to read once the statement is done, so that a function that
+   * `set_config`ed one can be heard: they come back, in this order, as {@link Result.settings}. The
+   * engine does not say what they mean. `@tsql/rest` reads the two PostgREST's functions answer with.
+   */
+  readonly read?: ReadonlyArray<string> | undefined;
+  /**
    * `SET` clauses already compiled to SQL, for an update: the expressions of `query()`'s `set`
    * (`sql/expression.ts`). Only `query()` fills it; a PATCH over HTTP is PostgREST's, a JSON body.
    */
@@ -109,8 +103,9 @@ export interface QueryParams {
 const valuesFor = (qp: QueryParams, taken: number): Values => (qp.bind ? bindFrom(taken) : inlined);
 
 /** Statement options that depend on the output format. */
-const formatOptions = (format: OutputFormat) => ({
+const formatOptions = (format: OutputFormat, qp: QueryParams) => ({
   render: format.kind === "rendered" ? format.sql : undefined,
+  read: qp.read,
 });
 
 // ---------------------------------------------------------------------------
@@ -202,55 +197,6 @@ export const transactionSetup = (env: Env, ctx: RequestContext): { sql: string; 
   return setConfigSql([...whoEntries(role, claims), ...settingsEntries(ctx)]);
 };
 
-/** Parsed `response.headers` GUC: `[{"X-A": "b"}, ...]`. */
-const parseResponseHeaders = (raw: unknown): Record<string, string> => {
-  if (raw == null || raw === "") return {};
-  const bad = () =>
-    new EngineError(
-      "invalid_response_headers",
-      "response.headers guc must be a JSON array composed of objects with a single key and a string value",
-    );
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(String(raw));
-  } catch {
-    throw bad();
-  }
-  if (!Array.isArray(parsed)) throw bad();
-  const out: Record<string, string> = {};
-  for (const h of parsed) {
-    if (!h || typeof h !== "object" || Array.isArray(h)) throw bad();
-    const keys = Object.keys(h);
-    if (keys.length !== 1) throw bad();
-    const v = (h as Record<string, unknown>)[keys[0]!];
-    if (typeof v !== "string") throw bad();
-    out[keys[0]!] = v;
-  }
-  return out;
-};
-
-const parseStatusGuc = (raw: unknown): number | undefined => {
-  if (raw == null || raw === "") return undefined;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < 100 || n > 599) {
-    throw new EngineError("invalid_response_status", "response.status guc must be a valid status code");
-  }
-  return n;
-};
-
-const appliedHeader = (p: Preferences, honoredTx: boolean): string | undefined => {
-  const parts: string[] = [];
-  if (honoredTx && p.tx) parts.push(`tx=${p.tx}`);
-  if (p.return) parts.push(`return=${p.return}`);
-  if (p.count) parts.push(`count=${p.count}`);
-  if (p.resolution) parts.push(`resolution=${p.resolution}`);
-  if (p.missing) parts.push(`missing=${p.missing}`);
-  if (p.handling) parts.push(`handling=${p.handling}`);
-  if (p.timezone) parts.push(`timezone=${p.timezone}`);
-  if (p.maxAffected !== undefined && p.handling === "strict") parts.push(`max-affected=${p.maxAffected}`);
-  return parts.length ? parts.join(", ") : undefined;
-};
-
 class RollbackWith<T> extends Error {
   constructor(readonly value: T) {
     super("rollback");
@@ -262,7 +208,6 @@ class RollbackWith<T> extends Error {
 // ---------------------------------------------------------------------------
 
 export interface Plan {
-  readonly method: Method;
   readonly statement: string;
   readonly params: string[];
   readonly readOnly: boolean;
@@ -313,7 +258,7 @@ const effectivePaging = (env: Env, query: ParsedQuery, range: { offset: number; 
 
 export const planTable = (
   env: Env,
-  method: Method,
+  operation: Operation,
   schema: string,
   name: string,
   qp: QueryParams,
@@ -327,7 +272,7 @@ export const planTable = (
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
   const singular = format.kind === "object";
 
-  if (method === "GET" || method === "HEAD") {
+  if (operation === "read") {
     const { limit, offset } = effectivePaging(env, query, range);
     const values = valuesFor(qp, 0);
     const read = buildRead({
@@ -343,7 +288,6 @@ export const planTable = (
     const paged = limit !== undefined || offset > 0;
     const needCount = prefer.count === "exact" || prefer.count === "estimated";
     return {
-      method,
       kind: "read",
       readOnly: true,
       source: false,
@@ -360,7 +304,7 @@ export const planTable = (
         count: needCount && paged ? read.count : undefined,
         shape,
         stripNulls: strip,
-        ...formatOptions(format),
+        ...formatOptions(format, qp),
       }),
     };
   }
@@ -381,7 +325,6 @@ export const planTable = (
   };
 
   const common = {
-    method,
     rel,
     readOnly: false,
     source: true,
@@ -390,7 +333,7 @@ export const planTable = (
     pagedRead: false,
   } as const;
 
-  if (method === "POST") {
+  if (operation === "insert") {
     if (!body) throw new EngineError("invalid_body", "Empty or invalid json");
     const rows = asRows(body.value);
     const insertSql = buildInsert({
@@ -415,13 +358,13 @@ export const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        ...formatOptions(format),
+        ...formatOptions(format, qp),
         upsertColumns: insertSql.includes("pgrst_inserted") ? upsertColumns(rel, returning) : undefined,
       }),
     };
   }
 
-  if (method === "PATCH") {
+  if (operation === "update") {
     if (!body) throw new EngineError("invalid_body", "Empty or invalid json");
     // PostgREST uses the first element of an array and treats other payloads as "no columns".
     const first = Array.isArray(body.value) ? body.value[0] : body.value;
@@ -451,7 +394,7 @@ export const planTable = (
           source: "SELECT 1 WHERE FALSE",
           rows: "SELECT * FROM pgrst_source",
           shape: emptyShape,
-          ...formatOptions(format),
+          ...formatOptions(format, qp),
         }),
       };
     }
@@ -466,12 +409,12 @@ export const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        ...formatOptions(format),
+        ...formatOptions(format, qp),
       }),
     };
   }
 
-  if (method === "DELETE") {
+  if (operation === "delete") {
     const values = valuesFor(qp, 0);
     const deleteSql = buildDelete({ rel, filters: query.root.filters, returning, values });
     const { rows: outRows, shape } = rowsFor(returning);
@@ -486,7 +429,7 @@ export const planTable = (
         rows: outRows,
         shape,
         stripNulls: strip,
-        ...formatOptions(format),
+        ...formatOptions(format, qp),
       }),
     };
   }
@@ -553,7 +496,13 @@ export const planTable = (
     returning,
     params: [JSON.stringify([full])],
     shape,
-    statement: buildStatement({ source: putSql, rows: outRows, shape, stripNulls: strip, ...formatOptions(format) }),
+    statement: buildStatement({
+      source: putSql,
+      rows: outRows,
+      shape,
+      stripNulls: strip,
+      ...formatOptions(format, qp),
+    }),
   };
 };
 
@@ -570,7 +519,8 @@ const RESERVED = new Set(["select", "order", "limit", "offset", "and", "or", "co
 
 export const planRpc = (
   env: Env,
-  method: Method,
+  /** Whether the function may write: it is called in a transaction that is not read only. */
+  write: boolean,
   schema: string,
   name: string,
   qp: QueryParams,
@@ -579,17 +529,13 @@ export const planRpc = (
   range: { offset: number; limit?: number } | undefined,
   body: { kind: string; value: unknown } | undefined,
 ): Plan => {
-  if (method !== "GET" && method !== "HEAD" && method !== "POST") {
-    throw new EngineError("rpc_method_not_allowed", `Cannot use the ${method} method on RPC`);
-  }
-
   let argValues: Record<string, unknown> = {};
   let nonObjectBody = false;
   const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
   const getArgKeys = new Set<string>();
   const bare = qp.bare;
 
-  if (method === "POST") {
+  if (write) {
     if (body) {
       const v = body.value;
       if (isObj(v)) argValues = v;
@@ -619,7 +565,7 @@ export const planRpc = (
     }
   }
   const provided = Object.keys(argValues);
-  const fn = resolveFunction(env.cache, schema, name, new Set(provided), nonObjectBody, method === "POST");
+  const fn = resolveFunction(env.cache, schema, name, new Set(provided), nonObjectBody, write);
   // GET: repeated parameters make a list, and a variadic parameter always takes one
   for (const a of fn.args) {
     if (a.variadic && getArgKeys.has(a.name) && !Array.isArray(argValues[a.name]))
@@ -632,7 +578,7 @@ export const planRpc = (
   const query = qp.parse({
     skip: (k, v) => v === "" && bare.has(k),
     // On GET, parameters that name function arguments are not filters.
-    allowFilterKey: (k) => method === "POST" || !fnArgNames.has(k),
+    allowFilterKey: (k) => write || !fnArgNames.has(k),
   });
   const argsJson = rawBody ? JSON.stringify(body!.value) : JSON.stringify(argValues);
   const params = call.usesBody
@@ -643,9 +589,8 @@ export const planRpc = (
   const values = valuesFor(qp, params.length);
 
   const base = {
-    method,
     kind: "rpc",
-    readOnly: method !== "POST",
+    readOnly: !write,
     source: false,
     rpc: call,
     rel: call.relation,
@@ -683,7 +628,7 @@ export const planRpc = (
         count: needCount && paged ? read.count : undefined,
         shape,
         stripNulls: strip,
-        ...formatOptions(format),
+        ...formatOptions(format, qp),
       }),
     };
   }
@@ -695,21 +640,54 @@ export const planRpc = (
       : call.shape === "scalar"
         ? "scalar"
         : "scalar-array";
-  return { ...base, shape, statement: buildStatement({ rows: call.source, shape, ...formatOptions(format) }) };
+  return { ...base, shape, statement: buildStatement({ rows: call.source, shape, ...formatOptions(format, qp) }) };
 };
 
 // ---------------------------------------------------------------------------
 // execution
 // ---------------------------------------------------------------------------
 
+/**
+ * What a statement came to. Nothing is parsed or dressed for a transport: `body` is the text the
+ * statement made (see {@link shownBody}), `rows` the rows of the page, `total` the count the plan asked for
+ * (see `Preferences.count`) and `settings` what {@link QueryParams.read} asked to be read afterwards.
+ */
+export interface Result {
+  readonly body: string;
+  readonly rows: number;
+  readonly total: number | undefined;
+  readonly settings: ReadonlyArray<string | null>;
+  /** An upsert that inserted no row (every one of them already existed). */
+  readonly noneInserted: boolean;
+}
+
+/** What the statement made, before `shownBody` decides whether the caller wants it. */
 interface RawResult {
-  readonly pageTotal: number;
+  readonly rows: number;
   readonly body: string;
   readonly total: number | undefined;
   readonly planned: number | undefined;
-  readonly responseHeaders: Record<string, string>;
-  readonly responseStatus: number | undefined;
+  readonly settings: ReadonlyArray<string | null>;
+  readonly noneInserted: boolean;
 }
+
+/** How a call runs, beyond what the plan says. */
+export interface ExecuteOptions {
+  /** Roll the transaction back instead of committing it: the statement runs, nothing stays. */
+  readonly rollback?: boolean | undefined;
+  /** Do not run the statement: answer with `EXPLAIN` of it, in this format, and roll back. */
+  readonly explain?: { readonly format: "json" | "text"; readonly options: ReadonlyArray<string> } | undefined;
+}
+
+/**
+ * The body a caller shows: what the statement made for a read or a function call, nothing for a write
+ * that does not return its rows.
+ */
+export const shownBody = (plan: Plan, body: string): string => {
+  if (plan.kind === "read" || plan.kind === "rpc") return body;
+  if ((plan.returning ?? "minimal") !== "representation") return "";
+  return plan.shape === "none" ? "" : body;
+};
 
 export const execute = async (
   env: Env,
@@ -719,9 +697,9 @@ export const execute = async (
   prefer: Preferences,
   format: OutputFormat,
   plan: Plan,
-  honoredTx: boolean,
-  wantsPlan?: { readonly format: "json" | "text"; readonly options: ReadonlyArray<string> },
-): Promise<Outcome> => {
+  options: ExecuteOptions = {},
+): Promise<Result> => {
+  const wantsPlan = options.explain;
   const { role, claims } = identityOf(env, ctx);
   // Inside a scope the transaction is already open and already carries the identity: this call
   // only says where its own statement runs, and owns neither the boundary nor what READ ONLY and a
@@ -729,7 +707,7 @@ export const execute = async (
   const session = env.session;
   const setup = setConfigSql(ctxEntries(env, ctx, role, claims, call, schema, prefer, session ? "statement" : "both"));
   const strict = prefer.handling === "strict";
-  const rollback = (honoredTx && prefer.tx === "rollback") || wantsPlan !== undefined;
+  const rollback = options.rollback === true || wantsPlan !== undefined;
 
   const attempt = async (): Promise<RawResult> => {
     try {
@@ -762,12 +740,12 @@ export const execute = async (
                 : JSON.stringify(cells[0], null, 2)
               : cells.join("\n");
           throw new RollbackWith({
-            pageTotal: 0,
+            rows: 0,
             body: text,
             total: undefined,
             planned: undefined,
-            responseHeaders: {},
-            responseStatus: undefined,
+            settings: [],
+            noneInserted: false,
           } satisfies RawResult);
         }
 
@@ -775,12 +753,13 @@ export const execute = async (
         const row = rows[0] ?? {};
         const pageTotal = Number(row["page_total"] ?? 0);
         const raw: RawResult = {
-          pageTotal,
+          rows: pageTotal,
           body: String(row["body"] ?? ""),
           total: row["total_result_set"] == null ? undefined : Number(row["total_result_set"]),
           planned,
-          responseHeaders: parseResponseHeaders(row["response_headers"]),
-          responseStatus: parseStatusGuc(row["response_status"]),
+          settings: settingsOf(row),
+          noneInserted:
+            row["none_inserted"] === true || row["none_inserted"] === "true" || row["none_inserted"] === "t",
         };
 
         // Checks that must roll back the transaction when they fail.
@@ -841,22 +820,32 @@ export const execute = async (
   }
 
   // an EXPLAIN is its text, whatever the format it describes
-  if (wantsPlan) return { status: 200, headers: {}, text: result.body };
-  return buildOutcome(env, prefer, plan, result, honoredTx);
+  if (wantsPlan) return { ...result, total: undefined };
+  return {
+    body: result.body,
+    rows: result.rows,
+    total: totalOf(env, prefer, plan, result),
+    settings: result.settings,
+    noneInserted: result.noneInserted,
+  };
 };
 
-// ---------------------------------------------------------------------------
-// outcome
-// ---------------------------------------------------------------------------
+/** The `setting_<n>` columns of the statement's row, in order. */
+const settingsOf = (row: Record<string, unknown>): Array<string | null> => {
+  const out: Array<string | null> = [];
+  for (let i = 0; `setting_${i}` in row; i++)
+    out.push(row[`setting_${i}`] == null ? null : String(row[`setting_${i}`]));
+  return out;
+};
 
-const buildOutcome = (env: Env, prefer: Preferences, plan: Plan, r: RawResult, honoredTx: boolean): Outcome => {
-  const headers: Record<string, string> = {};
-  const applied = appliedHeader(prefer, honoredTx);
-  if (applied) headers["Preference-Applied"] = applied;
-
-  // total rows, according to the requested count mode
+/**
+ * The count a call asked for (`Preferences.count`). A read or a function call counts what the plan counted;
+ * a write only knows how many rows it touched, which is the count when it is `exact`.
+ */
+const totalOf = (env: Env, prefer: Preferences, plan: Plan, r: RawResult): number | undefined => {
+  if (plan.kind !== "read" && plan.kind !== "rpc") return prefer.count === "exact" ? r.rows : undefined;
   let total: number | undefined;
-  if (prefer.count === "exact") total = plan.countInStatement ? r.total : r.pageTotal;
+  if (prefer.count === "exact") total = plan.countInStatement ? r.total : r.rows;
   else if (prefer.count === "planned") total = r.planned;
   else if (prefer.count === "estimated") {
     const max = env.config.maxRows;
@@ -865,74 +854,25 @@ const buildOutcome = (env: Env, prefer: Preferences, plan: Plan, r: RawResult, h
         ? r.planned
         : plan.countInStatement
           ? r.total
-          : r.pageTotal;
+          : r.rows;
   }
-  const totalStr = total === undefined ? "*" : String(total);
-
-  let status = 200;
-  let text = r.body;
-
+  const pagedRead =
+    plan.kind === "read" || (plan.pagedRead !== undefined && (plan.shape === "array" || plan.shape === "object"));
   if (
-    plan.kind === "read" ||
-    (plan.kind === "rpc" && plan.pagedRead !== undefined && (plan.shape === "array" || plan.shape === "object"))
+    pagedRead &&
+    total !== undefined &&
+    plan.offset > 0 &&
+    r.rows === 0 &&
+    plan.offset >= total &&
+    prefer.count !== "planned"
   ) {
-    const first = plan.offset;
-    const last = plan.offset + r.pageTotal - 1;
-    headers["Content-Range"] = r.pageTotal > 0 ? `${first}-${last}/${totalStr}` : `*/${totalStr}`;
-    if (
-      total !== undefined &&
-      plan.offset > 0 &&
-      r.pageTotal === 0 &&
-      plan.offset >= total &&
-      prefer.count !== "planned"
-    ) {
-      throw new EngineError(
-        "range_not_satisfiable",
-        "Requested range not satisfiable",
-        `An offset of ${plan.offset} was requested, but there are only ${total} rows.`,
-        null,
-        { total, ...(applied ? { applied } : {}) },
-      );
-    }
-    if (total !== undefined && r.pageTotal > 0 && r.pageTotal < total) status = 206;
-    if (total !== undefined && r.pageTotal === total && plan.offset > 0) status = 206;
-  } else if (plan.kind === "rpc") {
-    status = plan.shape === "none" ? 204 : 200;
-    headers["Content-Range"] = r.pageTotal > 0 ? `0-${r.pageTotal - 1}/${totalStr}` : `*/${totalStr}`;
-  } else {
-    if (plan.kind === "update") {
-      const n = r.pageTotal;
-      headers["Content-Range"] =
-        n > 0
-          ? `0-${n - 1}/${prefer.count === "exact" ? String(n) : "*"}`
-          : `*/${prefer.count === "exact" ? "0" : "*"}`;
-    } else if (plan.kind !== "put") {
-      headers["Content-Range"] = `*/${prefer.count === "exact" ? String(r.pageTotal) : "*"}`;
-    }
-    const ret = plan.returning ?? "minimal";
-    if (plan.kind === "insert") {
-      status = 201;
-      if (ret === "pk") {
-        const rows = JSON.parse(r.body || "[]") as Array<Record<string, unknown>>;
-        const pk = plan.rel?.pk ?? [];
-        if (rows.length === 1 && pk.length > 0) {
-          const q = pk.map((c) => `${encodeURIComponent(c)}=eq.${encodeURIComponent(String(rows[0]![c]))}`).join("&");
-          headers["Location"] = `/${encodeURIComponent(plan.rel!.name)}?${q}`;
-        }
-      }
-    } else if (plan.kind === "put") {
-      status = ret === "representation" ? 200 : 204;
-    } else {
-      status = ret === "representation" ? 200 : 204;
-    }
-    if (ret !== "representation") text = "";
-    else if (plan.shape === "none") text = "";
+    throw new EngineError(
+      "range_not_satisfiable",
+      "Requested range not satisfiable",
+      `An offset of ${plan.offset} was requested, but there are only ${total} rows.`,
+      null,
+      { total },
+    );
   }
-
-  if (plan.kind === "insert" && (plan.returning ?? "minimal") !== "representation") text = "";
-
-  Object.assign(headers, r.responseHeaders);
-  if (r.responseStatus !== undefined) status = r.responseStatus;
-
-  return { status, headers, text };
+  return total;
 };

@@ -40,6 +40,7 @@ reference lives in `docs/`.
 | --- | --- |
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest`, `RestOptions`, the HTTP-only settings |
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, OpenAPI root, plans, cookies and headers for SQL, the `Response` (`HttpConfig`) |
+| `packages/rest/src/outcome.ts` | the `Result` of the engine turned into status, `Content-Range`, `Location`, `Preference-Applied`; the `response.*` settings |
 | `packages/rest/src/request.ts` | reading HTTP: method, path, `Prefer`, `Range`, `Accept`, the body |
 | `packages/rest/src/render.ts` | the SQL of CSV, GeoJSON and media type handlers; the engine only knows `OutputFormat` (`json`, `object`, or `rendered` by SQL it is given) |
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
@@ -49,7 +50,7 @@ reference lives in `docs/`.
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → PostgREST status and `PGRSTxxx` code table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions, `toApiError` |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
 | `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
-| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns an `Outcome`: status, headers, body), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `Call` (`settings`, `before`) |
+| `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns a `Result`: body, rows, total), the transaction setup: shared by `handle` and `query`. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `Call` (`settings`, `before`) |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
 | `packages/core/src/parse/*` | the engine's input (`ParsedQuery`) and the hand-written readers of columns, select items, order terms; no grammar |
 | `packages/rest/src/parse/*` | PostgREST's query-string grammar (`parsec.ts`, `grammar.ts`) and `parseQuery` |

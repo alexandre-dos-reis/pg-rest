@@ -197,13 +197,10 @@ const REASONS: Readonly<Record<Reason, readonly [status: number, code: string]>>
   function_not_found: [404, "PGRST202"],
   ambiguous_function: [300, "PGRST203"],
   table_not_found: [404, "PGRST205"],
-  rpc_method_not_allowed: [405, "PGRST101"],
   put_requires_pk: [405, "PGRST105"],
   schema_not_exposed: [406, "PGRST106"],
   not_single_row: [406, "PGRST116"],
   range_not_satisfiable: [416, "PGRST103"],
-  invalid_response_headers: [500, "PGRST111"],
-  invalid_response_status: [500, "PGRST112"],
 };
 
 /** An engine error as the PostgREST error it answers with. */

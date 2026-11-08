@@ -1,8 +1,9 @@
-// What the engine takes from a request, whatever carried it: the method, the preferences, the output
-// format. Reading them out of HTTP headers (`Prefer`, `Accept`, `Range`) is `@tsql/rest`'s job;
+// What the engine takes from a call, whatever carried it: what it does, the preferences, the output
+// format. Reading them out of HTTP (`Prefer`, `Accept`, `Range`) is `@tsql/rest`'s job;
 // `@tsql/query` builds them from an object.
 
-export type Method = "GET" | "HEAD" | "POST" | "PATCH" | "PUT" | "DELETE" | "OPTIONS";
+/** What a call does to a table: read it, insert into it, update, delete from it, or upsert one row by key (`put`). */
+export type Operation = "read" | "insert" | "update" | "delete" | "put";
 
 export interface Preferences {
   readonly return?: "minimal" | "headers-only" | "representation";
@@ -10,11 +11,8 @@ export interface Preferences {
   readonly resolution?: "merge-duplicates" | "ignore-duplicates";
   readonly missing?: "default" | "null";
   readonly handling?: "strict" | "lenient";
-  readonly tx?: "commit" | "rollback";
   readonly timezone?: string;
   readonly maxAffected?: number;
-  /** Preferences that were present but not understood. */
-  readonly invalid: ReadonlyArray<string>;
 }
 
 /**

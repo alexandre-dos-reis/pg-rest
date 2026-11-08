@@ -3,7 +3,7 @@ import {
   type Call,
   type CoreConfig,
   type Env as CoreEnv,
-  type Outcome as EngineOutcome,
+  type Result,
   type Plan,
   type QueryParams,
   type RequestContext,
@@ -12,6 +12,7 @@ import {
   identityOf,
   planRpc,
   planTable,
+  shownBody,
   transactionSetup,
   useSchema,
 } from "@tsql/core/core";
@@ -38,14 +39,15 @@ import { getRelation } from "@tsql/core/schema";
 import { literal, quoteIdent } from "@tsql/core/quote";
 import { compileSet } from "@tsql/core/sql/expression";
 import { ROOT_ALIAS } from "@tsql/core/sql/read";
-import type { Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
+import type { Operation, OutputFormat, Preferences } from "@tsql/core/parse/request";
 import type { JsonObject } from "@tsql/core/sql/write";
 
 /** What `preRequest` is told about the call it runs for. There is no request: no `Request`, no headers. */
 export interface PreRequestInfo {
   readonly role: string;
   readonly claims: Readonly<Record<string, unknown>>;
-  readonly method: Method;
+  /** What the call does: to a table, or `rpc` for a function. */
+  readonly operation: Operation | "rpc";
   /** `/<table>` or `/rpc/<function>`: what the call stands for. */
   readonly path: string;
 }
@@ -66,14 +68,14 @@ export interface Env extends CoreEnv {
  * What a call adds to its transaction: `preRequest`, if there is one. There is no request, so none
  * of PostgREST's `request.*` settings are set.
  */
-const callOf = (env: Env, ctx: RequestContext, method: Method, path: string): Call => {
+const callOf = (env: Env, ctx: RequestContext, operation: Operation | "rpc", path: string): Call => {
   const pre = env.config.preRequest;
   if (pre === undefined) return {};
   const { role, claims } = identityOf(env, ctx);
   return {
     before: async (session) => {
       if (typeof pre === "string") await session.query(`SELECT ${pre.split(".").map(quoteIdent).join(".")}()`);
-      else await pre(session, { role, claims, method, path });
+      else await pre(session, { role, claims, operation, path });
     },
   };
 };
@@ -803,18 +805,17 @@ export const toParsed = (input: QueryInput): ParsedQuery => {
 
 const isRpc = (input: QueryInput): input is RpcQuery => "rpc" in input;
 
-const methodOf = (input: QueryInput): Method => {
-  if (isRpc(input)) return "POST";
-  switch (input.action ?? "select") {
+const tableOperationOf = (input: QueryInput): Operation => {
+  switch (isRpc(input) ? "select" : (input.action ?? "select")) {
     case "select":
-      return "GET";
+      return "read";
     case "insert":
     case "upsert":
-      return "POST";
+      return "insert";
     case "update":
-      return "PATCH";
+      return "update";
     case "delete":
-      return "DELETE";
+      return "delete";
   }
 };
 
@@ -833,8 +834,7 @@ const bodyOf = (input: QueryInput): { kind: string; value: unknown } | undefined
 };
 
 const writes = (input: QueryInput): boolean => {
-  const method = methodOf(input);
-  return method !== "GET" && !isRpc(input);
+  return tableOperationOf(input) !== "read" && !isRpc(input);
 };
 
 /**
@@ -856,18 +856,7 @@ const preferencesOf = (input: QueryInput): Preferences => ({
     : {}),
   ...(input.maxAffected !== undefined ? { handling: "strict" as const, maxAffected: input.maxAffected } : {}),
   ...(input.timezone ? { timezone: input.timezone } : {}),
-  invalid: [],
 });
-
-/** The total in the `Content-Range` of an outcome (`0-9/42`), when one was computed. */
-const totalOf = (headers: Readonly<Record<string, string>>): number | undefined => {
-  // header names are case-insensitive, and a function may have set its own spelling of this one
-  const values = Object.entries(headers)
-    .filter(([name]) => name.toLowerCase() === "content-range")
-    .map(([, value]) => value);
-  const total = values.length ? values.join(", ").split("/")[1] : undefined;
-  return total === undefined || total === "*" ? undefined : Number(total);
-};
 
 const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
   if (isPrepared(given)) return runPrepared(env, given, ctx);
@@ -877,7 +866,7 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
     throw bad("A query names either a table or an rpc, not both");
   }
   const schema = useSchema(env, input.schema);
-  const method = methodOf(input);
+  const operation = tableOperationOf(input);
   const prefer = preferencesOf(input);
   const format: OutputFormat = input.single
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
@@ -893,28 +882,26 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
   }
 
   const plan: Plan = isRpc(input)
-    ? planRpc(env, method, schema, input.rpc, qp, prefer, format, undefined, body)
-    : planTable(env, method, schema, input.table, qp, prefer, format, undefined, body);
+    ? planRpc(env, true, schema, input.rpc, qp, prefer, format, undefined, body)
+    : planTable(env, operation, schema, input.table, qp, prefer, format, undefined, body);
 
   const path = isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}`;
   const outcome = await execute(
     env,
     ctx,
-    callOf(env, ctx, method, path),
+    callOf(env, ctx, isRpc(input) ? "rpc" : operation, path),
     schema,
     prefer,
     format,
     plan,
-    false,
-    undefined,
   );
-  return answerOf(outcome);
+  return answerOf(plan, outcome);
 };
 
-const answerOf = (outcome: EngineOutcome): Omit<QueryOk, "error"> => ({
-  data: outcome.text === "" ? null : (JSON.parse(outcome.text) as unknown),
-  count: totalOf(outcome.headers),
-});
+const answerOf = (plan: Plan, result: Result): Omit<QueryOk, "error"> => {
+  const text = shownBody(plan, result.body);
+  return { data: text === "" ? null : (JSON.parse(text) as unknown), count: result.total };
+};
 
 /**
  * Run a query described by an object, in-process. Nothing here is HTTP: no request, no URL, no status.
@@ -970,7 +957,7 @@ interface PreparedPlan {
   readonly planned: Template | undefined;
   /** The parameters: `args[i]` is the argument a parameter is made of, or `undefined` when it is fixed. */
   readonly params: ReadonlyArray<number | undefined>;
-  readonly method: Method;
+  readonly operation: Operation;
   readonly schema: string;
   readonly prefer: Preferences;
   readonly format: OutputFormat;
@@ -1070,7 +1057,7 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);
   const qp: QueryParams = { params: [], bare: new Set<string>(), parse: () => parsed, bind: true };
-  const plan = planTable(env, "GET", schema, input.table, qp, prefer, format, undefined, undefined);
+  const plan = planTable(env, "read", schema, input.table, qp, prefer, format, undefined, undefined);
 
   const statement = templateOf(plan.statement, marker, names);
   const planned = plan.planned === undefined ? undefined : templateOf(plan.planned, marker, names);
@@ -1100,7 +1087,7 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     statement,
     planned,
     params,
-    method: "GET",
+    operation: "read",
     schema,
     prefer,
     format,
@@ -1124,18 +1111,8 @@ const runPrepared = async (env: Env, call: Prepared, ctx: RequestContext): Promi
     planned: c.planned && (c.planned.slots.length ? fill(c.planned, literals) : c.plan.planned),
     params: c.params.map((slot, i) => (slot === undefined ? c.plan.params[i]! : texts[slot]!)),
   };
-  const outcome = await execute(
-    env,
-    ctx,
-    callOf(env, ctx, c.method, c.path),
-    c.schema,
-    c.prefer,
-    c.format,
-    plan,
-    false,
-    undefined,
-  );
-  return answerOf(outcome);
+  const outcome = await execute(env, ctx, callOf(env, ctx, c.operation, c.path), c.schema, c.prefer, c.format, plan);
+  return answerOf(plan, outcome);
 };
 
 /**
