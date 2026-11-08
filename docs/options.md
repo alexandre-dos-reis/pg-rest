@@ -29,7 +29,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `anonymousRole` | the role for a call with no context. Default `"anon"`; `false` refuses anonymous calls with `401 PGRST302` |
 | `maxRows` | a cap on the rows a read returns (PostgREST's `db-max-rows`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
-| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path |
+| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path. `info` is `{ role, claims, method, path }`; `createRest` adds the `request` (`@tsql/query` has none) |
 
 **`createRest` only**: HTTP.
 

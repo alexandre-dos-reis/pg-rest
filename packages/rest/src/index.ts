@@ -2,11 +2,12 @@ import type { RequestContext } from "@tsql/core/core";
 import { type EngineOptions, createEngine } from "@tsql/core/engine";
 import { ApiError, toApiError } from "./errors";
 import type { SchemaCache } from "@tsql/core/schema";
-import type { HttpConfig } from "./http";
+import type { HttpConfig, PreRequest } from "./http";
 import { errorResponse, handleSafely } from "./serve";
 
 export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
-export type { PreRequestInfo, RequestContext } from "@tsql/core/core";
+export type { RequestContext } from "@tsql/core/core";
+export type { PreRequest, PreRequestInfo } from "./http";
 export type { EngineOptions } from "@tsql/core/engine";
 export { DbQueryError } from "@tsql/core/errors";
 export { ApiError, PgRestError } from "./errors";
@@ -28,6 +29,8 @@ export { SchemaLoadError } from "@tsql/core/service";
  * and what is about HTTP.
  */
 export interface RestOptions extends EngineOptions {
+  /** A SQL function (`"auth.check_request"`) or callback to run in each request's transaction (`db-pre-request`). */
+  readonly preRequest?: PreRequest;
   /**
    * Decide who is calling. Return the role and claims (what RLS policies read
    * from `request.jwt.claims`). There is no JWT: use a session cookie, an API
@@ -78,6 +81,7 @@ export const createRest = async (options: RestOptions): Promise<RestInstance> =>
   const { adapter, config: shared, store } = await createEngine(options);
   const config: HttpConfig = {
     ...shared,
+    preRequest: options.preRequest,
     basePath: options.basePath ?? "",
     allowTxOverride: options.allowTxOverride ?? false,
     planEnabled: options.planEnabled ?? false,

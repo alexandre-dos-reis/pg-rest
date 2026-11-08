@@ -1,5 +1,5 @@
 import {
-  type Caller,
+  type Call,
   type CoreConfig,
   type Env,
   type Outcome,
@@ -8,10 +8,13 @@ import {
   type RequestContext,
   assertRole,
   execute,
+  identityOf,
   planRpc,
   planTable,
   useSchema,
 } from "@tsql/core/core";
+import type { DbSession } from "@tsql/core/adapter";
+import { quoteIdent } from "@tsql/core/quote";
 import { PgRestError } from "./errors";
 import type { Method } from "@tsql/core/parse/request";
 import { getRelation } from "@tsql/core/schema";
@@ -30,8 +33,22 @@ import {
 } from "./request";
 import { toEngineFormat } from "./render";
 
+/** What `preRequest` is told about the request it runs for. */
+export interface PreRequestInfo {
+  readonly role: string;
+  readonly claims: Readonly<Record<string, unknown>>;
+  readonly method: Method;
+  readonly path: string;
+  /** The HTTP request being answered. */
+  readonly request: Request;
+}
+
+/** A SQL function (`"auth"."check"`) or a callback run in the request's transaction (`db-pre-request`). */
+export type PreRequest = string | ((session: DbSession, info: PreRequestInfo) => Promise<void>);
+
 /** What only the HTTP entry point reads, on top of what both entry points share. */
 export interface HttpConfig extends CoreConfig {
+  readonly preRequest?: PreRequest | undefined;
   readonly basePath: string;
   /** Honor `Prefer: tx=rollback|commit` (PostgREST `db-tx-end`). */
   readonly allowTxOverride: boolean;
@@ -46,6 +63,36 @@ export interface HttpConfig extends CoreConfig {
 export interface HttpEnv extends Env {
   readonly config: HttpConfig;
 }
+
+/**
+ * What this request adds to its transaction: the `request.*` settings SQL reads (PostgREST's HTTP
+ * contract) and `preRequest`. The engine knows neither; it issues them in order.
+ */
+const callOf = (env: HttpEnv, ctx: RequestContext, request: Request, method: Method, path: string): Call => {
+  const settings: Array<readonly [string, string]> = [];
+  if (env.config.requestSettings) {
+    const headers: Record<string, string> = {};
+    request.headers.forEach((v, k) => {
+      headers[k] = v;
+    });
+    settings.push(
+      ["request.method", method],
+      ["request.path", path],
+      ["request.headers", JSON.stringify(headers)],
+      ["request.cookies", JSON.stringify(parseCookies(request.headers.get("cookie")))],
+    );
+  }
+  const pre = env.config.preRequest;
+  if (pre === undefined) return { settings };
+  const { role, claims } = identityOf(env, ctx);
+  return {
+    settings,
+    before: async (session) => {
+      if (typeof pre === "string") await session.query(`SELECT ${pre.split(".").map(quoteIdent).join(".")}()`);
+      else await pre(session, { role, claims, method, path, request });
+    },
+  };
+};
 
 const JSON_CT = "application/json; charset=utf-8";
 
@@ -223,15 +270,7 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
     plan = planRpc(env, method, schema, target.name, qp, prefer, engineFormat, range, body);
   }
 
-  const headers: Record<string, string> = {};
-  request.headers.forEach((v, k) => {
-    headers[k] = v;
-  });
-  const caller: Caller = {
-    path: url.pathname,
-    request,
-    http: env.config.requestSettings ? { headers, cookies: parseCookies(request.headers.get("cookie")) } : undefined,
-  };
-  const outcome = await execute(env, ctx, caller, method, schema, prefer, engineFormat, plan, honoredTx, wantsPlan);
+  const call = callOf(env, ctx, request, method, url.pathname);
+  const outcome = await execute(env, ctx, call, schema, prefer, engineFormat, plan, honoredTx, wantsPlan);
   return toResponse(outcome, method, format, plan, wantsPlan);
 };

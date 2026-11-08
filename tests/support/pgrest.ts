@@ -4,6 +4,7 @@ import {
   createQuery,
   type AnyDatabase,
   type QueryInstance,
+  type QueryOptions,
   type TypedQueryInstance,
 } from "../../packages/query/src/index";
 import { introspect, toDescriptor } from "../../packages/core/src/schema";
@@ -34,6 +35,8 @@ const create = async (options: PgRestOptions): Promise<PgRestInstance> => {
   const build = async () =>
     createQuery({
       ...options,
+      // the same callback serves both: a call of `query()` has no `request` to give it
+      preRequest: options.preRequest as QueryOptions["preRequest"],
       schema: toDescriptor(await introspect(options.db, options.schemas?.length ? options.schemas : ["public"])),
     });
   let query = await build();

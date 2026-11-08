@@ -33,7 +33,7 @@ status code, and it holds no PostgREST error code. Each package imports the step
  │  └ http.ts, request │        │  ParsedQuery (the IR)        │        │  └ query.ts         │
  │     parseQuery:     │──────▶ │  planTable / planRpc (sql/*) │ ◀──────│     toParsed: built │
  │     the grammar     │ parsed │  execute  ─▶ Outcome         │ parsed │     from the object,│
- │     (route, Accept, │ Caller │  schema cache, adapters      │ Caller │     no text, no     │
+ │     (route, Accept, │  Call  │  schema cache, adapters      │  Call  │     no text, no     │
  │      Prefer, Range, │ format │                              │ format │     grammar)        │
  │                     │ format │                              │ format │                     │
  │ Response  ◀─ toResponse ◀──── Outcome {status, headers, text} ────▶ { data, count, error } │
@@ -48,7 +48,7 @@ What each side hands the core, and what it takes back:
 | **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
 | **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
 | **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
-| **Caller** | `{ path, request, http: { headers, cookies } }`: the `request.*` settings are set when `http` is given (`requestSettings`) | `{ path }` only: there is no request, so no `request.*` setting |
+| **Call** | `{ settings, before }`, built in `rest/src/http.ts`: the `request.*` settings (`requestSettings`) and `preRequest`, which is told the `Request` | `{ before }` only, built in `query.ts` from `preRequest`, which is told the role, claims, method and path: there is no request, so no `request.*` setting |
 | **Planning and execution** | `planTable` / `planRpc`, then `execute` | the same calls, on the same code |
 | **What comes back** | an `Outcome` (`status`, `headers`, `text`); `toResponse` adds `Content-Type`, `Vary`, `HEAD`, `bytea` and makes the `Response` | the same `Outcome`: the `text` is `JSON.parse`d into `data`, the count is the total in its `Content-Range`; the status and headers are not read further |
 | **Failures** | `EngineError.reason` and SQLSTATE become a PostgREST status and `PGRSTxxx` code in `toApiError` (`rest/src/errors.ts`) | `EngineError.reason` and SQLSTATE become a `kind` in `describeFailure` (`query/src/kinds.ts`) |
@@ -57,8 +57,9 @@ What each side hands the core, and what it takes back:
 Three consequences worth remembering. A change to parsing, planning, SQL or `execute` is a change to both packages,
 and the comparison against PostgREST (`tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
 A new way for the engine to refuse something is a new `Reason`, which has to be mapped by both packages (the compiler
-checks it). And a feature that exists for one transport only is not in the core: the core's `Caller` and
-`OutputFormat` have no field for it.
+checks it). And a feature that exists for one transport only is not in the core: the core's `Call` and
+`OutputFormat` have no field for it: `Call` is only settings to issue and something to run in the transaction, and each package
+builds its own.
 
 ## A request, step by step
 
@@ -78,23 +79,33 @@ checks it). And a feature that exists for one transport only is not in the core:
    forwards text rather than re-serialising rows.
 4. **Execute** (`core.execute`). One transaction on one connection:
    `SET TRANSACTION READ ONLY` for a read, then one `set_config` statement for the role, the claims, the `search_path`
-   and your settings, then `preRequest` if you declared one, then the statement. `Prefer: tx=rollback` and a plan
+   and your settings, then the call's `before` (that is `preRequest`, if you declared one), then the statement. `Prefer: tx=rollback` and a plan
    request roll back instead of committing, and a serialization failure (`40001`) is retried twice, since the whole
    transaction rolled back.
 
    Inside a scope (`transaction()`, `query.runTransaction`) the transaction is already open and already carries the
    identity: `Env.session` is set, so this step posts its statements there instead of calling `adapter.transaction`,
-   and issues only the half of the `set_config` that is per statement — the `search_path`, the `request.*` settings and
-   the time zone. `READ ONLY` and the replay belong to the scope, which is the only thing holding the boundary.
+   and issues only the half of the `set_config` that is per statement — the `search_path`, the call's own `settings` (the
+   `request.*` ones, for `rest`) and the time zone, then the call's `before`. `READ ONLY` and the replay belong to the scope, which is the only thing holding the boundary.
 5. **Outcome** (`core.buildOutcome`). The status (`201`, `204`, `206`, `416`…) and the headers PostgREST's logic
    decides: `Content-Range`, `Location`, `Preference-Applied`, and the headers and status a function set through
    `response.headers` / `response.status`; plus the body. Nothing here is a `Response`.
 6. **Dress it for the transport.** `@tsql/rest` adds what is only HTTP (`Content-Type` from the negotiated format,
    `Vary`), drops the body where HTTP says there is none (`HEAD`, `204`) and makes the `Response`.
 
-`query()` enters at step 2 with parameters it renders from the object, builds the same plan, runs the same `execute`,
+`query()` enters at step 2 with the `ParsedQuery` it builds from the object, builds the same plan, runs the same `execute`,
 and reads the outcome into `{ data, count, error }`: the count is the total in its `Content-Range`. The HTTP-only
 parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tsql/rest`'s.
+
+**What a transport adds to a call.** The engine does not know `preRequest` and does not know the `request.*` settings
+(`request.method`, `request.path`, `request.headers`, `request.cookies`: PostgREST's HTTP contract). `execute` takes a
+`Call` — `settings`, which it issues with the `set_config` of the statement, and `before`, which it runs in the transaction
+right after — and says nothing about what they are. `rest` builds its `Call` from the `Request` (`callOf`, in `http.ts`):
+the `request.*` settings, and a `before` that runs `preRequest`, told the `Request`. `query` builds its own (`callOf`, in
+`query.ts`): no settings, and a `before` that runs the same option, told only the role, claims, method and path, since
+there is no request. `identityOf` is how either learns the role and claims the engine will apply. What stays in the core
+is the connection, the transaction, the identity, the SQL and the reporting of connection and SQL errors; the shaping of
+the `Outcome` (step 5) is the part that still reads like a transport and has not moved yet.
 
 `transaction()` (`packages/query/src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
 `tx.query` through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
@@ -104,18 +115,18 @@ parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and r
 | path | |
 | --- | --- |
 | `packages/rest/src/index.ts` | `@tsql/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
-| `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the headers and cookies SQL will read, and the `Response` made out of an outcome; the HTTP-only settings |
+| `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the `Call` (`request.*` settings and `preRequest`), and the `Response` made out of an outcome; the HTTP-only settings |
 | `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept` (the negotiated format), the body (JSON, form, CSV) |
 | `packages/rest/src/render.ts` | the SQL of the formats beyond JSON — CSV, GeoJSON, custom media type handlers — and how a negotiated format becomes what the engine is told |
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → status and `PGRSTxxx` table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
 | `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `query`, `setContextQuery`, `transaction`, `close` |
-| `packages/query/src/query.ts` | the object API: `QueryInput` → query parameters, `QueryError`, and the transaction scope |
+| `packages/query/src/query.ts` | the object API: `QueryInput` → `ParsedQuery`, the `Call` (`preRequest`), prepared queries, `QueryError`, and the transaction scope |
 | `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries, and how an engine or database error becomes one |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
 | `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tsql/query/types` |
-| `packages/core/src/core.ts` | planning, the transaction, and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
+| `packages/core/src/core.ts` | planning, the transaction (`execute`, which takes a `Call`), the identity (`identityOf`), and the `Outcome` (status, the headers PostgREST's logic decides, body): what both entry points run |
 | `packages/core/src/parse/request.ts` | the types of a request, whatever carried it: `Method`, `Preferences`, `OutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
 | `packages/core/src/parse/*` | what the engine takes in, without any syntax of its own: `ParsedQuery` and its parts (`filter.ts`), the hand-written readers of a column, a `select` item and an order term (`field.ts`, `select.ts`), the operator vocabulary (`syntax.ts`) and the request types |

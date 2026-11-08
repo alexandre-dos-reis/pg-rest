@@ -1,13 +1,15 @@
 import type { DbSession } from "@tsql/core/adapter";
 import {
-  type Caller,
-  type Env,
+  type Call,
+  type CoreConfig,
+  type Env as CoreEnv,
   type Outcome as EngineOutcome,
   type Plan,
   type QueryParams,
   type RequestContext,
   assertRole,
   execute,
+  identityOf,
   planRpc,
   planTable,
   transactionSetup,
@@ -33,11 +35,48 @@ import {
 import { type SelectItem, parseSelect } from "@tsql/core/parse/select";
 import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tsql/core/parse/syntax";
 import { getRelation } from "@tsql/core/schema";
-import { literal } from "@tsql/core/quote";
+import { literal, quoteIdent } from "@tsql/core/quote";
 import { compileSet } from "@tsql/core/sql/expression";
 import { ROOT_ALIAS } from "@tsql/core/sql/read";
 import type { Method, OutputFormat, Preferences } from "@tsql/core/parse/request";
 import type { JsonObject } from "@tsql/core/sql/write";
+
+/** What `preRequest` is told about the call it runs for. There is no request: no `Request`, no headers. */
+export interface PreRequestInfo {
+  readonly role: string;
+  readonly claims: Readonly<Record<string, unknown>>;
+  readonly method: Method;
+  /** `/<table>` or `/rpc/<function>`: what the call stands for. */
+  readonly path: string;
+}
+
+/** A SQL function (`"auth"."check"`) or a callback run in the call's transaction before its statement. */
+export type PreRequest = string | ((session: DbSession, info: PreRequestInfo) => Promise<void>);
+
+export interface QueryConfig extends CoreConfig {
+  readonly preRequest?: PreRequest | undefined;
+}
+
+/** The engine's environment, with the settings `query()` reads on top. */
+export interface Env extends CoreEnv {
+  readonly config: QueryConfig;
+}
+
+/**
+ * What a call adds to its transaction: `preRequest`, if there is one. There is no request, so none
+ * of PostgREST's `request.*` settings are set.
+ */
+const callOf = (env: Env, ctx: RequestContext, method: Method, path: string): Call => {
+  const pre = env.config.preRequest;
+  if (pre === undefined) return {};
+  const { role, claims } = identityOf(env, ctx);
+  return {
+    before: async (session) => {
+      if (typeof pre === "string") await session.query(`SELECT ${pre.split(".").map(quoteIdent).join(".")}()`);
+      else await pre(session, { role, claims, method, path });
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // input
@@ -857,9 +896,18 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
     ? planRpc(env, method, schema, input.rpc, qp, prefer, format, undefined, body)
     : planTable(env, method, schema, input.table, qp, prefer, format, undefined, body);
 
-  // there is no request, so no `request.*` settings
-  const caller: Caller = { path: isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}` };
-  const outcome = await execute(env, ctx, caller, method, schema, prefer, format, plan, false, undefined);
+  const path = isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}`;
+  const outcome = await execute(
+    env,
+    ctx,
+    callOf(env, ctx, method, path),
+    schema,
+    prefer,
+    format,
+    plan,
+    false,
+    undefined,
+  );
   return answerOf(outcome);
 };
 
@@ -926,7 +974,7 @@ interface PreparedPlan {
   readonly schema: string;
   readonly prefer: Preferences;
   readonly format: OutputFormat;
-  readonly caller: Caller;
+  readonly path: string;
 }
 
 const isPrepared = (x: unknown): x is Prepared => typeof x === "object" && x !== null && PREPARED in x;
@@ -937,7 +985,7 @@ const inputOf = (x: QueryInput | Prepared): QueryInput => {
   try {
     return x[PREPARED].build(x.args);
   } catch {
-    return { table: x[PREPARED].caller.path.slice(1) };
+    return { table: x[PREPARED].path.slice(1) };
   }
 };
 
@@ -1056,7 +1104,7 @@ export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) 
     schema,
     prefer,
     format,
-    caller: { path: `/${input.table}` },
+    path: `/${input.table}`,
   };
   return (args: A): Prepared => ({ [PREPARED]: compiled, args });
 };
@@ -1076,7 +1124,17 @@ const runPrepared = async (env: Env, call: Prepared, ctx: RequestContext): Promi
     planned: c.planned && (c.planned.slots.length ? fill(c.planned, literals) : c.plan.planned),
     params: c.params.map((slot, i) => (slot === undefined ? c.plan.params[i]! : texts[slot]!)),
   };
-  const outcome = await execute(env, ctx, c.caller, c.method, c.schema, c.prefer, c.format, plan, false, undefined);
+  const outcome = await execute(
+    env,
+    ctx,
+    callOf(env, ctx, c.method, c.path),
+    c.schema,
+    c.prefer,
+    c.format,
+    plan,
+    false,
+    undefined,
+  );
   return answerOf(outcome);
 };
 
