@@ -1,10 +1,10 @@
+import { ALIAS, ROOT_ALIAS } from "../constants";
 import { EngineError } from "../errors";
 import type { FilterNode } from "../parse/filter";
 import { quoteIdent, quoteQualified } from "../quote";
 import type { Relation } from "../schema";
 import { whereSql } from "./filters";
 import { type Values, inlined } from "./values";
-import { ROOT_ALIAS } from "./read";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -126,9 +126,9 @@ export const buildInsert = (o: InsertOptions): string => {
   // response can be 200 instead of 201 when it only updated existing rows.
   const flag =
     o.flagInserted && o.resolution === "merge-duplicates"
-      ? `, (${quoteIdent(ROOT_ALIAS)}.xmax = 0) AS pgrst_inserted`
+      ? `, (${quoteIdent(ROOT_ALIAS)}.xmax = 0) AS ${ALIAS}_inserted`
       : "";
-  const ret = flag && returning === "1" ? "1 AS pgrst_one" : returning;
+  const ret = flag && returning === "1" ? `1 AS ${ALIAS}_one` : returning;
   return `INSERT INTO ${target} (${colList}) ${select}${conflict} RETURNING ${ret}${flag}`;
 };
 
@@ -136,7 +136,7 @@ export const buildInsert = (o: InsertOptions): string => {
 export const upsertColumns = (rel: Relation, returning: Returning): string[] => {
   if (returning === "representation") return rel.columns.map((c) => quoteIdent(c.name));
   if (returning === "pk" && rel.pk.length > 0) return rel.pk.map(quoteIdent);
-  return ["pgrst_one"];
+  return [`${ALIAS}_one`];
 };
 
 export interface UpdateOptions {

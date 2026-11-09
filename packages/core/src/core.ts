@@ -10,6 +10,7 @@ import { type BodyType, buildRpc, isSingleUnnamedParam, resolveFunction, type Rp
 import { buildStatement, type BodyShape } from "./sql/statement";
 import { type Values, bindFrom, inlined } from "./sql/values";
 import { buildDelete, buildInsert, upsertColumns, buildUpdate, type JsonObject, type Returning } from "./sql/write";
+import { ALIAS, ROOT_ALIAS } from "./constants";
 
 /** Who is making the call, as far as the database is concerned. */
 export interface SqlRequestContext {
@@ -318,10 +319,10 @@ export const planTable = (
       // The call's filters selected the rows to write; they must not be applied
       // again to the rows that were written (an UPDATE may no longer match them).
       const resultQuery: ParsedQuery = { ...query, root: { ...query.root, filters: [], presence: [] } };
-      const read = buildRead({ cache: env.cache, rel, from: "pgrst_source", query: resultQuery });
+      const read = buildRead({ cache: env.cache, rel, from: `${ALIAS}_source`, query: resultQuery });
       return { rows: read.rows, shape: shapeFor(r) };
     }
-    return { rows: "SELECT * FROM pgrst_source", shape: shapeFor(r) };
+    return { rows: `SELECT * FROM ${ALIAS}_source`, shape: shapeFor(r) };
   };
 
   const common = {
@@ -359,7 +360,7 @@ export const planTable = (
         shape,
         stripNulls: strip,
         ...formatOptions(format, qp),
-        upsertColumns: insertSql.includes("pgrst_inserted") ? upsertColumns(rel, returning) : undefined,
+        upsertColumns: insertSql.includes(`${ALIAS}_inserted`) ? upsertColumns(rel, returning) : undefined,
       }),
     };
   }
@@ -392,7 +393,7 @@ export const planTable = (
         shape: emptyShape,
         statement: buildStatement({
           source: "SELECT 1 WHERE FALSE",
-          rows: "SELECT * FROM pgrst_source",
+          rows: `SELECT * FROM ${ALIAS}_source`,
           shape: emptyShape,
           ...formatOptions(format, qp),
         }),
@@ -807,7 +808,7 @@ export const execute = async (
       // The root table is aliased internally; PostgreSQL error texts should name the real table.
       if (e instanceof DbQueryError && plan.kind !== "rpc" && plan.rel) {
         const fix = (t: string | undefined) =>
-          t?.replace(/"pgrst_root"/g, `"${plan.rel!.name}"`).replace(/pgrst_root\./g, `${plan.rel!.name}.`);
+          t?.replaceAll(`"${ROOT_ALIAS}"`, `"${plan.rel!.name}"`).replaceAll(`${ROOT_ALIAS}.`, `${plan.rel!.name}.`);
         throw new DbQueryError(e.sqlState, fix(e.message) ?? e.message, fix(e.detail), fix(e.hint));
       }
       throw e;

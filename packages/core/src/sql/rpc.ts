@@ -1,3 +1,4 @@
+import { ALIAS } from "../constants";
 import { EngineError } from "../errors";
 import { quoteIdent, quoteQualified } from "../quote";
 import { type FunctionDef, type Relation, type SchemaCache, levenshtein, relKey } from "../schema";
@@ -219,10 +220,10 @@ export const buildRpc = (
 
   const call = `${from}${fnRef}(${args}) AS _f`;
   const base = fn.returnsVoid
-    ? `SELECT 1 AS pgrst_scalar FROM ${call}`
+    ? `SELECT 1 AS ${ALIAS}_scalar FROM ${call}`
     : fn.returnsComposite
       ? `SELECT _f.* FROM ${call}`
-      : `SELECT _f AS pgrst_scalar FROM ${call}`;
+      : `SELECT _f AS ${ALIAS}_scalar FROM ${call}`;
 
   const shape: RpcShape = fn.returnsVoid
     ? "void"

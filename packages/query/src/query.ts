@@ -38,7 +38,7 @@ import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from 
 import { getRelation } from "@tsql/core/schema";
 import { literal, quoteIdent } from "@tsql/core/quote";
 import { compileSet } from "@tsql/core/sql/expression";
-import { ROOT_ALIAS } from "@tsql/core/sql/read";
+import { ROOT_ALIAS } from "@tsql/core/constants";
 import type { SqlOperation, SqlOutputFormat, SqlPreferences } from "@tsql/core/parse/sql-options";
 import type { JsonObject } from "@tsql/core/sql/write";
 

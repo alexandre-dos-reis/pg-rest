@@ -1,3 +1,4 @@
+import { ALIAS } from "@tsql/core/constants";
 import type { SqlOutputFormat } from "@tsql/core/parse/sql-options";
 import type { MediaChoice, Negotiated } from "./request";
 
@@ -7,7 +8,7 @@ import type { MediaChoice, Negotiated } from "./request";
 /** CSV, the way PostgREST does: the header from the first row, then PostgreSQL's record text. */
 const CSV_BODY =
   `coalesce((SELECT string_agg(k, ',') FROM (SELECT json_object_keys(r)::text AS k FROM ` +
-  `(SELECT row_to_json(hh) AS r FROM pgrst_body AS hh LIMIT 1) s) a), '') || E'\\n' || ` +
+  `(SELECT row_to_json(hh) AS r FROM ${ALIAS}_body AS hh LIMIT 1) s) a), '') || E'\\n' || ` +
   `coalesce(string_agg(substring(_t::text, 2, length(_t::text) - 2), E'\\n'), '')`;
 
 /** A GeoJSON FeatureCollection, the way PostgREST does (needs PostGIS). */
@@ -22,8 +23,8 @@ const handlerBody = (h: MediaChoice): string => {
     return h.bytea ? `coalesce(encode(${call}::bytea, 'hex'), '')` : `coalesce(${call}::text, '')`;
   }
   return h.bytea
-    ? `coalesce(encode((array_agg(_t.pgrst_scalar::bytea))[1], 'hex'), '')`
-    : `coalesce((array_agg(_t.pgrst_scalar::text))[1], '')`;
+    ? `coalesce(encode((array_agg(_t.${ALIAS}_scalar::bytea))[1], 'hex'), '')`
+    : `coalesce((array_agg(_t.${ALIAS}_scalar::text))[1], '')`;
 };
 
 /** What the engine is told about a negotiated format. */

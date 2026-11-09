@@ -1,3 +1,5 @@
+import { ALIAS } from "../../packages/core/src/constants";
+
 /**
  * Requests replayed against both PostgREST 16 and pg-rest on the same database.
  * `as`: who is calling (anon by default). `known`: documented, intentional difference —
@@ -693,6 +695,11 @@ const allCases: Case[] = [
   get("/clients?order=id.desc.nullsfirst%3B%20SELECT%20pg_sleep(3)", { name: "order nulls followed by SQL" }),
 ];
 
+/** The CSV header of a scalar result: our internal alias, not PostgREST's. */
+const CSV_SCALAR_HEADER =
+  "the CSV header is the column name of the scalar result, which is an internal alias: " +
+  `\`${ALIAS}_scalar\` here, \`pgrst_scalar\` in PostgREST`;
+
 /**
  * Differences that are understood and accepted (or not implemented yet), keyed by case name.
  * The test asserts the responses still differ, so an entry that starts matching must be removed.
@@ -700,6 +707,12 @@ const allCases: Case[] = [
 const KNOWN: Record<string, string> = {
   "GET /clients?select=id::int4%20from%20x":
     "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
+  // CSV takes its header from the row's column names, so the alias the engine gives a scalar result
+  // leaks into the body: PostgREST calls it `pgrst_scalar`, we call it `tsql_scalar` (ALIAS).
+  "csv of a scalar function": CSV_SCALAR_HEADER,
+  "csv of a set of scalars": CSV_SCALAR_HEADER,
+  "csv of a json function": CSV_SCALAR_HEADER,
+  "scalar as csv": CSV_SCALAR_HEADER,
 };
 
 export const cases: Case[] = allCases.map((c) => {
