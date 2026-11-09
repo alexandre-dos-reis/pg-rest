@@ -18,16 +18,16 @@ export interface Transfer {
  * The three writes that have to land together: the debit, the credit, and the row that says it
  * happened.
  *
- * There is no error handling here, and that is the design rather than an omission. `tx.query`
+ * There is no error handling here, and that is the design rather than an omission. the scope's operations
  * rejects when a query fails, because a query that failed is a transaction that will not commit --
  * so the scope catches it, rolls everything back and answers with it. What is left is the happy
  * path, with `data` already narrowed: the failures are named in the comments, and handled by the
  * caller choosing to read the scope's `error`.
  */
 const move = async (tx: Tx, t: Transfer): Promise<number> => {
-  const { data: accounts } = await tx.query({
+  const { data: accounts } = await tx.select({
     table: "accounts",
-    select: ["id", "balance"],
+    columns: ["id", "balance"],
     where: { id: { $in: [t.payer, t.payee] } },
   });
   const payer = accounts.find((a) => a.id === t.payer);
@@ -36,22 +36,19 @@ const move = async (tx: Tx, t: Transfer): Promise<number> => {
 
   // The balance is read here and written back below, which is a lost update waiting to happen if
   // two of these run at once -- hence the isolation level and the retry declared at the scope.
-  await tx.query({
+  await tx.update({
     table: "accounts",
-    action: "update",
     set: { balance: payer.balance - t.amount }, //  23514: the CHECK refuses an overdrawn account
     where: { id: t.payer },
   });
-  await tx.query({
+  await tx.update({
     table: "accounts",
-    action: "update",
     set: { balance: payee.balance + t.amount },
     where: { id: t.payee },
   });
 
-  const { data: row } = await tx.query({
+  const { data: row } = await tx.insert({
     table: "ledger",
-    action: "insert",
     rows: { payer: t.payer, payee: t.payee, amount: t.amount, memo: t.memo ?? null },
     single: true, //                               42501: the policy only allows your own account
   });
@@ -97,8 +94,8 @@ export const dryRun = (t: Transfer) =>
 export const report = () =>
   pgQuery.transaction(
     async (tx) => {
-      const { data: accounts } = await tx.query({ table: "accounts", select: ["balance"] });
-      const { data: moved } = await tx.query({ table: "ledger", select: ["amount"] });
+      const { data: accounts } = await tx.select({ table: "accounts", columns: ["balance"] });
+      const { data: moved } = await tx.select({ table: "ledger", columns: ["amount"] });
       return {
         held: accounts.reduce((n, a) => n + a.balance, 0),
         moved: moved.reduce((n, l) => n + l.amount, 0),

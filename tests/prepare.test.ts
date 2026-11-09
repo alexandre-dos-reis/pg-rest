@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createQuery, type QueryInput, type QueryInstance } from "../packages/query/src/index";
+import { createQuery, type QueryInput, type QueryInstance, type SelectInput } from "../packages/query/src/index";
+import { exec } from "./support/pgrest";
 import { introspect, toDescriptor } from "../packages/core/src/schema";
 import { createTestDb, hasDb, type TestDb } from "./support/db";
 
@@ -31,9 +32,9 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     return sent[sent.length - 1]!;
   };
 
-  const paid = (a: { status: string; min: number }): QueryInput => ({
+  const paid = (a: { status: string; min: number }): SelectInput => ({
     table: "orders",
-    select: ["id", "total", { clients: { select: ["name"], inner: true } }],
+    columns: ["id", "total", { clients: { columns: ["name"], inner: true } }],
     where: { status: a.status, total: { $gte: a.min } },
     order: ["id"],
   });
@@ -47,7 +48,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
       { status: "it's \\ quoted", min: 1 },
       { status: "", min: -1 },
     ]) {
-      const by = { prepared: () => q.run(find(args), authed), direct: () => q.query(paid(args), authed) };
+      const by = { prepared: () => q.run(find(args), authed), direct: () => q.select(paid(args), authed) };
       const [a, b] = [await statementOf(by.prepared), await statementOf(by.direct)];
       expect(a).toEqual(b);
       expect(await by.prepared()).toEqual(await by.direct());
@@ -66,13 +67,13 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     const eq = q.prepare((a: { email: string | null }) => ({ table: "clients", where: { email: a.email as never } }));
     // `*` is a wildcard for like, which the stand-in did not know about
     expect((await q.run(like({ name: "a*" }), authed)).data).toEqual(
-      (await q.query({ table: "clients", where: { name: { $ilike: "a*" } }, order: ["id"] }, authed)).data,
+      (await q.select({ table: "clients", where: { name: { $ilike: "a*" } }, order: ["id"] }, authed)).data,
     );
     expect(((await q.run(like({ name: "*a" }), authed)).data as unknown[]).length).toBe(1); // only Ada ends in a
     // null is IS NULL, not `= 'null'`
     const nullEmail = await q.run(eq({ email: null }), authed);
     expect(nullEmail.error).toBeNull();
-    expect(nullEmail.data).toEqual((await q.query({ table: "clients", where: { email: null } }, authed)).data);
+    expect(nullEmail.data).toEqual((await q.select({ table: "clients", where: { email: null } }, authed)).data);
     // a missing argument is null too
     expect((await q.run(eq({} as never), authed)).error).toBeNull();
   });
@@ -80,7 +81,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("it works in a transaction and on a context query", async () => {
     const find = q.prepare((a: { status: string }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { status: a.status },
       order: ["id"],
     }));
@@ -89,22 +90,22 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     const db2 = q.setContextQuery(() => authed);
     expect((await db2.run(find({ status: "new" }))).data).toEqual([{ id: 2 }]);
     // a failure inside the scope rolls it back like any other query's
-    const failing = q.prepare((a: { s: string }) => ({ table: "orders", select: ["nope"], where: { status: a.s } }));
+    const failing = q.prepare((a: { s: string }) => ({ table: "orders", columns: ["nope"], where: { status: a.s } }));
     const out = await q.transaction(async (tx) => tx.run(failing({ s: "paid" })), authed);
     expect(out.error?.kind).toBe("undefined_object");
   });
 
   test("a failure names the query that ran", async () => {
-    const failing = q.prepare((a: { s: string }) => ({ table: "orders", select: ["nope"], where: { status: a.s } }));
+    const failing = q.prepare((a: { s: string }) => ({ table: "orders", columns: ["nope"], where: { status: a.s } }));
     const r = await q.run(failing({ s: "paid" }), authed);
     expect(r.error?.kind).toBe("undefined_object");
-    expect(r.error?.input).toEqual({ table: "orders", select: ["nope"], where: { status: "paid" } });
+    expect(r.error?.input).toEqual({ table: "orders", columns: ["nope"], where: { status: "paid" } });
   });
 
   test("count, paging and the single row", async () => {
     const page = q.prepare((a: { status: string }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { status: a.status },
       order: ["id"],
       limit: 1,
@@ -115,7 +116,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     expect(r.count).toBe(2);
     const one = q.prepare((a: { id: number }) => ({
       table: "orders",
-      select: ["id", "status"],
+      columns: ["id", "status"],
       where: { id: a.id },
       single: true as const,
     }));
@@ -126,24 +127,24 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("filters inside groups and `in` lists take their values from the arguments", async () => {
     const find = q.prepare((a: { a: string; b: string; id: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { $or: [{ status: a.a }, { status: a.b, id: a.id }] },
       order: ["id"],
     }));
     const direct = (a: { a: string; b: string; id: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { $or: [{ status: a.a }, { status: a.b, id: a.id }] },
       order: ["id"],
     });
     const args = { a: "new", b: "paid", id: 3 };
     expect(await statementOf(() => q.run(find(args), authed))).toEqual(
-      await statementOf(() => q.query(direct(args), authed)),
+      await statementOf(() => q.select(direct(args), authed)),
     );
     expect((await q.run(find(args), authed)).data).toEqual([{ id: 2 }, { id: 3 }]);
     const inList = q.prepare((a: { x: number; y: number }) => ({
       table: "orders",
-      select: ["id"],
+      columns: ["id"],
       where: { id: { $in: [a.x, a.y] } },
       order: ["id"],
     }));
@@ -153,7 +154,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
   test("set-up refuses what a prepared query cannot be", () => {
     // an argument that is not a filter value
     expect(() => q.prepare((a: { c: string }) => ({ table: "orders", where: { [a.c]: 1 } }))).toThrow("filter values");
-    expect(() => q.prepare((a: { c: string }) => ({ table: "orders", select: [a.c] }))).toThrow();
+    expect(() => q.prepare((a: { c: string }) => ({ table: "orders", columns: [a.c] }))).toThrow();
     expect(() => q.prepare((a: { n: number }) => ({ table: "orders", limit: a.n }))).toThrow();
     // an argument that never reaches the SQL
     expect(() =>
@@ -164,9 +165,11 @@ describe.skipIf(!hasDb)("prepared queries", () => {
     ).toThrow("never ends up");
     // only selects
     expect(() =>
-      q.prepare((a: { s: string }) => ({ table: "orders", action: "delete" as const, where: { status: a.s } })),
+      q.prepare(
+        (a: { s: string }) => ({ table: "orders", action: "delete" as const, where: { status: a.s } }) as never,
+      ),
     ).toThrow("only a select");
-    expect(() => q.prepare((a: { s: string }) => ({ rpc: "orders_by_status", args: { s: a.s } }))).toThrow(
+    expect(() => q.prepare((a: { s: string }) => ({ rpc: "orders_by_status", args: { s: a.s } }) as never)).toThrow(
       "only a select",
     );
     // a table that is not there
@@ -183,7 +186,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
       return performance.now() - t;
     };
     const prepared = await time(() => q.run(find({ status: "paid", min: 100 }), authed));
-    const direct = await time(() => q.query(paid({ status: "paid", min: 100 }), authed));
+    const direct = await time(() => q.select(paid({ status: "paid", min: 100 }), authed));
     // not a benchmark -- the database dominates -- but it must not be slower than doing the work again
     expect(prepared).toBeLessThan(direct * 1.25);
   });
@@ -209,14 +212,14 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
 
   const lastOf = async (input: QueryInput) => {
     sent = [];
-    const r = await q.query(input, authed);
+    const r = await exec(q, input, authed);
     expect(r.error).toBeNull();
     return { ...sent[sent.length - 1]!, result: r };
   };
 
   test("the text depends on the shape of the query, not on its values", async () => {
-    const a = await lastOf({ table: "orders", select: ["id"], where: { status: "paid", total: { $gte: 100 } } });
-    const b = await lastOf({ table: "orders", select: ["id"], where: { status: "new", total: { $gte: 5 } } });
+    const a = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid", total: { $gte: 100 } } });
+    const b = await lastOf({ table: "orders", columns: ["id"], where: { status: "new", total: { $gte: 5 } } });
     expect(a.text).toBe(b.text);
     expect(a.text).not.toContain("'paid'");
     expect(a.params).toEqual(["paid", "100"]);
@@ -224,7 +227,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   });
 
   test("a value is never part of the SQL", async () => {
-    const r = await lastOf({ table: "clients", select: ["id"], where: { name: "x' OR 1=1 --" } });
+    const r = await lastOf({ table: "clients", columns: ["id"], where: { name: "x' OR 1=1 --" } });
     expect(r.text).not.toContain("OR 1=1");
     expect(r.params).toEqual(["x' OR 1=1 --"]);
     expect(r.result.data).toEqual([]);
@@ -233,7 +236,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   test("in lists, groups, quantifiers, text search and embeds bind too", async () => {
     const r = await lastOf({
       table: "orders",
-      select: ["id", { clients: { select: ["name"], where: { name: { $like: "A*" } } } }],
+      columns: ["id", { clients: { columns: ["name"], where: { name: { $like: "A*" } } } }],
       where: { $or: [{ id: { $in: [1, 2] } }, { status: { $any: { $eq: ["paid", "new"] } } }] },
     });
     expect(r.text).not.toMatch(/'(paid|new|A%)'/);
@@ -257,22 +260,22 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
   });
 
   test("json and jsonb columns keep a literal, a text path is bound", async () => {
-    const j = await lastOf({ table: "clients", select: ["id"], where: { meta: { $cs: { tier: "gold" } } } });
+    const j = await lastOf({ table: "clients", columns: ["id"], where: { meta: { $cs: { tier: "gold" } } } });
     expect(j.params ?? []).toEqual([]);
     expect(j.text).toContain("tier");
     expect(j.result.data).toEqual([{ id: 1 }]);
-    const t = await lastOf({ table: "clients", select: ["id"], where: { "meta->>tier": "silver" } });
+    const t = await lastOf({ table: "clients", columns: ["id"], where: { "meta->>tier": "silver" } });
     expect(t.params).toEqual(["silver"]);
     expect(t.result.data).toEqual([{ id: 2 }]);
-    const p = await lastOf({ table: "clients", select: ["id"], where: { "meta->tier": '"gold"' } });
+    const p = await lastOf({ table: "clients", columns: ["id"], where: { "meta->tier": '"gold"' } });
     expect(p.params ?? []).toEqual([]);
     expect(p.result.data).toEqual([{ id: 1 }]);
   });
 
   test("counts and plans work with bound values", async () => {
-    const c = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, limit: 1, count: "exact" });
+    const c = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid" }, limit: 1, count: "exact" });
     expect((c.result as { count: number }).count).toBe(2);
-    const e = await lastOf({ table: "orders", select: ["id"], where: { status: "paid" }, count: "planned" });
+    const e = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid" }, count: "planned" });
     expect(e.result.error).toBeNull();
   });
 

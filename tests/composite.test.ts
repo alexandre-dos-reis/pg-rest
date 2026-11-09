@@ -59,9 +59,9 @@ describe.skipIf(!hasDb)("composite types", () => {
 
   describe("reading", () => {
     test("a composite column comes back as an object, an array of them as a list", async () => {
-      const { data } = await t.api.query({
+      const { data } = await t.api.select({
         table: "venues",
-        select: ["label", "owner", "branches"],
+        columns: ["label", "owner", "branches"],
         single: true,
         where: { label: "Back room" },
       });
@@ -73,9 +73,9 @@ describe.skipIf(!hasDb)("composite types", () => {
     });
 
     test("arrow paths reach the fields, nested and through an array", async () => {
-      const { data } = await t.api.query({
+      const { data } = await t.api.select({
         table: "venues",
-        select: ["id", "owner->>name", "owner->home->>city", "owner->home", "first_branch:branches->0->>city"],
+        columns: ["id", "owner->>name", "owner->home->>city", "owner->home", "first_branch:branches->0->>city"],
         order: ["id"],
       });
       expect(data).toEqual([
@@ -108,29 +108,29 @@ describe.skipIf(!hasDb)("composite types", () => {
 
   describe("filtering by a whole composite value", () => {
     test("the fields may come in any order, and the ones left out are NULL", async () => {
-      const found = await t.api.query({ table: "venues", select: ["id"], where: { owner: ADA } });
+      const found = await t.api.select({ table: "venues", columns: ["id"], where: { owner: ADA } });
       expect(found.data).toEqual([{ id: 1 }]);
-      const reordered = await t.api.query({
+      const reordered = await t.api.select({
         table: "venues",
-        select: ["id"],
+        columns: ["id"],
         where: { owner: { tags: ["music", "large"], home: { zip: "75001", city: "Paris" }, name: "Ada" } },
       });
       expect(reordered.data).toEqual([{ id: 1 }]);
       // a partial value compares against a row whose other fields are NULL, so it matches nothing
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { name: "Ada" } } })).data).toEqual(
-        [],
-      );
+      expect(
+        (await t.api.select({ table: "venues", columns: ["id"], where: { owner: { name: "Ada" } } })).data,
+      ).toEqual([]);
     });
 
     test("neq, in and isdistinct take one too", async () => {
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $neq: ADA } } })).data).toEqual([
+      expect((await t.api.select({ table: "venues", columns: ["id"], where: { owner: { $neq: ADA } } })).data).toEqual([
         { id: 2 },
       ]);
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $in: [ADA] } } })).data).toEqual([
-        { id: 1 },
-      ]);
+      expect((await t.api.select({ table: "venues", columns: ["id"], where: { owner: { $in: [ADA] } } })).data).toEqual(
+        [{ id: 1 }],
+      );
       expect(
-        (await t.api.query({ table: "venues", select: ["id"], where: { owner: { $isdistinct: ADA } } })).data,
+        (await t.api.select({ table: "venues", columns: ["id"], where: { owner: { $isdistinct: ADA } } })).data,
       ).toEqual([{ id: 2 }]);
     });
 
@@ -148,20 +148,19 @@ describe.skipIf(!hasDb)("composite types", () => {
     });
 
     test("is.null still tests the column, not its fields", async () => {
-      expect((await t.api.query({ table: "venues", select: ["id"], where: { owner: { $is: "null" } } })).data).toEqual(
-        [],
-      );
+      expect(
+        (await t.api.select({ table: "venues", columns: ["id"], where: { owner: { $is: "null" } } })).data,
+      ).toEqual([]);
     });
   });
 
   describe("writing", () => {
     test("a nested object is the composite value, and a missing field is NULL", async () => {
-      const { data, error } = await t.api.query(
+      const { data, error } = await t.api.insert(
         {
           table: "venues",
-          action: "insert",
           rows: { label: "New", owner: { name: "Edsger", home: { city: "Rotterdam" } }, branches: [{ city: "Delft" }] },
-          select: ["label", "owner", "branches"],
+          returning: ["label", "owner", "branches"],
           single: true,
         },
         authed(),
@@ -172,36 +171,32 @@ describe.skipIf(!hasDb)("composite types", () => {
         owner: { name: "Edsger", home: { city: "Rotterdam", zip: null }, tags: null },
         branches: [{ city: "Delft", zip: null }],
       });
-      await t.api.query({ table: "venues", action: "delete", where: { label: "New" } }, authed());
+      await t.api.delete({ table: "venues", where: { label: "New" } }, authed());
     });
 
     test("an update replaces the whole value", async () => {
-      const { data } = await t.api.query(
+      const { data } = await t.api.update(
         {
           table: "venues",
-          action: "update",
           set: { owner: { name: "Ada Lovelace" } },
           where: { label: "Concert hall" },
-          select: ["owner"],
+          returning: ["owner"],
           single: true,
         },
         authed(),
       );
       expect(data).toEqual({ owner: { name: "Ada Lovelace", home: null, tags: null } });
-      await t.api.query(
-        { table: "venues", action: "update", set: { owner: ADA }, where: { label: "Concert hall" } },
-        authed(),
-      );
+      await t.api.update({ table: "venues", set: { owner: ADA }, where: { label: "Concert hall" } }, authed());
     });
   });
 
   describe("functions", () => {
     test("a composite argument travels as JSON", async () => {
-      expect((await t.api.query({ rpc: "city_of", args: { who: ADA } })).data).toBe("Paris");
+      expect((await t.api.rpc({ rpc: "city_of", args: { who: ADA } })).data).toBe("Paris");
     });
 
     test("a function returning a composite type answers with the object", async () => {
-      expect((await t.api.query({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } })).data).toEqual({
+      expect((await t.api.rpc({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } })).data).toEqual({
         city: "Lyon",
         zip: "69001",
       });

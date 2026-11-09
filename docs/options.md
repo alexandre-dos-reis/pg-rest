@@ -29,7 +29,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `anonymousRole` | the role for a call with no context. Default `"anon"`; `false` refuses anonymous calls with `401 PGRST302` |
 | `maxRows` | a cap on the rows a read returns (PostgREST's `db-max-rows`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
-| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every `tx.query`, each with its own method and path. `info` is `{ role, claims, method, path }`; `createRest` adds the `request` (`@tsql/query` has none) |
+| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every operation of `tx`, each with its own method and path. `info` is `{ role, claims, method, path }`; `createRest` adds the `request` (`@tsql/query` has none) |
 
 **`createRest` only**: HTTP.
 
@@ -39,7 +39,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `basePath` | a URL prefix to strip, so the handler can be mounted anywhere (`/api/rest`) |
 | `allowTxOverride` | honour `Prefer: tx=rollback` (`db-tx-end`). Default off |
 | `planEnabled` | answer `Accept: application/vnd.pgrst.plan` with the query plan (`db-plan-enabled`). A plan reveals the shape of the database: keep it off in production. Default off |
-| `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on. `query()` sets none of them: there is no request |
+| `requestSettings` | expose `request.method` / `path` / `headers` / `cookies` to SQL. Default on. The in-process operations set none of them: there is no request |
 | `openApi` | serve the Swagger 2.0 document at `/`. Default on |
 | `serverUrl` | the public URL used as `host` in the OpenAPI document. Defaults to the request's origin |
 
@@ -58,8 +58,8 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 
 | | |
 | --- | --- |
-| `query(input, ctx?)` | a request from an object, in-process: `{ data, count, error }`. Never rejects → [`query.md`](query.md) |
-| `setContextQuery(source)` | `query` with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
+| `select(input, ctx?)`, `insert`, `upsert`, `update`, `delete`, `rpc` | a request from an object, in-process: `{ data, count, error }`. Never reject → [`query.md`](query.md) |
+| `setContextQuery(source)` | the operations with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
 | `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
 | `close()` | stop the instance. Your driver is left open |
 
@@ -68,11 +68,11 @@ It never reads the catalog, so there is nothing to reload: after a migration, ge
 place `createQuery` differs from `createRest`, which reads the catalog itself and has `schemaCache()` and
 `reloadSchema()`.
 
-With a generated database type — `createQuery<Database>(options)` — `query` is typed by it and everything else is
+With a generated database type — `createQuery<Database>(options)` — the operations are typed by it and everything else is
 unchanged.
 
 `handle` is for requests that come from outside: mount it in any server that speaks web-standard `Request`/`Response`.
-In the same process, reach for `query()` instead — a PostgREST client library over `handle` would build a URL and a
+In the same process, reach for the operations instead — a PostgREST client library over `handle` would build a URL and a
 body for pg-rest to parse straight back, two passes over a query you are already holding as an object. Both packages
 are built on one core, so the database sees the same thing either way; only the envelope differs. `@tsql/rest` stays
 PostgREST's, to the byte; what goes beyond PostgREST (the `$` filters, computed updates) is in `@tsql/query` only.
@@ -97,6 +97,6 @@ const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 `handle()` never rejects: a failure becomes a PostgREST-shaped JSON response.
 
-**`@tsql/query`** has errors of its own, and none of the above: `query()` never rejects either, it returns a
+**`@tsql/query`** has errors of its own, and none of the above: the operations never reject either, it returns a
 `QueryError` — a `kind` to switch on, the `message`, `details` and `hint`, the `sqlState` of a database error, and the
 input that produced it. See [`query.md`](query.md#errors).

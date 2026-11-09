@@ -41,7 +41,7 @@ Not gaps — adding them would work against the point of the project.
 
 The same trade reversed: because it runs inside your process, it can do things a server cannot.
 
-- **Queries without HTTP.** `query({ table: "todos", select: ["id"] })` goes through the same parser and the same SQL as a
+- **Queries without HTTP.** `select({ table: "todos", columns: ["id"] })` goes through the same parser and the same SQL as a
   request — no loopback call, and no second copy of the logic for your server components, jobs and
   webhooks. → [`query.md`](query.md)
 - **Types from your own catalog.** `generateModule()` reads `pg_catalog` once, at build time, and writes the types and
@@ -63,7 +63,7 @@ Both entry points converge on one pipeline on purpose; what that looks like is i
 
 Additions being weighed rather than planned — joining a transaction the application itself opened, observability
 hooks, guardrails for an exposed surface, a debug mode — are written out, with their cost, in
-[`proposals.md`](proposals.md). A transaction across several `query()` calls was one of them and is now built:
+[`proposals.md`](proposals.md). A transaction across several operations was one of them and is now built:
 [`query.md`](query.md#transactions).
 
 A handful of things are missing rather than refused — `PATCH`/`PUT` on a function's result, a few representation and

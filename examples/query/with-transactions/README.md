@@ -64,7 +64,7 @@ export const asUser = <T>(sub: string, fn: () => Promise<T>): Promise<T> =>
 
 pg-rest holds no store of its own, which is what leaves it dependency-free and lets the context come
 from anywhere — `node:async_hooks` here, a per-request store your framework already has, a fixed
-context for a job. `pgQuery(input)` reads the store at **every** call, so one bound query serves a
+context for a job. `pgQuery.select(input)` reads the store at **every** call, so one bound query serves a
 different caller for every request in flight; a scope reads it **once, on entry**, because a
 transaction has one `set_config` and a store answering differently halfway through could not be
 honoured anyway.
@@ -76,7 +76,7 @@ mentions no role, no claims and no user id; nothing is threaded through its sign
 
 ```ts
 const move = async (tx: Tx, t: Transfer): Promise<number> => {
-  const { data: accounts } = await tx.query({ table: "accounts", select: ["id", "balance"], where: { … } });
+  const { data: accounts } = await tx.select({ table: "accounts", columns: ["id", "balance"], where: { … } });
   //    ^ Array<{ id: string; balance: number }> -- typed, and not `| null`
   …
 };
@@ -96,7 +96,7 @@ scope — the per-call override, moved to the granularity `set_config` works at.
 
 ## What each scope shows
 
-**1. Three writes, one transaction.** `tx.query` differs from `query` in exactly two ways. It takes
+**1. Three writes, one transaction.** A scope's operations differ from the instance's in exactly two ways. It takes
 no context — the role and the claims are transaction-local and issued once at the head of the
 transaction, so a per-call context would change the role for every statement that follows instead of
 scoping anything. And it rejects on failure instead of answering an `error`, which is why `move()`
@@ -113,7 +113,7 @@ policy reads the claims that were set once, on entry, and the two balance update
 it.
 
 **4. One transfer allowed to fail: `tx.transaction()`.** A nested scope is a `SAVEPOINT`, and the one
-place a transaction may carry on after a failure — so unlike `tx.query` it answers a `QueryResult`
+place a transaction may carry on after a failure — so unlike an operation of `tx` it answers a `QueryResult`
 rather than rejecting. The batch reads that `error`, keeps the two transfers that worked, and still
 commits them: one transaction, three savepoints.
 

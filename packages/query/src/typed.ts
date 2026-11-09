@@ -10,13 +10,14 @@ import type {
   QueryOk,
   QueryResult,
   Scalar,
+  Settled,
   TransactionOptions,
 } from "./query";
 import type { QueryInstance } from "./index";
 
 /**
  * The types `generateTypes` emits, as constraints. They describe a database, not a query: see
- * {@link TypedQuery} for what a call may say, and {@link QueryData} for what it returns.
+ * {@link TypedSelect} (and its siblings) for what a call may say, and {@link QueryData} for what it returns.
  */
 export interface AnyRelation {
   readonly row: Record<string, unknown>;
@@ -74,7 +75,7 @@ type Flatten<T> = T extends object ? { [K in keyof T]: T[K] } & {} : T;
 
 /**
  * One item of a `select`. Columns, `alias:column`, `*`, and embedded resources as
- * `{ relation: [...] }` or `{ relation: { select, inner, limit, ... } }`.
+ * `{ relation: [...] }` or `{ relation: { columns, inner, limit, ... } }`.
  *
  * The other string forms of a `select` -- casts, JSON paths, aggregates -- are not described here: they
  * change the type of the value or invent a column, and parsing them from a string literal would
@@ -93,7 +94,7 @@ type SelectList<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
 /** An embedded resource: its columns, or an object with its own filters and paging. */
 type EmbedOptions<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = {
   /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
-  readonly select?: SelectList<Db, S, T>;
+  readonly columns?: SelectList<Db, S, T>;
   /** `!inner`: drop the parent rows that have no match here. A to-one embed stops being nullable. */
   readonly inner?: boolean;
   /** Which relationship to follow, when more than one leads here: a foreign key name, or a table. */
@@ -225,7 +226,7 @@ type SpreadOf<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, 
   : SpreadRow<Db, S, T, Spec>;
 
 type SpreadRow<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>, Spec> = Spec extends {
-  select: infer Items;
+  columns: infer Items;
 }
   ? Selected<Db, S, T, Items>
   : Row<Db, S, T>;
@@ -235,7 +236,7 @@ type Arrayed<R> = { [K in keyof R]: R[K][] };
 type EmbedOf<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>, Rel, Spec> =
   Spec extends ReadonlyArray<unknown>
     ? Shaped<Rel, Spec, Selected<Db, S, T, Spec>>
-    : Spec extends { select: infer Items }
+    : Spec extends { columns: infer Items }
       ? Shaped<Rel, Spec, Selected<Db, S, T, Items>>
       : Shaped<Rel, Spec, Row<Db, S, T>>;
 
@@ -438,33 +439,18 @@ type AtSchema<Db extends AnyDatabase, S extends Schema<Db>> = S extends Db["defa
   : { readonly schema: S };
 
 /**
- * Everything a query on one relation may say. Reads and writes share **one** member per table on
- * purpose: when several members of the union carry the same `table` value, TypeScript cannot pick
- * one from the discriminant, and the editor then offers every table's columns inside `select` and
- * `where`. What the separate shapes used to enforce is enforced by {@link WriteRules} instead.
+ * What any operation on one relation may say. `table` is what restricts everything below: `where`
+ * and `order` only accept this relation's columns. Each operation has its own union with one member
+ * per table: were several members to carry the same `table` value, TypeScript could not pick one
+ * from the discriminant, and the editor would offer every table's columns inside `columns` and `where`.
  */
-type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
+type TableBase<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Common &
   AtSchema<Db, S> & {
     /**
-     * The table or view to read or write. It is what restricts everything below: `select`, `where`
+     * The table or view to read or write. It is what restricts everything below: `columns`, `where`
      * and `order` only accept this relation's columns, and `rows`/`set` its writable ones.
      */
     readonly table: T;
-    /** Never both: the discriminant has to exist on every member for the editor to pick one. */
-    readonly rpc?: never;
-    /**
-     * What to do. `"select"` (the default) reads; `"insert"` and `"upsert"` take `rows`, `"update"`
-     * takes `set`, `"delete"` takes neither. A write returns its rows unless `returning: "minimal"`.
-     */
-    readonly action?: "select" | "insert" | "upsert" | "update" | "delete";
-    /**
-     * The columns to return, and the resources to embed. A string is a column (`"title"`) or a
-     * renamed one (`"name:title"`); `"*"` takes them all; `{ tags: ["label"] }` embeds a related
-     * resource, and `{ tags: { select, inner, where, order, limit, as, spread } }` is its long form.
-     *
-     * `data` is inferred from exactly this: pick two columns and the rows have two keys.
-     */
-    readonly select?: SelectList<Db, S, T>;
     /**
      * Which rows, by column. A plain value means `eq` (and `null` means `is.null`), and
      * `{ $gte: 3, $lt: 9 }` names the operators; `$not`, `$any` and `$all` modify one.
@@ -474,35 +460,59 @@ type TableQuery<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db
     readonly where?: Where<Db, S, T>;
     /** How to sort: `"created"`, `"created.desc"`, or `{ column, desc, nulls }`. */
     readonly order?: ReadonlyArray<Order<Db, S, T>>;
+  };
+
+/** A read of one relation. */
+type TableRead<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> & {
+  /**
+   * The columns to return, and the resources to embed. A string is a column (`"title"`) or a
+   * renamed one (`"name:title"`); `"*"` takes them all; `{ tags: ["label"] }` embeds a related
+   * resource, and `{ tags: { columns, inner, where, order, limit, as, spread } }` is its long form.
+   *
+   * `data` is inferred from exactly this: pick two columns and the rows have two keys.
+   */
+  readonly columns?: SelectList<Db, S, T>;
+};
+
+/**
+ * What a write answers with: its rows (`"representation"`, the default), nothing (`"minimal"`), or
+ * its rows with only these columns and embeds, like the `RETURNING` of the statement. `data` is
+ * inferred from the list.
+ */
+interface Returning<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> {
+  readonly returning?: "representation" | "minimal" | SelectList<Db, S, T>;
+}
+
+/** An insert of one row or several. */
+type TableInsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T> & {
     /**
      * What to insert: one object or many. Generated and `GENERATED ALWAYS AS IDENTITY` columns are
      * absent, and a column with a default or a nullable one is optional.
      */
-    readonly rows?: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
-    /** The columns to change, for an `"update"`. The rows are the ones `where` matches. */
-    readonly set?: SetOf<Relations<Db, S>[T]["update"]>;
-    /** For an `"upsert"`, the columns the conflict is resolved on. Defaults to the primary key. */
-    readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
+    readonly rows: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
     /** Insert only these columns, ignoring any other key in `rows` (and so making a bulk insert uniform). */
     readonly columns?: ReadonlyArray<Column<Db, S, T>>;
     /** What a column missing from `rows` gets: its `DEFAULT` (the default here) or `null`. */
     readonly missing?: "default" | "null";
-    /** Whether a write answers with the rows it touched (the default here) or with nothing. */
-    readonly returning?: "representation" | "minimal";
   };
 
-/**
- * The payload each action needs, and refuses: `rows` belongs to an insert or an upsert, `set` to an
- * update, and a read has no business with either. Required here rather than in the shape, because
- * an optional property that must sometimes be present cannot be said in one object type.
- */
-type WriteRules<Db extends AnyDatabase, Q> = (Q extends { action: "insert" | "upsert" }
-  ? {
-      readonly rows: WriteShape<Db, Q, "insert"> | ReadonlyArray<WriteShape<Db, Q, "insert">>;
-    }
-  : { readonly rows?: never; readonly onConflict?: never; readonly columns?: never; readonly missing?: never }) &
-  (Q extends { action: "update" } ? { readonly set: SetOf<WriteShape<Db, Q, "update">> } : { readonly set?: never }) &
-  (Q extends { action: "insert" | "upsert" | "update" | "delete" } ? unknown : { readonly returning?: never });
+/** An insert that resolves a conflict by updating the row it finds. */
+type TableUpsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableInsert<Db, S, T> & {
+  /** The columns the conflict is resolved on. Defaults to the primary key. */
+  readonly onConflict?: ReadonlyArray<Column<Db, S, T>>;
+};
+
+/** An update of the rows `where` matches. */
+type TableUpdate<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T> & {
+    /** The columns to change. The rows are the ones `where` matches. */
+    readonly set: SetOf<Relations<Db, S>[T]["update"]>;
+  };
+
+/** A delete of the rows `where` matches. */
+type TableDelete<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
+  Returning<Db, S, T>;
 
 type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions<Db, S> & string> = Common &
   AtSchema<Db, S> & {
@@ -511,21 +521,13 @@ type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions
      * signature the catalog carries, overloads included.
      */
     readonly rpc: F;
-    /**
-     * `table` is absent from a function call, but it must still be *declared*: a union where some
-     * members lack the discriminant altogether is one TypeScript will not narrow, and the editor
-     * then offers every table's columns inside `select`.
-     */
-    readonly table?: never;
-    /** A function call has no action: it is whatever the function does. */
-    readonly action?: never;
     /** The arguments, by name. A parameter with a `DEFAULT` is optional. */
     readonly args?: Functions<Db, S>[F][number]["args"];
     /**
      * A function's result is a row like any other, so it takes the same three. These apply to the
      * rows it returns, not to its arguments -- and a scalar function has no columns to ask for.
      */
-    readonly select?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
+    readonly columns?: RowSelect<Functions<Db, S>[F][number]["returns"]>;
     /** Filters on the rows the function returned, by their column. */
     readonly where?: WhereOf<Functions<Db, S>[F][number]["returns"], never>;
     /** How to sort the rows the function returned. */
@@ -674,12 +676,44 @@ type NoExtraWhereKeys<Db extends AnyDatabase, Q> = Q extends { where: infer W }
     : unknown
   : unknown;
 
-/** Every query this database allows, as a union discriminated by `table` or `rpc`. */
-export type TypedQuery<Db extends AnyDatabase> = {
-  [S in Schema<Db>]:
-    | { [T in Table<Db, S>]: TableQuery<Db, S, T> }[Table<Db, S>]
-    | { [F in keyof Functions<Db, S> & string]: Rpc<Db, S, F> }[keyof Functions<Db, S> & string];
+/** Every `select` this database allows, as a union discriminated by `table`. */
+export type TypedSelect<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [T in Table<Db, S>]: TableRead<Db, S, T> }[Table<Db, S>];
 }[Schema<Db>];
+
+/** Every `insert` this database allows. */
+export type TypedInsert<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [T in Table<Db, S>]: TableInsert<Db, S, T> }[Table<Db, S>];
+}[Schema<Db>];
+
+/** Every `upsert` this database allows. */
+export type TypedUpsert<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [T in Table<Db, S>]: TableUpsert<Db, S, T> }[Table<Db, S>];
+}[Schema<Db>];
+
+/** Every `update` this database allows. */
+export type TypedUpdate<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [T in Table<Db, S>]: TableUpdate<Db, S, T> }[Table<Db, S>];
+}[Schema<Db>];
+
+/** Every `delete` this database allows. */
+export type TypedDelete<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [T in Table<Db, S>]: TableDelete<Db, S, T> }[Table<Db, S>];
+}[Schema<Db>];
+
+/** Every function call this database allows, as a union discriminated by `rpc`. */
+export type TypedRpc<Db extends AnyDatabase> = {
+  [S in Schema<Db>]: { [F in keyof Functions<Db, S> & string]: Rpc<Db, S, F> }[keyof Functions<Db, S> & string];
+}[Schema<Db>];
+
+/**
+ * An input checked against what an operation allows. Inference through a type parameter does not
+ * flag excess properties, so the keys, the payload and the `where` are each checked on their own.
+ */
+type Guard<Db extends AnyDatabase, Q, Allowed> = Q &
+  NoExtraKeys<Q, Allowed> &
+  NoExtraPayload<Db, Q> &
+  NoExtraWhereKeys<Db, Q>;
 
 // ---------------------------------------------------------------------------
 // the result
@@ -700,16 +734,30 @@ type Signatures<Db extends AnyDatabase, Q> = Q extends { rpc: infer F }
 
 /** One row of the answer, before `single` decides whether it comes alone. */
 type RowOut<Db extends AnyDatabase, Q> = Q extends { rpc: string }
-  ? Q extends { select: infer Items }
+  ? Q extends { columns: infer Items }
     ? PickedFrom<Signatures<Db, Q>["returns"], Items>
     : Signatures<Db, Q>["returns"]
   : Q extends { table: infer T }
     ? T extends Table<Db, SchemaIn<Db, Q>>
-      ? Q extends { select: infer Items }
-        ? Selected<Db, SchemaIn<Db, Q>, T, Items>
-        : Row<Db, SchemaIn<Db, Q>, T>
+      ? TableRowOut<Db, Q, T>
       : never
     : never;
+
+/**
+ * A table's row: the list a read names in `columns`, or the one a write names in `returning`. An insert
+ * has a `columns` of its own -- the columns it inserts -- which says nothing about the answer.
+ */
+type TableRowOut<Db extends AnyDatabase, Q, T extends Table<Db, SchemaIn<Db, Q>>> = Q extends {
+  returning: infer R;
+}
+  ? R extends ReadonlyArray<unknown>
+    ? Selected<Db, SchemaIn<Db, Q>, T, R>
+    : Row<Db, SchemaIn<Db, Q>, T>
+  : Q extends { rows: unknown }
+    ? Row<Db, SchemaIn<Db, Q>, T>
+    : Q extends { columns: infer Items }
+      ? Selected<Db, SchemaIn<Db, Q>, T, Items>
+      : Row<Db, SchemaIn<Db, Q>, T>;
 
 /**
  * What `data` holds: the rows, one object with `single`, and `null` for a write that was asked to
@@ -731,17 +779,81 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
 // ---------------------------------------------------------------------------
 
 /**
- * A {@link QueryInstance} whose `query` is typed by a generated database type:
- * `table` and `rpc` are the ones that exist, `select` and `where` only name real columns and
- * relationships, and `data` is inferred from the `select`.
+ * The six operations typed by a generated database type: `table` and `rpc` are the ones that exist,
+ * `columns` and `where` only name real columns and relationships, `rows` and `set` its writable
+ * columns, and `data` is inferred from the `columns`, nesting included.
  *
- * `handle` is unchanged: HTTP requests are strings from outside and cannot be typed.
+ * `Mode` and `Ctx` are what {@link Operations} takes: how a failure comes back, and what follows the input.
  */
-export interface TypedContextQuery<Db extends AnyDatabase> {
-  <const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-    ctx?: RequestContext,
-  ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
+export interface TypedOperations<Db extends AnyDatabase, Mode extends "result" | "ok", Ctx extends unknown[]> {
+  /**
+   * Read rows. `columns`, `where` and `order` take this relation's columns and the resources a
+   * foreign key leads to; `data` is inferred from the `columns`.
+   *
+   * The optional `ctx` is who is asking -- `{ role, claims, settings }` -- applied with `set_config`,
+   * so row level security and privileges work as they do over HTTP. They are the database's business:
+   * no type here knows what a role may do.
+   *
+   * A failure is part of the result: `error` is a `QueryError` (a `kind`, a `message`, `details`,
+   * `hint` and the SQLSTATE of a database error), and exactly one of `data` and `error` is set, so
+   * `if (error)` narrows both `data` and `count`. It never rejects.
+   *
+   * @example
+   * const { data, error } = await pgRest.select({
+   *   table: "todos",
+   *   columns: ["id", "title", { tags: ["label"] }],
+   *   where: { done: false },
+   *   limit: 10,
+   * });
+   * if (error) return c.json({ error: error.message, kind: error.kind }, 400);
+   * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
+   */
+  select<const Q extends TypedSelect<Db>>(
+    input: Guard<Db, Q, TypedSelect<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+  /**
+   * Insert one row or several. `rows` is required and takes the relation's writable columns; the
+   * rows come back unless `returning: "minimal"`; `returning: ["id"]` returns only those columns.
+   *
+   * @example
+   * const { data } = await pgRest.insert({ table: "todos", rows: { title: "ship it" }, single: true });
+   */
+  insert<const Q extends TypedInsert<Db>>(
+    input: Guard<Db, Q, TypedInsert<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Insert, or update the row a conflict is found with: `onConflict` names the columns, the primary key by default. */
+  upsert<const Q extends TypedUpsert<Db>>(
+    input: Guard<Db, Q, TypedUpsert<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Change the rows `where` matches. `set` is required; a column takes a value or an expression the database computes. */
+  update<const Q extends TypedUpdate<Db>>(
+    input: Guard<Db, Q, TypedUpdate<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Remove the rows `where` matches. */
+  delete<const Q extends TypedDelete<Db>>(
+    input: Guard<Db, Q, TypedDelete<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+  /** Call a function, like `POST /rpc/name`; its arguments and result come from the signature the catalog carries. */
+  rpc<const Q extends TypedRpc<Db>>(
+    input: Guard<Db, Q, TypedRpc<Db>>,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, QueryData<Db, Q>, CountFrom<Q>>>;
+}
+
+/**
+ * The object {@link TypedQueryInstance.setContextQuery} returns: the instance's operations with the
+ * context decided once, typed by the database.
+ */
+export interface TypedContextQuery<Db extends AnyDatabase> extends TypedOperations<
+  Db,
+  "result",
+  [ctx?: RequestContext]
+> {
   /** Run a call of a prepared query, with this context. */
   run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /** {@link TypedQueryInstance.transaction} with the context read from the source, once, on entry. */
@@ -752,19 +864,13 @@ export interface TypedContextQuery<Db extends AnyDatabase> {
 }
 
 /**
- * The scope `transaction()` hands out, whose `query` is typed by the database, like the instance's own -- minus
- * the context, which a scope decides once, on entry.
+ * The scope `transaction()` hands out, whose operations are typed by the database, like the instance's own -- minus
+ * the context, which a scope decides once, on entry. They **reject** on failure rather than answering an `error`, so
+ * the result is the success: `data` is not null and `count` is the number the query asked for.
+ * The scope catches it, rolls back, and hands it to you as its own `error`.
  */
-export interface TypedTransaction<Db extends AnyDatabase> {
-  /**
-   * Run a query in this transaction. It **rejects** on failure rather than answering an `error`, so
-   * the result is the success: `data` is not null and `count` is the number the query asked for.
-   * The scope catches it, rolls back, and hands it to you as its own `error`.
-   */
-  query<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-  ): Promise<QueryOk<QueryData<Db, Q>, CountFrom<Q>>>;
-  /** Run a call of a prepared query in this transaction. Like `query`, it rejects on failure. */
+export interface TypedTransaction<Db extends AnyDatabase> extends TypedOperations<Db, "ok", []> {
+  /** Run a call of a prepared query in this transaction. Like the operations, it rejects on failure. */
   run<T, C extends number | undefined>(call: Prepared<T, C>): Promise<QueryOk<T, C>>;
   /** A nested scope on a `SAVEPOINT`: it rolls back on its own, leaving this one usable. */
   transaction<A>(fn: (tx: TypedTransaction<Db>) => Promise<A>): Promise<QueryResult<A, undefined>>;
@@ -772,85 +878,57 @@ export interface TypedTransaction<Db extends AnyDatabase> {
   rollback(): never;
 }
 
-export interface TypedQueryInstance<Db extends AnyDatabase> extends Omit<
-  QueryInstance,
-  "query" | "prepare" | "setContextQuery" | "transaction"
-> {
+export interface TypedQueryInstance<Db extends AnyDatabase>
+  extends
+    Omit<
+      QueryInstance,
+      "select" | "insert" | "upsert" | "update" | "delete" | "rpc" | "prepare" | "setContextQuery" | "transaction"
+    >,
+    TypedOperations<Db, "result", [ctx?: RequestContext]> {
   /**
    * Plan a select once and get a function that fills in its values: a call is string concatenation
    * and the statement for the driver, with no parsing or planning. The query is checked against the
-   * database like `query`'s, and the result is typed by it. A call is run with `run`, on the
-   * instance, in a transaction scope (`tx.run`) or on a `setContextQuery` function.
+   * database like `select`'s, and the result is typed by it. A call is run with `run`, on the
+   * instance, in a transaction scope (`tx.run`) or on a `setContextQuery` object.
    *
    * An argument is a **filter value and nothing else**: `build` runs once with a stand-in for each,
    * so it cannot pick a column, an operator or a limit, and cannot branch on an argument. Preparing
-   * throws, at set-up time, for a query that does not follow that, and for anything but a select.
-   * A call whose values change the SQL itself (`null`, a `*` wildcard, a composite) is not an error: it runs the
-   * ordinary way.
+   * throws, at set-up time, for a query that does not follow that. A call whose values change the
+   * SQL itself (`null`, a `*` wildcard, a composite) is not an error: it runs the ordinary way.
    *
    * @example
    * const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
    *   table: "orders",
-   *   select: ["id", "total"],
+   *   columns: ["id", "total"],
    *   where: { status: a.status, total: { $gte: a.min } },
    * }));
    * const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
    */
-  prepare<A extends PreparedArgs, const Q extends TypedQuery<Db>>(
-    build: (
-      args: A,
-    ) => Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
+  prepare<A extends PreparedArgs, const Q extends TypedSelect<Db>>(
+    build: (args: A) => Guard<Db, Q, TypedSelect<Db>>,
   ): (args: A) => Prepared<QueryData<Db, Q>, CountFrom<Q>>;
 
   /**
-   * Run a query, in-process. `table` (or `rpc`) decides what the rest may say: `select`, `where` and
-   * `order` take this relation's columns and the resources a foreign key leads to, `rows` and `set`
-   * its writable columns. `data` is inferred from the `select`, nesting included.
-   *
-   * `ctx` is who is asking -- `{ role, claims, settings }` -- applied with `set_config`, so row
-   * level security and privileges work as they do over HTTP. They are the database's business: no
-   * type here knows what a role may do.
-   *
-   * A failure is part of the result: `error` is a `QueryError` (a `kind`, a `message`, `details`,
-   * `hint` and the SQLSTATE of a database error), and exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and
-   * `count`. It never rejects.
-   *
-   * @example
-   * const { data, error } = await pgRest.query({
-   *   table: "todos",
-   *   select: ["id", "title", { tags: ["label"] }],
-   *   where: { done: false },
-   *   limit: 10,
-   * });
-   * if (error) return c.json({ error: error.message, kind: error.kind }, 400);
-   * // data: Array<{ id: number; title: string; tags: Array<{ label: string }> }>
-   */
-  query<const Q extends TypedQuery<Db>>(
-    input: Q & NoExtraKeys<Q, TypedQuery<Db>> & NoExtraPayload<Db, Q> & NoExtraWhereKeys<Db, Q> & WriteRules<Db, Q>,
-    ctx?: RequestContext,
-  ): Promise<QueryResult<QueryData<Db, Q>, CountFrom<Q>>>;
-
-  /**
-   * {@link TypedQueryInstance.query} with the context decided once -- typically read from an
-   * `AsyncLocalStorage` your middleware entered -- so queries deep in the call stack no longer carry
-   * it. The returned function is typed exactly like `query` minus `ctx`.
+   * The operations with the context decided once -- typically read from an `AsyncLocalStorage` your
+   * middleware entered -- so queries deep in the call stack no longer carry it. They are typed
+   * exactly like the instance's, minus `ctx`.
    *
    * @example
    * const store = new AsyncLocalStorage<RequestContext>();
    * const db = pgRest.setContextQuery(() => store.getStore());
-   * const { data, error } = await db({ table: "todos", select: ["id", "title"] });
+   * const { data, error } = await db.select({ table: "todos", columns: ["id", "title"] });
    * // data: Array<{ id: number; title: string }>
    */
   setContextQuery(source: ContextSource): TypedContextQuery<Db>;
 
   /**
-   * Several queries in one transaction, typed like `query`. The context is applied once for the
-   * whole scope, so `tx.query` takes none; the callback's return value is the result's `data`.
+   * Several queries in one transaction, typed like the instance's. The context is applied once for the
+   * whole scope, so the scope's operations take none; the callback's return value is the result's `data`.
    *
    * @example
    * const { data, error } = await pgRest.transaction(async (tx) => {
-   *   const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Ada" }, single: true });
-   *   await tx.query({ table: "orders", action: "insert", rows: { client_id: client.data.id, total: 10 } });
+   *   const client = await tx.insert({ table: "clients", rows: { name: "Ada" }, single: true });
+   *   await tx.insert({ table: "orders", rows: { client_id: client.data.id, total: 10 } });
    *   return client.data.id;
    * }, { role: "authenticated" });
    * // data: number | null -- null when the scope failed, which `error` is what explains

@@ -32,7 +32,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| `select` columns, `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist. A path on anything other than `json`/`jsonb` -- a composite type, an array, a scalar, or a column whose type is unknown -- goes through `to_jsonb()` first, as PostgREST does; a path ending on an index is named after the last key before it |
+| `select` columns (`columns` in `@tsql/query`), `*`, aliases, `::cast`, JSON `->`/`->>` paths | ✅ | Casts limited to a strict type allowlist. A path on anything other than `json`/`jsonb` -- a composite type, an array, a scalar, or a column whose type is unknown -- goes through `to_jsonb()` first, as PostgREST does; a path ending on an index is named after the last key before it |
 | Horizontal filtering: `eq neq gt gte lt lte like ilike match imatch in is isdistinct cs cd ov sl sr nxl nxr adj` | ✅ | |
 | `not.` negation, `and()` / `or()` (nested) | ✅ | |
 | `any` / `all` quantifiers | ✅ | |
@@ -88,7 +88,7 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | `DELETE` with filters | ✅ | |
 | `limit`/`offset`/`order` on `PATCH`/`DELETE` | ✅ | Ignored, as in PostgREST v16 (`PUT` with limit/offset → `PGRST114`) |
 | `Prefer: max-affected` (`PGRST124`) | ✅ | |
-| Write response `select`, embeds and filters | ✅ | |
+| Write response `select`, embeds and filters | ✅ | `returning: [...]` in `@tsql/query` |
 | Write through updatable views | ✅ | |
 | `Prefer: params=single-object` | ➖ | Removed from PostgREST v16 itself |
 
@@ -133,8 +133,8 @@ pg-rest is a **library**: the HTTP server, JWT and config-file layers of PostgRE
 | Schema cache from `pg_catalog` | ✅ | Tables, views, columns, PK/UK/FK, functions, comments |
 | Domain types, enums, range/array types | 🟡 | Passed through as Postgres returns them; only common types tested |
 | Composite types: reading, writing, `->`/`->>` into their fields | ✅ | The fields are also in the schema cache (`SchemaCache.composites`) and in the generated types |
-| Comparing a whole composite value (`owner=eq.…`) | ➕ | PostgREST answers `0A000` (*input of anonymous composite types is not implemented*) for any such comparison. pg-rest reads a **JSON object** as a row of the column's own type, so `query({ where: { owner: { … } } })` works -- see [`docs/query.md`](docs/query.md#composite-types). A bare row literal still answers `0A000` |
-| `UPDATE … SET column = expression \| DEFAULT` | ➕ | A superset of PostgREST's `PATCH`, in `query()` only (`set: { total: { $add: [{ $col: "total" }, 1] } }`): over HTTP the body is still PostgREST's JSON. See [`docs/query.md`](docs/query.md#computed-values) |
+| Comparing a whole composite value (`owner=eq.…`) | ➕ | PostgREST answers `0A000` (*input of anonymous composite types is not implemented*) for any such comparison. pg-rest reads a **JSON object** as a row of the column's own type, so `select({ table, where: { owner: { … } } })` works -- see [`docs/query.md`](docs/query.md#composite-types). A bare row literal still answers `0A000` |
+| `UPDATE … SET column = expression \| DEFAULT` | ➕ | A superset of PostgREST's `PATCH`, in `@tsql/query` only (`set: { total: { $add: [{ $col: "total" }, 1] } }`): over HTTP the body is still PostgREST's JSON. See [`docs/query.md`](docs/query.md#computed-values) |
 | Hot-reloading on DDL | ➖ | Needs a dedicated `LISTEN` connection (see the README); call `reloadSchema()` after migrations |
 
 ## Verification status

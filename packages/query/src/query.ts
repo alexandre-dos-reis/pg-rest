@@ -243,7 +243,8 @@ export interface NodeFields {
 
 /** An embedded resource, with its own columns, filters, order and paging. */
 export interface Embed extends NodeFields {
-  readonly select?: Select | undefined;
+  /** The columns of the embedded resource, and its own embeds. Defaults to all of them. */
+  readonly columns?: Select | undefined;
   /** Drop parent rows that have no match (`!inner`). */
   readonly inner?: boolean | undefined;
   /** Merge the embedded columns into the parent row (`...rel(*)`). */
@@ -254,13 +255,15 @@ export interface Embed extends NodeFields {
   readonly as?: string | undefined;
 }
 
-/** What a write returns: the affected rows, or nothing. */
-export type QueryReturning = "representation" | "minimal";
+/**
+ * What a write returns: the affected rows (`"representation"`, the default), nothing (`"minimal"`), or
+ * the affected rows with only these columns and embeds -- the `RETURNING` of the statement.
+ */
+export type QueryReturning = "representation" | "minimal" | Select;
 
 interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
-  readonly select?: Select | undefined;
   /** Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
@@ -277,6 +280,8 @@ interface Common extends NodeFields {
 export interface SelectQuery extends Common {
   readonly table: string;
   readonly action?: "select" | undefined;
+  /** The columns to return, and the resources to embed. Defaults to all of them. */
+  readonly columns?: Select | undefined;
 }
 
 /** Insert rows, or upsert them with `action: "upsert"`. */
@@ -308,13 +313,87 @@ export interface DeleteQuery extends Common {
   readonly returning?: QueryReturning | undefined;
 }
 
-/** Call a function, like `POST /rpc/name`. `select`, `where` and `order` apply to its result. */
+/** Call a function, like `POST /rpc/name`. `columns`, `where` and `order` apply to its result. */
 export interface RpcQuery extends Common {
   readonly rpc: string;
   readonly args?: Readonly<Record<string, unknown>> | undefined;
+  readonly columns?: Select | undefined;
 }
 
 export type QueryInput = SelectQuery | InsertQuery | UpdateQuery | DeleteQuery | RpcQuery;
+
+/** What `select` takes: a {@link SelectQuery} minus the `action`, which the method is. */
+export type SelectInput = Omit<SelectQuery, "action">;
+/** What `insert` takes: `rows` and the options of a plain insert (a conflict is `upsert`'s business). */
+export type InsertInput = Omit<InsertQuery, "action" | "onConflict">;
+/** What `upsert` takes: an insert that also names the columns a conflict is resolved on. */
+export type UpsertInput = Omit<InsertQuery, "action">;
+/** What `update` takes: `set`, and `where` for the rows to change. */
+export type UpdateInput = Omit<UpdateQuery, "action">;
+/** What `delete` takes: `where` for the rows to remove. */
+export type DeleteInput = Omit<DeleteQuery, "action">;
+/** What `rpc` takes: the function and its arguments. */
+export type RpcInput = RpcQuery;
+
+/**
+ * What an operation answers with. `"result"` is the promise that never rejects (`data` or `error`);
+ * `"ok"` is a query inside a transaction, which rejects on failure so that its result is the success.
+ */
+export type Settled<Mode extends "result" | "ok", T, C extends number | undefined> = Mode extends "ok"
+  ? QueryOk<T, C>
+  : QueryResult<T, C>;
+
+/**
+ * The six operations, one method each. `Ctx` is what follows the input: a context for an instance
+ * or a `setContextQuery` object, nothing in a transaction, whose context was decided on entry.
+ */
+export interface Operations<Mode extends "result" | "ok", Ctx extends unknown[]> {
+  /** Read rows from a table or view. */
+  select<T = unknown, C extends number | undefined = number | undefined>(
+    input: SelectInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Insert one row or several. */
+  insert<T = unknown, C extends number | undefined = number | undefined>(
+    input: InsertInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Insert, or update the row a conflict is found with (`onConflict`, the primary key by default). */
+  upsert<T = unknown, C extends number | undefined = number | undefined>(
+    input: UpsertInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Change the rows `where` matches. */
+  update<T = unknown, C extends number | undefined = number | undefined>(
+    input: UpdateInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Remove the rows `where` matches. */
+  delete<T = unknown, C extends number | undefined = number | undefined>(
+    input: DeleteInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+  /** Call a function, like `POST /rpc/name`. */
+  rpc<T = unknown, C extends number | undefined = number | undefined>(
+    input: RpcInput,
+    ...ctx: Ctx
+  ): Promise<Settled<Mode, T, C>>;
+}
+
+/**
+ * The six methods over one function that runs a {@link QueryInput}: each fixes the `action` the
+ * method stands for and hands the rest on, so there is one way in to the engine.
+ */
+export const operationsOf = <X extends unknown[], R>(
+  run: (input: QueryInput, ...rest: X) => R,
+): Record<"select" | "insert" | "upsert" | "update" | "delete" | "rpc", (input: never, ...rest: X) => R> => ({
+  select: (input, ...rest) => run({ ...(input as object), action: "select" } as QueryInput, ...rest),
+  insert: (input, ...rest) => run({ ...(input as object), action: "insert" } as QueryInput, ...rest),
+  upsert: (input, ...rest) => run({ ...(input as object), action: "upsert" } as QueryInput, ...rest),
+  update: (input, ...rest) => run({ ...(input as object), action: "update" } as QueryInput, ...rest),
+  delete: (input, ...rest) => run({ ...(input as object), action: "delete" } as QueryInput, ...rest),
+  rpc: (input, ...rest) => run(input as QueryInput, ...rest),
+});
 
 /**
  * What `count` a query gets back from the `count` it asked for. `"exact"` and `"estimated"` always
@@ -758,7 +837,7 @@ const selectOf = (
       continue;
     }
     for (const [relation, spec] of Object.entries(item)) {
-      const embed: Embed = isEmbed(spec) ? spec : { select: spec };
+      const embed: Embed = isEmbed(spec) ? spec : { columns: spec };
       if (embed.spread && embed.as) throw bad(`'${relation}' is spread, so it cannot be renamed`);
       const here = [...path, embed.as ?? relation];
       embeds.push({ node: embed, path: here });
@@ -769,17 +848,29 @@ const selectOf = (
         ...(embed.hint ? { hint: embed.hint } : {}),
         join: embed.inner ? "inner" : "left",
         spread: Boolean(embed.spread),
-        items: selectOf(embed.select ?? ["*"], here, embeds),
+        items: selectOf(embed.columns ?? ["*"], here, embeds),
       });
     }
   }
   return out;
 };
 
+/**
+ * The columns a call asks for: `columns` on a read or a function call, and on a write the list
+ * `returning` may be. (An insert's own `columns` is something else: the columns it inserts.)
+ */
+const columnsOf = (input: QueryInput): Select | undefined => {
+  if (isRpc(input)) return input.columns;
+  if (input.action === undefined || input.action === "select") return (input as SelectQuery).columns;
+  const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
+  return asked === undefined || typeof asked === "string" ? undefined : asked;
+};
+
 /** `input` as the engine's parsed form: what a query string with the same meaning parses to. */
 export const toParsed = (input: QueryInput): ParsedQuery => {
   const embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }> = [];
-  const select: SelectItem[] = input.select?.length ? selectOf(input.select, [], embeds) : [{ kind: "star" }];
+  const listed = columnsOf(input);
+  const select: SelectItem[] = listed?.length ? selectOf(listed, [], embeds) : [{ kind: "star" }];
   const known = new Map<string, string>();
   walkEmbeds(select, [], known);
   const built: Built = { known, nodes: new Map(), root: emptyParams() };
@@ -839,12 +930,13 @@ const writes = (input: QueryInput): boolean => {
 
 /**
  * Unlike HTTP, a write defaults to returning its rows: a function that gives nothing back
- * is of little use in a program. `returning: "minimal"` gives nothing back.
+ * is of little use in a program. `returning: "minimal"` gives nothing back, and a list of columns
+ * gives back the rows with only those.
  */
 const returningOf = (input: QueryInput): "representation" | "minimal" | undefined => {
   if (!writes(input)) return undefined;
   const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
-  return asked ?? "representation";
+  return typeof asked === "string" ? asked : "representation";
 };
 
 const preferencesOf = (input: QueryInput): SqlPreferences => ({
@@ -1155,12 +1247,11 @@ export type ContextSource = RequestContext | (() => RequestContext | undefined |
  * `query` with its context already decided. Passing one anyway overrides the source for that call,
  * which is how an administrative call escapes the ambient context without leaving it.
  *
- * It is callable, and it carries `transaction`: a scope is the other place application code runs a
+ * It carries the six operations and `transaction`: a scope is the other place application code runs a
  * query, and it reads the same source -- once, on entry, because the transaction has one
  * `set_config`.
  */
-export interface ContextQuery {
-  <T = unknown>(input: QueryInput, ctx?: RequestContext): Promise<QueryResult<T>>;
+export interface ContextQuery extends Operations<"result", [ctx?: RequestContext]> {
   /** Run a call of a prepared query, with this context. */
   run<T, C extends number | undefined>(call: Prepared<T, C>, ctx?: RequestContext): Promise<QueryResult<T, C>>;
   /**
@@ -1235,36 +1326,32 @@ export interface TransactionOptions extends RequestContext {
 }
 
 /**
- * One transaction, several queries. `query` is {@link runQuery} minus its context: the role and the
+ * One transaction, several queries. Its operations are the instance's minus the context: the role and the
  * claims were set with `set_config(..., true)` once at the head of the transaction, and re-issuing
  * them halfway through would change the role for every statement that follows instead of scoping
  * anything -- so a context here is a type error rather than an argument quietly ignored.
+ *
+ * What differs from the instance is the failure, and for one reason -- a query that failed is a
+ * transaction that will not commit, so there is nothing for the rest of the callback to do with it.
+ * An operation **rejects** instead of answering an `error`, which is what makes the result the
+ * success: `data` is not null, `count` is the number the query asked for, and nothing has to be
+ * narrowed. `transaction()` catches it, rolls the transaction back and hands it to you as its own
+ * `error`, so the promise that does not reject is still there -- it is the scope's now.
+ *
+ * ```ts ignore
+ * const { data, count } = await tx.select({ table: "todos", columns: ["id"], count: "exact" });
+ * ```
+ *
+ * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint
+ * is the only place a transaction can carry on after one.
  */
-export interface Transaction {
-  /**
-   * Run a query in this transaction: same SQL and the same errors as `query()`. What differs
-   * is the failure, and for one reason -- a query that failed is a transaction that will not
-   * commit, so there is nothing for the rest of the callback to do with it.
-   *
-   * It **rejects** instead of answering an `error`, which is what makes the result the success:
-   * `data` is not null, `count` is the number the query asked for, and nothing has to be narrowed.
-   * `transaction()` catches it, rolls the transaction back and hands it to you as its own `error`,
-   * so the promise that does not reject is still there -- it is the scope's now, not the query's.
-   *
-   * ```ts ignore
-   * const { data, count } = await tx.query({ table: "todos", select: ["id"], count: "exact" });
-   * ```
-   *
-   * To *look* at a failure rather than leave on it, use {@link Transaction.transaction}: a savepoint
-   * is the only place a transaction can carry on after one.
-   */
-  query<T = unknown, C extends number | undefined = number | undefined>(input: QueryInput): Promise<QueryOk<T, C>>;
-  /** Run a call of a prepared query in this transaction. Like `query`, it rejects on failure. */
+export interface Transaction extends Operations<"ok", []> {
+  /** Run a call of a prepared query in this transaction. Like the operations, it rejects on failure. */
   run<T, C extends number | undefined>(call: Prepared<T, C>): Promise<QueryOk<T, C>>;
   /**
    * A nested scope, on a `SAVEPOINT`: it rolls back on its own when it fails, leaving the
    * transaction around it usable. That is how one query is allowed to fail inside a scope -- and
-   * unlike `query`, this answers a {@link QueryResult} rather than rejecting, because here the
+   * unlike an operation, this answers a {@link QueryResult} rather than rejecting, because here the
    * failure is recoverable: the savepoint undid it, and the enclosing scope decides what next.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>): Promise<QueryResult<A, undefined>>;
@@ -1354,7 +1441,7 @@ const runScope = async <A>(
   };
 
   const tx: Transaction = {
-    query: exec,
+    ...(operationsOf((input: QueryInput) => exec(input)) as unknown as Operations<"ok", []>),
     run: exec,
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {

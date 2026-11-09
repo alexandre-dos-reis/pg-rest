@@ -1,6 +1,6 @@
 # Architecture
 
-Two packages, one core. `@tsql/rest`'s `handle()` is the HTTP front door; `@tsql/query`'s `query()` takes an object.
+Two packages, one core. `@tsql/rest`'s `handle()` is the HTTP front door; `@tsql/query`'s operations (`select`, `insert`...) take an object.
 They meet as soon as the query parameters exist and share everything after that — parsing, planning, SQL, the
 transaction, the error mapping — which lives in `packages/core`, a private package that each of the two bundles. A
 feature or a fix in the core lands in both; what is only HTTP (content negotiation, `Range`, OpenAPI, plans) never
@@ -103,7 +103,7 @@ carries a `Sql` prefix (`SqlRequestContext`, `SqlQueryParams`, `SqlCall`, `SqlRe
 7. **Dress it for the transport.** `@tsql/rest` adds what is only HTTP (`Content-Type` from the negotiated format,
    `Vary`), drops the body where HTTP says there is none (`HEAD`, `204`) and makes the `Response`.
 
-`query()` enters at step 2 with the `ParsedQuery` it builds from the object, builds the same plan, runs the same `execute`,
+The operations enter at step 2 with the `ParsedQuery` it builds from the object, builds the same plan, runs the same `execute`,
 and reads the `SqlResult` into `{ data, count, error }`: `count` is its `total`. The HTTP-only
 parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tsql/rest`'s.
 
@@ -120,7 +120,7 @@ whether the function may write), no `Prefer` header (`SqlPreferences` is what th
 unparsed tokens are `rest`'s `Prefer`), and no response: `Outcome`, `appliedHeader` and the `response.*` settings are `rest`'s.
 
 `transaction()` (`packages/query/src/query.ts`) wraps that: it opens the transaction itself, issues the identity once, and runs each
-`tx.query` through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
+`tx`'s operations through the very same steps on the session it holds. A nested scope is a `SAVEPOINT` around the same thing.
 
 ## Where things live
 
@@ -134,7 +134,7 @@ unparsed tokens are `rest`'s `Prefer`), and no response: `Outcome`, `appliedHead
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → status and `PGRSTxxx` table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
-| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `query`, `setContextQuery`, `transaction`, `close` |
+| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `select`, `insert`, `upsert`, `update`, `delete`, `rpc`, `setContextQuery`, `transaction`, `close` |
 | `packages/query/src/query.ts` | the object API: `QueryInput` → `ParsedQuery`, the `SqlCall` (`preRequest`), prepared queries, `QueryError`, and the transaction scope |
 | `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries, and how an engine or database error becomes one |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
@@ -189,7 +189,7 @@ result. Neither is a rejection, and neither package knows the other's mapping.
 They are the kind that break quietly, so each has a test that fails loudly:
 
 - **One pipeline.** A feature must come from the shared code, not from one entry point. `tests/query.test.ts` asserts
-  `query()` and `handle()` answer identically, error bodies included.
+  the operations and `handle()` answer identically, error bodies included.
 - **PostgREST's behaviour is the specification.** `tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
 - **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.

@@ -1,7 +1,7 @@
-# `query()` — asking in-process
+# Queries — asking in-process
 
-`@tsql/query` asks Postgres from inside your process: `query()` takes a plain object and answers a result, with no
-`Request`, no URL and no HTTP status in between. One example per field below; the
+`@tsql/query` asks Postgres from inside your process: `select`, `insert`, `upsert`, `update`, `delete` and `rpc` each take a plain object and answer a result, with no
+`Request`, no URL and no HTTP status in between. The method says what to do (`pgRest.insert({ table, rows })`); there is no `action` to write. One example per field below; the
 options of the instance itself are in [`options.md`](options.md), and the types the examples rely on in
 [`types.md`](types.md).
 
@@ -124,9 +124,9 @@ Without a type argument, the input is loosely typed and you name the result your
 ```ts
 const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const { data } = await pgRest.query<Array<{ id: number; name: string }>>({
+const { data } = await pgRest.select<Array<{ id: number; name: string }>>({
   table: "clients",
-  select: ["id", "name"],
+  columns: ["id", "name"],
 });
 ```
 
@@ -137,7 +137,7 @@ import type { Database } from "./db.generated.ts";
 
 const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
-const { data } = await pgRest.query({ table: "clients", select: ["id", "name"] });
+const { data } = await pgRest.select({ table: "clients", columns: ["id", "name"] });
 // data: Array<{ id: number; name: string }>
 ```
 
@@ -148,50 +148,54 @@ unchanged.
 
 ### Columns
 
+A read names the columns it wants in `columns` (so does `rpc`, and so does an [embed](#embedded-resources) in its long
+form). A write names what it answers with in `returning` instead -- see [Writing](#writing) -- because an insert's own
+`columns` is something else: the columns it inserts.
+
 ```ts
 // all of them
-const all = await pgRest.query({ table: "clients" });
+const all = await pgRest.select({ table: "clients" });
 // all.data: Array<{ id: number; name: string; email: string | null; meta: unknown; tags: string[] | null; created_at: string }>
 
 // some of them, and a renamed one
-const some = await pgRest.query({ table: "clients", select: ["id", "who:name"] });
+const some = await pgRest.select({ table: "clients", columns: ["id", "who:name"] });
 // some.data: Array<{ id: number; who: string }>
 
 // `*` is the whole row, and can sit beside an embed
-const star = await pgRest.query({ table: "profiles", select: ["*"] });
+const star = await pgRest.select({ table: "profiles", columns: ["*"] });
 // star.data: Array<{ client_id: number; bio: string | null }>
 ```
 
 An enum column is a union of its labels, so the compiler knows the three values:
 
 ```ts
-const moods = await pgRest.query({ table: "moods", select: ["mood", "seen"] });
+const moods = await pgRest.select({ table: "moods", columns: ["mood", "seen"] });
 // moods.data: Array<{ mood: "sad" | "ok" | "happy"; seen: Array<"sad" | "ok" | "happy"> | null }>
 ```
 
 ### Embedded resources
 
-A foreign key in either direction, a junction table, or a computed relationship — all of them are a key of `select`:
+A foreign key in either direction, a junction table, or a computed relationship — all of them are a key of `columns`:
 
 ```ts
 // to-one (orders.client_id -> clients): an object, or null when there is no match
-const toOne = await pgRest.query({ table: "orders", select: ["id", { clients: ["name"] }] });
+const toOne = await pgRest.select({ table: "orders", columns: ["id", { clients: ["name"] }] });
 // toOne.data: Array<{ id: number; clients: { name: string } | null }>
 
 // to-many (clients <- orders): an array
-const toMany = await pgRest.query({ table: "clients", select: ["name", { orders: ["total"] }] });
+const toMany = await pgRest.select({ table: "clients", columns: ["name", { orders: ["total"] }] });
 // toMany.data: Array<{ name: string; orders: Array<{ total: number }> }>
 
 // many-to-many, through order_items
-const m2m = await pgRest.query({ table: "orders", select: ["id", { products: ["name"] }] });
+const m2m = await pgRest.select({ table: "orders", columns: ["id", { products: ["name"] }] });
 
 // a computed relationship is addressed by the function's name
-const computed = await pgRest.query({ table: "clients", select: ["name", { recent_orders: ["total"] }] });
+const computed = await pgRest.select({ table: "clients", columns: ["name", { recent_orders: ["total"] }] });
 
 // nested, as deep as you like
-const nested = await pgRest.query({
+const nested = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["id", { order_items: ["qty"] }] } }],
+  columns: ["name", { orders: { columns: ["id", { order_items: ["qty"] }] } }],
 });
 // nested.data: Array<{ name: string; orders: Array<{ id: number; order_items: Array<{ qty: number }> }> }>
 ```
@@ -200,51 +204,51 @@ The long form adds the embed's own filters, order and paging — and four modifi
 
 ```ts
 // `inner` drops the parent rows without a match, so the embed stops being nullable
-const inner = await pgRest.query({
+const inner = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], inner: true } }],
+  columns: ["id", { clients: { columns: ["name"], inner: true } }],
 });
 // inner.data: Array<{ id: number; clients: { name: string } }>
 
 // `as` renames it, in the result and in the type
-const renamed = await pgRest.query({
+const renamed = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { as: "who", select: ["name"] } }],
+  columns: ["id", { clients: { as: "who", columns: ["name"] } }],
 });
 // renamed.data: Array<{ id: number; who: { name: string } | null }>
 
 // `spread` merges the columns into the parent row instead of nesting them
-const spreadOne = await pgRest.query({
+const spreadOne = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], spread: true } }],
+  columns: ["id", { clients: { columns: ["name"], spread: true } }],
 });
 // spreadOne.data: Array<{ id: number; name: string }>
 
 // spreading a to-many turns each column into an array of its values
-const spreadMany = await pgRest.query({
+const spreadMany = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["t:total", "status"], spread: true } }],
+  columns: ["name", { orders: { columns: ["t:total", "status"], spread: true } }],
 });
 // spreadMany.data: Array<{ name: string; t: number[]; status: string[] }>
 
 // a to-one can be addressed by its foreign key column, which is how a self-reference is reached
-const manager = await pgRest.query({
+const manager = await pgRest.select({
   table: "employees",
-  select: ["name", { manager_id: { select: ["name"], as: "manager" } }],
+  columns: ["name", { manager_id: { columns: ["name"], as: "manager" } }],
 });
 // manager.data: Array<{ name: string; manager: { name: string } | null }>
 
 // `hint` names the relationship to follow, which is required when more than one leads to the same
 // resource (the error is `invalid_embed`, and its `details` list them)
-const hinted = await pgRest.query({
+const hinted = await pgRest.select({
   table: "orders",
-  select: ["id", { clients: { select: ["name"], hint: "orders_client_id_fkey" } }],
+  columns: ["id", { clients: { columns: ["name"], hint: "orders_client_id_fkey" } }],
 });
 
 // the embed's own where / order / limit / offset
-const page = await pgRest.query({
+const page = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: { select: ["total"], where: { status: "paid" }, order: ["total.desc"], limit: 3 } }],
+  columns: ["name", { orders: { columns: ["total"], where: { status: "paid" }, order: ["total.desc"], limit: 3 } }],
 });
 ```
 
@@ -253,9 +257,9 @@ belongs to the other resource, so only the shape of the condition is checked the
 which knows its columns:
 
 ```ts
-const dotted = await pgRest.query({
+const dotted = await pgRest.select({
   table: "clients",
-  select: ["name", { orders: ["total"] }],
+  columns: ["name", { orders: ["total"] }],
   where: { "orders.status": "paid", "orders.total": { $gte: 100 } },
 });
 ```
@@ -265,9 +269,9 @@ const dotted = await pgRest.query({
 A plain value means `eq`, `null` means `is.null`, and an object names the operators, each one starting with `$`. Several operators on one column are ANDed:
 
 ```ts
-const filters = await pgRest.query({
+const filters = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: "paid", //                   eq
     total: { $gte: 100, $lt: 500 }, //   several operators, ANDed
@@ -277,9 +281,9 @@ const filters = await pgRest.query({
 });
 
 // null is a NULL test, whichever way you write it
-const nulls = await pgRest.query({
+const nulls = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     meta: null, //                       is.null
     email: { $not: null }, //           not.is.null (same as { $not: { $eq: null } })
@@ -292,9 +296,9 @@ Every operator, by what it works on. A `$` key is an operator; the table at the 
 **Comparison** works on numbers, text, dates, enums and arrays:
 
 ```ts
-const comparison = await pgRest.query({
+const comparison = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: { $neq: "void" }, //            <>
     total: { $gt: 10, $lte: 500 }, //       > and <=, ANDed
@@ -303,9 +307,9 @@ const comparison = await pgRest.query({
   },
 });
 
-const ranged = await pgRest.query({
+const ranged = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: { total: { $gte: 100, $lt: 500 } }, //   100 <= total < 500
 });
 ```
@@ -314,18 +318,18 @@ const ranged = await pgRest.query({
 regular expression:
 
 ```ts
-const text = await pgRest.query({
+const text = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     name: { $like: "A*" }, //                 LIKE 'A%'
     email: { $ilike: "*@EXAMPLE.com" }, //    ILIKE '%@EXAMPLE.com'
   },
 });
 
-const regex = await pgRest.query({
+const regex = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $match: "^A.*a$" }, email: { $imatch: "@example\\.com$" } }, //  ~ and ~*
 });
 ```
@@ -336,9 +340,9 @@ const regex = await pgRest.query({
 ```ts
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const nulls = await pgRest.query({
+const nulls = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     meta: null, //                           IS NULL
     email: { $neq: null }, //                IS NOT NULL
@@ -347,14 +351,14 @@ const nulls = await pgRest.query({
 });
 
 // $isdistinct is a null-safe <>: it never answers NULL
-const distinct = await pgRest.query({
+const distinct = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: { total: { $isdistinct: 0 }, placed_at: { $isdistinct: null } },
 });
 
 // booleans: $is takes true, false, unknown and null
-const flags = await untyped.query({
+const flags = await untyped.select({
   table: "todos",
   where: {
     done: { $is: false }, //                 IS FALSE
@@ -368,15 +372,15 @@ const flags = await untyped.query({
 query; each takes a text, or `{ query, config }`:
 
 ```ts
-const search = await pgRest.query({
+const search = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $fts: "ada & lovelace" } }, //                           to_tsquery
 });
 
-const searches = await pgRest.query({
+const searches = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     name: { $plfts: "ada lovelace" }, //                                    plainto_tsquery
     email: { $phfts: "ada lovelace" }, //                                   phraseto_tsquery
@@ -388,31 +392,31 @@ const searches = await pgRest.query({
 **Arrays** have containment and overlap. To compare a whole array, say so with `$eq`: an array alone is not a condition:
 
 ```ts
-const arrays = await pgRest.query({
+const arrays = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     tags: { $cs: ["vip"] }, //               @>  contains every one of these
   },
 });
 
-const more = await pgRest.query({
+const more = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: {
     tags: { $cd: ["vip", "early", "beta"] }, //   <@  is contained in these
   },
 });
 
-const overlap = await pgRest.query({
+const overlap = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { tags: { $ov: ["vip", "beta"] } }, //   &&  shares at least one
 });
 
-const whole = await pgRest.query({
+const whole = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { tags: { $eq: ["vip", "early"] } }, //  = the whole array, in order
 });
 ```
@@ -423,13 +427,13 @@ too, and the range operators on a range column:
 ```ts
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const json = await pgRest.query({
+const json = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { meta: { $cs: '{"tier":"gold"}' } }, //   @>  the jsonb contains this
 });
 
-const ranges = await untyped.query({
+const ranges = await untyped.select({
   table: "events",
   where: {
     during: { $ov: "[2026-01-01,2026-02-01)" }, //    &&  overlaps
@@ -448,9 +452,9 @@ operator applies to the result. It is available on an instance created without a
 ```ts
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const paths = await untyped.query({
+const paths = await untyped.select({
   table: "venues",
-  select: ["id"],
+  columns: ["id"],
   where: {
     "meta->>tier": { $in: ["gold", "silver"] },
     "owner->home->>city": { $ilike: "ly*" },
@@ -464,9 +468,9 @@ with each value of a list (`LIKE ANY (…)`). For `eq`, `$in` says it already; n
 and `$ov` do the job:
 
 ```ts
-const negated = await pgRest.query({
+const negated = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     status: { $not: { $in: ["paid", "shipped"] } }, //   NOT IN
     client_id: { $not: 2 }, //                            <> 2 (a plain value is an eq)
@@ -474,15 +478,15 @@ const negated = await pgRest.query({
   },
 });
 
-const quantified = await pgRest.query({
+const quantified = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { name: { $any: { $like: ["A*", "B*"] } } }, //   LIKE ANY ('A%', 'B%')
 });
 
-const everyone = await pgRest.query({
+const everyone = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { email: { $all: { $ilike: ["*@example.com", "ada*"] } } }, //   ILIKE ALL
 });
 ```
@@ -491,9 +495,9 @@ const everyone = await pgRest.query({
 on one column, and `$not` inverts the AND of what is inside it:
 
 ```ts
-const logic = await pgRest.query({
+const logic = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     $or: [
       { status: "new" }, //                    status = 'new'
@@ -504,15 +508,15 @@ const logic = await pgRest.query({
 });
 
 // an object cannot repeat a key, so two $like on one column go through $and
-const both = await pgRest.query({
+const both = await pgRest.select({
   table: "clients",
-  select: ["id"],
+  columns: ["id"],
   where: { $and: [{ name: { $like: "A*" } }, { name: { $like: "*a" } }] },
 });
 
-const inverted = await pgRest.query({
+const inverted = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   where: {
     $not: { status: "paid", total: { $gte: 100 } }, //                     NOT (status = 'paid' AND total >= 100)
     $or: [{ client_id: 1 }, { $not: { $or: [{ status: "new" }, { status: "void" }] } }], //   groups nest
@@ -547,9 +551,9 @@ An array is not a condition by itself: write `{ $eq: [...] }` to compare a colum
 ### Order, paging, and one row
 
 ```ts
-const sorted = await pgRest.query({
+const sorted = await pgRest.select({
   table: "orders",
-  select: ["id"],
+  columns: ["id"],
   order: [
     { column: "total", desc: true, nulls: "last" }, // the object form
     "placed_at.asc", //                               or the string form
@@ -560,23 +564,23 @@ const sorted = await pgRest.query({
 });
 
 // `single` gives the object itself -- and a `not_single_row` error when there is not exactly one row
-const one = await pgRest.query({ table: "clients", select: ["name"], where: { id: 1 }, single: true });
+const one = await pgRest.select({ table: "clients", columns: ["name"], where: { id: 1 }, single: true });
 // one.data: { name: string }
 
 // `count` fills `count` with the number of matching rows, ignoring limit/offset
-const counted = await pgRest.query({ table: "orders", select: ["id"], limit: 1, count: "exact" });
+const counted = await pgRest.select({ table: "orders", columns: ["id"], limit: 1, count: "exact" });
 // counted.count: number -- on a typed instance the mode decides the type, so there is nothing to test for
 
 // "planned" asks the planner, which can have no usable number: that one stays optional
-const guessed = await pgRest.query({ table: "orders", select: ["id"], count: "planned" });
+const guessed = await pgRest.select({ table: "orders", columns: ["id"], count: "planned" });
 // guessed.count: number | undefined
 
 // and no `count` asked for is no count at all
-const plain = await pgRest.query({ table: "orders", select: ["id"] });
+const plain = await pgRest.select({ table: "orders", columns: ["id"] });
 // plain.count: undefined
 
 // `stripNulls` leaves the null fields out
-const lean = await pgRest.query({ table: "clients", select: ["name", "meta"], stripNulls: true });
+const lean = await pgRest.select({ table: "clients", columns: ["name", "meta"], stripNulls: true });
 ```
 
 ### Composite types
@@ -588,18 +592,18 @@ against than it looks.
 
 ```ts
 // the whole value, as the object Postgres returns
-const venue = await pgRest.query({
+const venue = await pgRest.select({
   table: "venues",
-  select: ["label", "owner", "branches"],
+  columns: ["label", "owner", "branches"],
   where: { id: 1 },
   single: true,
 });
 // venue.data.owner: { name: string | null; home: { city: string | null; zip: string | null } | null; tags: string[] | null } | null
 
 // filtering by a whole value: the fields may come in any order
-const byOwner = await pgRest.query({
+const byOwner = await pgRest.select({
   table: "venues",
-  select: ["id"],
+  columns: ["id"],
   where: { owner: { name: "Ada", home: { city: "Paris", zip: "75001" }, tags: ["music"] } },
 });
 
@@ -607,14 +611,13 @@ const byOwner = await pgRest.query({
 // NULL. For one field, use its path -- on an instance created without a type argument, like any
 // other JSON path (see "What the typed path does not describe")
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
-const byName = await untyped.query({ table: "venues", select: ["id"], where: { "owner->>name": "Ada" } });
+const byName = await untyped.select({ table: "venues", columns: ["id"], where: { "owner->>name": "Ada" } });
 
 // writing one: the fields left out are NULL
-const placed = await pgRest.query({
+const placed = await pgRest.insert({
   table: "venues",
-  action: "insert",
   rows: { label: "New hall", owner: { name: "Barbara", home: { city: "Brussels" } } },
-  select: ["owner"],
+  returning: ["owner"],
 });
 // placed.data: [{ owner: { name: "Barbara", home: { city: "Brussels", zip: null }, tags: null } }]
 ```
@@ -625,9 +628,9 @@ through an array — because the column is converted with `to_jsonb()` first:
 ```ts
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const fields = await untyped.query({
+const fields = await untyped.select({
   table: "venues",
-  select: ["id", "owner->>name", "owner->home->>city", "city:branches->0->>city"],
+  columns: ["id", "owner->>name", "owner->home->>city", "city:branches->0->>city"],
   where: { "owner->home->>city": "Lyon" },
   order: ["owner->>name.desc"],
 });
@@ -644,74 +647,67 @@ Two things to know:
 
 ## Writing
 
-`action` says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`: a function
-that gives nothing back is of little use in a program.
+The method says what to do. A write returns the rows it touched unless you ask for `returning: "minimal"`: a function
+that gives nothing back is of little use in a program. `returning` also takes a list, the same one `columns` takes on a
+read -- `returning: ["id", "name"]` -- and `data` is typed from it.
 
 ```ts
 // insert one, and get it back
-const created = await pgRest.query({
+const created = await pgRest.insert({
   table: "clients",
-  action: "insert",
   rows: { name: "Hopper", email: "grace@example.com" },
-  select: ["id", "name"],
+  returning: ["id", "name"],
 });
 // created.data: Array<{ id: number; name: string }>
 
 // insert many
-const bulk = await pgRest.query({
+const bulk = await pgRest.insert({
   table: "clients",
-  action: "insert",
   rows: [{ name: "A" }, { name: "B" }],
-  select: ["id"],
+  returning: ["id"],
 });
 
 // only these columns, whatever else the payload carries (and a uniform bulk insert)
-const narrowed = await pgRest.query({
+const narrowed = await pgRest.insert({
   table: "clients",
-  action: "insert",
   rows: { name: "C", email: "c@example.com" },
   columns: ["name"],
 });
 
 // a column missing from `rows` takes its DEFAULT; `missing: "null"` makes it null instead
-const defaults = await pgRest.query({
+const defaults = await pgRest.insert({
   table: "orders",
-  action: "insert",
   rows: [{ client_id: 1 }, { client_id: 2, status: "paid" }],
   missing: "null",
 });
 
 // upsert: on a conflict, update instead -- on the primary key by default
-const upserted = await pgRest.query({
+const upserted = await pgRest.upsert({
   table: "products",
-  action: "upsert",
   rows: { id: 1, name: "Keyboard mk2", price: 130 },
   onConflict: ["id"],
-  select: ["name"],
+  returning: ["name"],
 });
 
 // update the rows `where` matches
-const patched = await pgRest.query({
+const patched = await pgRest.update({
   table: "orders",
-  action: "update",
   set: { status: "shipped" },
   where: { status: "paid" },
-  select: ["id", "status"],
+  returning: ["id", "status"],
 });
 
 // delete, and say nothing back
-const deleted = await pgRest.query({
+const deleted = await pgRest.delete({
   table: "orders",
-  action: "delete",
   where: { id: 99 },
   returning: "minimal",
 });
 // deleted.data: null
 
 // refuse the whole thing if it would touch too many rows (the transaction rolls back)
-const careful = await pgRest.query({
+const careful = await pgRest.update({
   table: "orders",
-  action: "update",
   set: { status: "x" },
   where: { status: "paid" },
   maxAffected: 1,
@@ -723,19 +719,19 @@ default or a nullable one is optional, and a relation that cannot be written at 
 
 ```ts
 // @ts-expect-error `name` is NOT NULL and has no default
-void pgRest.query({ table: "clients", action: "insert", rows: {} });
+void pgRest.insert({ table: "clients", rows: { } });
 
 // @ts-expect-error `moods.id` is GENERATED ALWAYS AS IDENTITY: Postgres refuses a value for it
-void pgRest.query({ table: "moods", action: "insert", rows: { id: 42, mood: "ok" } });
+void pgRest.insert({ table: "moods", rows: { id: 42, mood: "ok" } });
 
 // @ts-expect-error client_totals is an aggregate view: nothing can be written to it
-void pgRest.query({ table: "client_totals", action: "insert", rows: { client_id: 1 } });
+void pgRest.insert({ table: "client_totals", rows: { client_id: 1 } });
 
 // @ts-expect-error an insert needs its rows
-void pgRest.query({ table: "clients", action: "insert" });
+void pgRest.insert({ table: "clients", });
 
 // @ts-expect-error and a read has no business with them
-void pgRest.query({ table: "clients", rows: { name: "x" } });
+void pgRest.select({ table: "clients", rows: { name: "x" } });
 ```
 
 ### Computed values
@@ -747,16 +743,15 @@ A plain value is still a plain value. An object whose keys all start with `$` is
 so every operator starts with `$`, like the filters:
 
 ```ts
-const computed = await pgRest.query({
+const computed = await pgRest.update({
   table: "orders",
-  action: "update",
   set: {
     status: "paid", //                                      a plain value, as before
     total: { $add: [{ $col: "total" }, 10] }, //            total = total + 10
     placed_at: { $default: true }, //                       = DEFAULT
   },
   where: { id: 1 },
-  select: ["id", "status", "total"],
+  returning: ["id", "status", "total"],
 });
 ```
 
@@ -768,18 +763,16 @@ nothing else: PostgreSQL's `(a, b) = ROW(x, y)` is `a = x, b = y`.
 unary minus.
 
 ```ts
-const arithmetic = await pgRest.query({
+const arithmetic = await pgRest.update({
   table: "orders",
-  action: "update",
   set: {
     total: { $add: [{ $col: "total" }, 10, { $neg: 2 }] }, //                    total + 10 + (-2)
   },
   where: { id: 1 },
 });
 
-const more = await pgRest.query({
+const more = await pgRest.update({
   table: "orders",
-  action: "update",
   set: {
     total: { $div: [{ $mul: [{ $col: "total" }, 3] }, 2] }, //                   (total * 3) / 2
     client_id: { $mod: [{ $add: [{ $col: "client_id" }, 1] }, 5] }, //           (client_id + 1) % 5
@@ -787,9 +780,8 @@ const more = await pgRest.query({
   where: { id: 2 },
 });
 
-const power = await pgRest.query({
+const power = await pgRest.update({
   table: "products",
-  action: "update",
   set: { price: { $pow: [{ $col: "price" }, 2] } }, //                           price ^ 2
   where: { id: 1 },
 });
@@ -800,39 +792,35 @@ merges `jsonb`. `$sub` on a `jsonb` removes a key. A bare string next to an arra
 PostgreSQL, so an element is written `{ $val: ["x"] }`:
 
 ```ts
-const text = await pgRest.query({
+const text = await pgRest.update({
   table: "clients",
-  action: "update",
   set: { name: { $concat: ["Dr. ", { $col: "name" }, "!"] } }, //               'Dr. ' || name || '!'
   where: { id: 1 },
 });
 
-const array = await pgRest.query({
+const array = await pgRest.update({
   table: "clients",
-  action: "update",
   set: { tags: { $concat: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, { $val: ["vip"] }] } }, //   append, from NULL too
   where: { id: 1 },
 });
 
-const json = await pgRest.query({
+const json = await pgRest.update({
   table: "clients",
-  action: "update",
   set: {
     meta: { $concat: [{ $coalesce: [{ $col: "meta" }, { $val: {} }] }, { $val: { seen: true } }] }, //   jsonb merge
   },
   where: { id: 1 },
 });
 
-const removed = await pgRest.query({
+const removed = await pgRest.update({
   table: "clients",
-  action: "update",
   set: { meta: { $sub: [{ $col: "meta" }, "seen"] } }, //                         meta - 'seen'
   where: { id: 1 },
 });
 ```
 
 **Functions**: `$coalesce`, `$greatest` and `$least` take a list; `$cast` takes an expression and a type, from the same
-allowlist as a `select` cast. The other functions are a fixed list too, and a name is never taken from the input:
+allowlist as a column cast. The other functions are a fixed list too, and a name is never taken from the input:
 
 | function                                  | SQL                                    | on          |
 | ----------------------------------------- | -------------------------------------- | ----------- |
@@ -845,9 +833,8 @@ allowlist as a `select` cast. The other functions are a fixed list too, and a na
 | `{ $arrayRemove: [array, element] }`      | `array_remove(array, element)`         | arrays      |
 
 ```ts
-const stamped = await pgRest.query({
+const stamped = await pgRest.update({
   table: "clients",
-  action: "update",
   set: {
     name: { $upper: { $trim: { $col: "name" } } }, //                           upper(btrim(name))
     created_at: { $now: true }, //                                               now()
@@ -855,32 +842,28 @@ const stamped = await pgRest.query({
   where: { id: 1 },
 });
 
-const rounded = await pgRest.query({
+const rounded = await pgRest.update({
   table: "orders",
-  action: "update",
   set: { total: { $round: [{ $mul: [{ $col: "total" }, 1.2] }, 2] } }, //        round(total * 1.2, 2)
   where: { id: 1 },
 });
 
-const tagged = await pgRest.query({
+const tagged = await pgRest.update({
   table: "clients",
-  action: "update",
   set: { tags: { $arrayAppend: [{ $coalesce: [{ $col: "tags" }, { $val: [] }] }, "vip"] } }, //   array_append(…, 'vip')
   where: { id: 1 },
 });
 
-const untagged = await pgRest.query({
+const untagged = await pgRest.update({
   table: "clients",
-  action: "update",
   set: { tags: { $arrayRemove: [{ $col: "tags" }, "vip"] } }, //                  array_remove(tags, 'vip')
   where: { id: 1 },
 });
 ```
 
 ```ts
-const functions = await pgRest.query({
+const functions = await pgRest.update({
   table: "orders",
-  action: "update",
   set: {
     total: { $greatest: [{ $col: "total" }, 0] }, //                             never below 0
     status: { $coalesce: [{ $cast: [{ $col: "client_id" }, "text"] }, "none"] }, //   COALESCE(client_id::text, 'none')
@@ -888,9 +871,8 @@ const functions = await pgRest.query({
   where: { id: 1 },
 });
 
-const capped = await pgRest.query({
+const capped = await pgRest.update({
   table: "orders",
-  action: "update",
   set: { total: { $least: [{ $mul: [{ $col: "total" }, 2] }, 1000] } }, //       at most 1000
   where: { id: 1 },
 });
@@ -902,9 +884,8 @@ const capped = await pgRest.query({
 ```ts
 const untyped = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const booleans = await untyped.query({
+const booleans = await untyped.update({
   table: "todos",
-  action: "update",
   set: {
     done: { $not: { $col: "done" } }, //                                                 done = NOT done
     urgent: { $and: [{ $gt: [{ $col: "priority" }, 3] }, { $lte: [{ $col: "due", }, { $val: "2026-12-31" }] }] }, //   priority > 3 AND due <= '2026-12-31'
@@ -919,9 +900,8 @@ const booleans = await untyped.query({
 and an expression can share one update:
 
 ```ts
-const reset = await pgRest.query({
+const reset = await pgRest.update({
   table: "orders",
-  action: "update",
   set: {
     status: { $default: true }, //                           status = DEFAULT
     total: { $default: true }, //                            total = DEFAULT
@@ -943,7 +923,7 @@ const reset = await pgRest.query({
 | `$coalesce` `$greatest` `$least`                       | the functions of the same name                         |
 | `$lower` `$upper` `$trim` `$length` `$abs` `$round`    | the functions, see above                               |
 | `$now` `$arrayAppend` `$arrayRemove`                   | `now()`, `array_append`, `array_remove`                |
-| `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a `select` cast        |
+| `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a column cast        |
 | `{ $default: true }`                                   | `DEFAULT`, as a whole assignment                       |
 
 Nothing is raw SQL: a column is checked against the schema, a type against an allowlist, a value is escaped, and an
@@ -956,13 +936,13 @@ cannot tell more about (`jsonb`, ranges) takes any expression, and so does `$cas
 
 ```ts
 // @ts-expect-error `nope` is not a column of orders
-void pgRest.query({ table: "orders", action: "update", set: { nope: { $add: [1, 2] } } });
+void pgRest.update({ table: "orders", set: { nope: { $add: [1, 2] } } });
 
 // @ts-expect-error `total` is a number, `$lower` gives text
-void pgRest.query({ table: "orders", action: "update", set: { total: { $lower: { $col: "status" } } } });
+void pgRest.update({ table: "orders", set: { total: { $lower: { $col: "status" } } } });
 
 // @ts-expect-error `$col: "status"` is text, `$add` takes numbers here
-void pgRest.query({ table: "orders", action: "update", set: { total: { $add: [{ $col: "status" }, 1] } } });
+void pgRest.update({ table: "orders", set: { total: { $add: [{ $col: "status" }, 1] } } });
 ```
 
 ## Calling a function
@@ -971,23 +951,23 @@ void pgRest.query({ table: "orders", action: "update", set: { total: { $add: [{ 
 
 ```ts
 // a scalar
-const sum = await pgRest.query({ rpc: "add", args: { a: 2, b: 3 } });
+const sum = await pgRest.rpc({ rpc: "add", args: { a: 2, b: 3 } });
 // sum.data: number
 
 // a parameter with a DEFAULT is optional
-const hello = await pgRest.query({ rpc: "greet" });
-const hi = await pgRest.query({ rpc: "greet", args: { name: "Ada" } });
+const hello = await pgRest.rpc({ rpc: "greet" });
+const hi = await pgRest.rpc({ rpc: "greet", args: { name: "Ada" } });
 // hello.data: string
 
 // void gives null
-const nothing = await pgRest.query({ rpc: "nothing" });
+const nothing = await pgRest.rpc({ rpc: "nothing" });
 // nothing.data: null
 
-// a set-returning function answers with rows, and takes the same select/where/order as a table
-const paid = await pgRest.query({
+// a set-returning function answers with rows, and takes the same columns/where/order as a table
+const paid = await pgRest.rpc({
   rpc: "orders_by_status",
   args: { s: "paid" },
-  select: ["id", "total"],
+  columns: ["id", "total"],
   where: { total: { $gte: 100 } },
   order: ["total.desc"],
   limit: 5,
@@ -995,23 +975,23 @@ const paid = await pgRest.query({
 // paid.data: Array<{ id: number; total: number }>
 
 // an overloaded function takes either signature
-const asInt = await pgRest.query({ rpc: "ovl", args: { a: 1 } });
-const asText = await pgRest.query({ rpc: "ovl", args: { a: "one" } });
+const asInt = await pgRest.rpc({ rpc: "ovl", args: { a: 1 } });
+const asText = await pgRest.rpc({ rpc: "ovl", args: { a: "one" } });
 ```
 
 ```ts
 // @ts-expect-error that function does not exist
-void pgRest.query({ rpc: "nope" });
+void pgRest.rpc({ rpc: "nope" });
 
 // @ts-expect-error `a` is an integer
-void pgRest.query({ rpc: "add", args: { a: "two", b: 3 } });
+void pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } });
 
-// @ts-expect-error a scalar function has no columns to select
-void pgRest.query({ rpc: "greet", select: ["anything"] });
+// @ts-expect-error a scalar function has no columns to ask for
+void pgRest.rpc({ rpc: "greet", columns: ["anything"] });
 ```
 
 A function declared `RETURNS TABLE(…)` is the one gap: the catalog does not carry its output columns, and neither does
-the request path, so its result is `Record<string, unknown>` and any `select` is accepted.
+the request path, so its result is `Record<string, unknown>` and any `columns` is accepted.
 
 ## Who is asking
 
@@ -1022,13 +1002,13 @@ privileges apply to the query as they would to any session of that role:
 const ctx = { role: "authenticated", claims: { sub: user.id, email: user.email } };
 
 // the row's `owner` defaults to claims.sub, and the policy only lets the owner write
-await pgRest.query({ table: "notes", action: "insert", rows: { body: "mine" } }, ctx);
+await pgRest.insert({ table: "notes", rows: { body: "mine" } }, ctx);
 
 // the same query as somebody else returns nothing: the policy filtered it out
-const mine = await pgRest.query({ table: "notes", select: ["body"] }, ctx);
+const mine = await pgRest.select({ table: "notes", columns: ["body"] }, ctx);
 
 // extra settings reach SQL as current_setting('app.tenant')
-await pgRest.query({ table: "notes", select: ["id"] }, { ...ctx, settings: { "app.tenant": "acme" } });
+await pgRest.select({ table: "notes", columns: ["id"] }, { ...ctx, settings: { "app.tenant": "acme" } });
 ```
 
 Without a context the query runs as the anonymous role (`anon` by default, `anonymousRole: false` to refuse it
@@ -1040,7 +1020,7 @@ type can express — so privileges stay where they are enforced.
 ### Binding it once
 
 Threading `ctx` through every layer that happens to run a query is noise. `setContextQuery(source)` returns the same
-`query`, typed the same way, with the context already decided -- `source` being either a fixed context or a function
+operations, typed the same way, with the context already decided -- `source` being either a fixed context or a function
 called at _every_ call, which is what makes an `AsyncLocalStorage` work:
 
 ```ts
@@ -1056,7 +1036,7 @@ app.use(async (c, next) => {
 });
 
 // anywhere below, however deep, with no ctx to pass
-const { data, error } = await pgQuery({ table: "notes", select: ["body"] });
+const { data, error } = await pgQuery.select({ table: "notes", columns: ["body"] });
 ```
 
 ```ts ignore
@@ -1077,15 +1057,15 @@ Two rules, and the second is the reason this is safe to reach for:
 const db = pgRest.setContextQuery(() => store.getStore());
 
 // a context passed to the call wins over the source: one administrative query without leaving the scope
-await db({ table: "notes", select: ["id"] }, { role: "admin" });
+await db.select({ table: "notes", columns: ["id"] }, { role: "admin" });
 
 // a source that gives nothing -- the store was never entered -- is an error, not the anonymous role
-const forgotten = await db({ table: "notes" });
+const forgotten = await db.select({ table: "notes" });
 forgotten.error?.kind; // "no_context"
 ```
 
 Falling back to `anon` there would turn a missing middleware into a silent change of privileges, which is the kind of
-bug that reads as "empty result" in development and as an incident in production. Like `query()`, a bound query never
+bug that reads as "empty result" in development and as an incident in production. Like the instance's operations, a bound one never
 rejects: a `source` that throws comes back as a 500 `error` carrying the original under `cause`.
 
 Use `store.run(ctx, …)`, not `store.enterWith(ctx)`: `run` is bounded by its callback, `enterWith` leaks the context
@@ -1101,22 +1081,29 @@ once and gives back a function of the values; a call of it is run with `run()`:
 ```ts
 const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
   table: "orders",
-  select: ["id", "total", { clients: ["name"] }],
+  columns: ["id", "total", { clients: ["name"] }],
   where: { status: a.status, total: { $gte: a.min } },
   order: ["id"],
 }));
 
 const { data, error } = await pgRest.run(paidOver({ status: "paid", min: 100 }), ctx);
-// data: the rows, typed by the select
+// data: the rows, typed by the columns
 ```
 
 The query is checked against the database when it is written, like any other, and `data` is typed by it. A call is
 string concatenation and the statement for the driver: no parsing, no planning. What remains is the database.
 
 `run()` is on the instance, on a [`setContextQuery`](#binding-it-once) function, and as `tx.run()` in a
-[transaction](#transactions), where it rejects on failure like `tx.query()`:
+[transaction](#transactions), where it rejects on failure like the scope's operations:
 
 ```ts
+// the same kind of prepared query as above
+const paidOver = pgRest.prepare((a: { status: string; min: number }) => ({
+  table: "orders",
+  columns: ["id", "total"],
+  where: { status: a.status, total: { $gte: a.min } },
+}));
+
 const inScope = await pgRest.transaction(async (tx) => (await tx.run(paidOver({ status: "new", min: 0 }))).data, ctx);
 ```
 
@@ -1133,21 +1120,19 @@ ordinary way, with the same result, at the cost of the saving.
 ## Transactions
 
 Every call opens its own transaction, which is right for a request — one request, one transaction, the role and the
-claims set with `set_config` inside it — and is the whole story for `handle()`. But `query()` is called from
+claims set with `set_config` inside it — and is the whole story for `handle()`. But the operations are called from
 application code, where two writes that must land together are ordinary. `transaction()` is one scope, one transaction:
 
 ```ts
 const { data, error } = await pgRest.transaction(async (tx) => {
-  const order = await tx.query({
+  const order = await tx.insert({
     table: "orders",
-    action: "insert",
     rows: { client_id: 1, total: 42 },
     single: true,
   });
 
-  await tx.query({
+  await tx.insert({
     table: "order_items",
-    action: "insert",
     rows: [{ order_id: order.data.id, product_id: 1, qty: 2 }],
   });
 
@@ -1159,15 +1144,15 @@ data; //          number | null
 ```
 
 The result is a `QueryResult` around whatever the callback returned: `data` is that value, and there is no `count`.
-A failure comes back the way `query()`'s does — a `QueryError` if it was one, an `internal` one carrying the
+A failure comes back the way an operation's does — a `QueryError` if it was one, an `internal` one carrying the
 original under `cause` if it was anything else.
 
-**`tx.query` differs from `query` in exactly two ways**, and both of them follow from sharing a transaction.
+**A scope's operations differ from the instance's in exactly two ways**, and both of them follow from sharing a transaction.
 
 **It takes no context, and cannot.** The role and the claims are set with `set_config(…, true)`, which is
 transaction-local and issued once at the head of the transaction; honouring a per-call context would mean issuing
 `set_config` again halfway through, which scopes nothing — it changes the role for every statement that follows, in row
-order, with no way back. So a context passed to `tx.query` is a type error rather than an argument quietly ignored.
+order, with no way back. So a context passed to a scope's operation is a type error rather than an argument quietly ignored.
 Another role means another transaction.
 
 **It rejects on failure instead of answering an `error`** — which is why nothing is narrowed above. A query that failed
@@ -1177,9 +1162,9 @@ therefore the *success*: `data` is not null and `count` is the number the query 
 
 ```ts
 const { data, count } = await pgRest.transaction(async (tx) => {
-  const { data: rows, count: total } = await tx.query({
+  const { data: rows, count: total } = await tx.select({
     table: "clients",
-    select: ["id", "name"],
+    columns: ["id", "name"],
     count: "exact",
     limit: 10,
   });
@@ -1190,8 +1175,8 @@ const { data, count } = await pgRest.transaction(async (tx) => {
 ```
 
 The promise that never rejects did not disappear; it moved from the query to the **scope**, which is the only place it
-can mean anything now that several of them share a transaction. What `tx.query` throws is the same `QueryError`
-`query()` would have returned, so a `catch` can read it — and the section below is about why you rarely want to.
+can mean anything now that several of them share a transaction. What a scope's operation throws is the same `QueryError`
+the instance's would have returned, so a `catch` can read it — and the section below is about why you rarely want to.
 
 What the context does _not_ cover is per-statement: the `search_path` and the
 `timezone` are issued with every query inside the scope, which is what lets two queries of one transaction name two
@@ -1202,21 +1187,21 @@ schemas.
 ```ts
 // 1. a failed query -- it leaves the scope, and the write before it is undone with it
 const refused = await pgRest.transaction(async (tx) => {
-  await tx.query({ table: "clients", action: "insert", rows: { name: "Ada", email: "a@b.c" } });
-  await tx.query({ table: "clients", action: "insert", rows: { name: "Dup", email: "a@b.c" } });
+  await tx.insert({ table: "clients", rows: { name: "Ada", email: "a@b.c" } });
+  await tx.insert({ table: "clients", rows: { name: "Dup", email: "a@b.c" } });
   return "unreachable"; //                       the second insert collides, so this is never reached
 }, ctx);
 refused.error?.sqlState; // "23505" -- the query's own failure, carried out of the scope
 
 // 2. a throw of your own, for a reason the database knows nothing about
 await pgRest.transaction(async (tx) => {
-  await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
+  await tx.insert({ table: "notes", rows: { body: "gone" } });
   throw new Error("changed my mind");
 }, ctx);
 
 // 3. rollback(), when nothing went wrong and you still do not want it
 const left = await pgRest.transaction(async (tx) => {
-  await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
+  await tx.insert({ table: "notes", rows: { body: "gone" } });
   tx.rollback();
 }, ctx);
 left.error?.kind; // "rolled_back"
@@ -1230,9 +1215,9 @@ the scope from committing**, even if you caught what it threw and carried on:
 
 ```ts
 const kept = await pgRest.transaction(async (tx) => {
-  await tx.query({ table: "notes", action: "insert", rows: { body: "gone" } });
+  await tx.insert({ table: "notes", rows: { body: "gone" } });
   try {
-    await tx.query({ table: "notes", where: { body: "nobody" }, single: true });
+    await tx.select({ table: "notes", where: { body: "nobody" }, single: true });
   } catch {
     return "committed anyway?"; //                 a value, from a callback that swallowed a failure
   }
@@ -1254,11 +1239,11 @@ nested scope is where an `error` is a thing you can read and decide about:
 
 ```ts
 await pgRest.transaction(async (tx) => {
-  const client = await tx.query({ table: "clients", action: "insert", rows: { name: "Ada" }, single: true });
+  const client = await tx.insert({ table: "clients", rows: { name: "Ada" }, single: true });
 
   // the profile is optional: if it collides, the client still stands
   const profile = await tx.transaction((nested) =>
-    nested.query({ table: "profiles", action: "insert", rows: { client_id: client.data.id, bio: "hi" } }),
+    nested.insert({ table: "profiles", rows: { client_id: client.data.id, bio: "hi" } }),
   );
   profile.error?.sqlState; //  "23505" perhaps -- and the scope is still good
 
@@ -1277,20 +1262,20 @@ first:
 
 ```ts
 // READ ONLY for all of it: a write inside is refused by PostgreSQL (25006 -> 405)
-await pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   readOnly: true,
 });
 
 // the isolation level, as PostgreSQL spells it. Both go in one `SET TRANSACTION`, first thing
-await pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   isolationLevel: "serializable",
   readOnly: true,
 });
 
 // replaying a serialization failure means replaying *your callback*, so it is asked for
-await pgRest.transaction(async (tx) => tx.query({ table: "clients", select: ["id"] }), {
+await pgRest.transaction(async (tx) => tx.select({ table: "clients", columns: ["id"] }), {
   ...ctx,
   isolationLevel: "serializable",
   retry: {
@@ -1306,7 +1291,7 @@ setting. `"read uncommitted"` is deliberately absent: PostgreSQL accepts it and 
 would be a synonym pretending to be a level. The other two are where a concurrent write can abort the transaction with
 a serialization failure — which is what the third option is for.
 
-A single `query()` retries `40001` twice on its own, because pg-rest owns that transaction and nothing else happened
+A single operation retries `40001` twice on its own, because pg-rest owns that transaction and nothing else happened
 inside it. A scope cannot assume as much: what else your callback does — a counter, an email, a write through another
 driver — is not the library's to repeat. Hence off by default, and `attempts` in plain sight when it is not. The two go
 together: asking for `serializable` without deciding what a `40001` means is asking for an error you have not planned
@@ -1319,17 +1304,13 @@ source answering differently halfway through could not be honoured anyway. A sou
 ```ts
 const pgQuery = pgRest.setContextQuery(() => store.getStore());
 
-await pgQuery.transaction(async (tx) => tx.query({ table: "notes", action: "insert", rows: { body: "mine" } }));
+await pgQuery.transaction(async (tx) => tx.insert({ table: "notes", rows: { body: "mine" } }));
 
 // `readOnly`, `isolationLevel` and `retry` alone leave the ambient context in place; naming a role
 // replaces it for the whole scope, which is the per-call override moved to the granularity
 // set_config works at
-await pgQuery.transaction(async (tx) => tx.query({ table: "notes", select: ["id"] }), { role: "admin" });
+await pgQuery.transaction(async (tx) => tx.select({ table: "notes", columns: ["id"] }), { role: "admin" });
 ```
-
-One asymmetry is left on purpose: the bound query is callable (`pgQuery(input)`) while the scope is an object
-(`tx.query(input)`). The callable form is what is documented and in use, and an object is what lets a scope name a
-second thing — `transaction`, `rollback` — without changing a signature again.
 
 What a scope is not is a transaction **your** application opened: here pg-rest owns the `BEGIN`, the `COMMIT` and the
 `ROLLBACK`, and lends a session to your callback. Running a pg-rest query inside a `sql.begin` of your own is the other
@@ -1342,12 +1323,12 @@ between two accounts, the caller read from an `AsyncLocalStorage`, and one scope
 
 ## Errors
 
-`query()` never rejects: a failure is part of the result, as an `error` carrying what went wrong and the input that
+An operation never rejects: a failure is part of the result, as an `error` carrying what went wrong and the input that
 produced it. Exactly one of `data` and `error` is set, so `if (error)` narrows both `data` and `count`.
 
 ```ts
-const { data, count, error } = await pgRest.query(
-  { table: "clients", action: "insert", rows: { name: "Dup", email: "ada@example.com" } },
+const { data, count, error } = await pgRest.insert(
+  { table: "clients", rows: { name: "Dup", email: "ada@example.com" } },
   ctx,
 );
 if (error) {
@@ -1366,7 +1347,7 @@ if (error) {
 
 `error` is a `QueryError`, an `Error`: throw it, log it, or read its fields. Even a failure the library did not foresee
 arrives this way -- an `internal` one carrying the original under `cause` -- so no `try`/`catch` is needed anywhere.
-There is no HTTP status on it: `query()` has no response, and what to answer is for the caller to decide from the
+There is no HTTP status on it: an operation has no response, and what to answer is for the caller to decide from the
 `kind`.
 
 `error.summary` is the same failure written out for whoever reads it: the call it came from, then what the database or
@@ -1390,8 +1371,8 @@ compiler rather than by a table of codes you keep yourself. For a database error
 
 ```ts
 const addClient = async (name: string, email: string) => {
-  const { data, error } = await pgRest.query(
-    { table: "clients", action: "insert", rows: { name, email }, single: true },
+  const { data, error } = await pgRest.insert(
+    { table: "clients", rows: { name, email }, single: true },
     ctx,
   );
   if (!error) return { ok: true as const, client: data };
@@ -1422,7 +1403,7 @@ Every kind, and what it means:
 
 | `kind`              | when                                                                                                                                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `select` or `order`, a filter on a resource that is not embedded |
+| `invalid_query`     | the query itself does not make sense: unknown operator, unparseable `columns` or `order`, a filter on a resource that is not embedded |
 | `invalid_payload`   | the `rows` or the `set` do not fit the table: a column that does not exist, keys that differ between rows, nothing to write          |
 | `undefined_object`  | no table, view or function by that name — a typo (read the `hint`), or a migration the generated schema has not seen                 |
 | `invalid_embed`     | no relationship between two resources, or more than one, which needs a `hint`                                                        |
@@ -1433,7 +1414,7 @@ Every kind, and what it means:
 | `conflict`          | a unique or foreign key constraint rejected the row                                                                                  |
 | `invalid_data`      | the values themselves were refused: a check constraint, a `NOT NULL`, a failed cast                                                  |
 | `raised`            | your own `RAISE` in SQL, with the message you wrote                                                                                  |
-| `unsupported`       | not implemented, or not over `query()`                                                                                               |
+| `unsupported`       | not implemented, or not over the in-process operations                                                                                               |
 | `unavailable`       | the database could not be reached, is out of connections, or timed out — retrying may work                                           |
 | `no_context`        | the `source` of a bound query returned nothing (see [Binding it once](#binding-it-once))                                             |
 | `rolled_back`       | a transaction scope will not commit: `rollback()` was called, or a query in it already failed                                        |
@@ -1445,25 +1426,25 @@ error. `describeErrorKind(kind)` gives a kind's wording, for a log line.
 
 ## What the typed path does not describe
 
-Three string forms of a `select` change or invent a column, and reading them back out of a string literal would cost
+Three string forms of a column change or invent a column, and reading them back out of a string literal would cost
 more than it gives. A JSON path in a `where` is the exception, because a filter does not change the result: it is
 accepted on its column, with a value checked no further than its shape.
 
 ```ts
 // @ts-expect-error a cast
-void pgRest.query({ table: "orders", select: ["total::text"] });
+void pgRest.select({ table: "orders", columns: ["total::text"] });
 
-// @ts-expect-error a JSON path, in a select
-void pgRest.query({ table: "clients", select: ["tier:meta->>tier"] });
+// @ts-expect-error a JSON path, in `columns`
+void pgRest.select({ table: "clients", columns: ["tier:meta->>tier"] });
 
 // a JSON path in a filter is fine: it names a column, and the column is checked
-void pgRest.query({ table: "clients", select: ["id"], where: { "meta->>tier": { $ilike: "go*" } } });
+void pgRest.select({ table: "clients", columns: ["id"], where: { "meta->>tier": { $ilike: "go*" } } });
 
 // @ts-expect-error ... but not on a column that does not exist
-void pgRest.query({ table: "clients", select: ["id"], where: { "nope->>tier": "gold" } });
+void pgRest.select({ table: "clients", columns: ["id"], where: { "nope->>tier": "gold" } });
 
 // @ts-expect-error an aggregate
-void pgRest.query({ table: "orders", select: ["status", "total.sum()"] });
+void pgRest.select({ table: "orders", columns: ["status", "total.sum()"] });
 ```
 
 They work on an instance created without a type argument, where the input is loose:
@@ -1471,9 +1452,9 @@ They work on an instance created without a type argument, where the input is loo
 ```ts
 const loose = createQuery({ db: nodePostgresAdapter(pool), schema });
 
-const { data } = await loose.query<Array<{ status: string; sum: number }>>({
+const { data } = await loose.select<Array<{ status: string; sum: number }>>({
   table: "orders",
-  select: ["status", "total.sum()"],
+  columns: ["status", "total.sum()"],
   order: ["status"],
 });
 ```
@@ -1485,8 +1466,7 @@ const { data } = await loose.query<Array<{ status: string; sum: number }>>({
 | `table`           | the relation to read or write. Restricts everything else                                                  |
 | `rpc`             | the function to call, instead of `table`                                                                  |
 | `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
-| `action`          | `"select"` (the default), `"insert"`, `"upsert"`, `"update"`, `"delete"`                                  |
-| `select`          | columns, `"alias:column"`, `"*"`, and embedded resources                                                  |
+| `columns`         | on a read or an `rpc`: columns, `"alias:column"`, `"*"`, and embedded resources                             |
 | `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
@@ -1498,9 +1478,9 @@ const { data } = await loose.query<Array<{ status: string; sum: number }>>({
 | `rows`            | the payload of an `insert` or `upsert`: one object or many                                                |
 | `set`             | the columns an `update` changes: values, or `$` expressions and `$default`                              |
 | `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
-| `columns`         | insert only these, whatever else `rows` carries                                                           |
+| `columns`         | on an `insert` or `upsert`: insert only these, whatever else `rows` carries                               |
 | `missing`         | a column absent from `rows`: its `"default"` or `"null"`                                                  |
-| `returning`       | `"representation"` (the default here) or `"minimal"`                                                      |
+| `returning`       | on a write: `"representation"` (the default here), `"minimal"`, or a list of columns like `columns` takes |
 | `args`            | a function's arguments, by name                                                                           |
 
 ### What comes back
