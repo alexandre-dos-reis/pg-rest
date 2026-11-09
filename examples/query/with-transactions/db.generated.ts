@@ -17,6 +17,7 @@ type DatabasePgRestApiRelations = {
       owner?: string;
       balance?: number;
     };
+    defaults: never;
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -48,6 +49,7 @@ type DatabasePgRestApiRelations = {
       memo?: string | null;
       at?: string;
     };
+    defaults: "at";
     pk: ["id"];
     insertable: true;
     updatable: true;

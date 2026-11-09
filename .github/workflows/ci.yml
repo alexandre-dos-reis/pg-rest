@@ -108,12 +108,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
+      # The suites are DDL-heavy -- a database created from a template and dropped again per test,
+      # PostGIS in that template -- and a runner's disk is far slower than a developer's, which is
+      # what made every test that builds two instances miss the 5s default timeout. The cluster is
+      # thrown away with the job, so it runs in RAM; `mise run db:start` does the same locally with
+      # `-c fsync=off`.
       postgres:
         image: postgis/postgis:16-3.6
         env:
           POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: --no-sync
         ports: ["5432:5432"]
         options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
@@ -127,6 +134,15 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
+      # nothing here is meant to survive the job: the rest of the durability cost goes too
+      - name: Make the throwaway cluster fast
+        run: |
+          psql "$TEST_DATABASE_URL" -q \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "SELECT pg_reload_conf()"
+          psql "$TEST_DATABASE_URL" -tAc "SELECT name || '=' || setting FROM pg_settings WHERE name IN ('fsync', 'full_page_writes', 'synchronous_commit')"
       - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
         if: needs.changes.outputs.compare == 'true'
         run: |
@@ -137,7 +153,7 @@ jobs:
       - run: bun run build
       # the suite the `changes` job chose, tests/compare included: it skips itself without POSTGREST_BIN
       - name: Unit, integration and differential tests
-        run: bun test ${{ needs.changes.outputs.filter }}
+        run: bun test --timeout 30000 ${{ needs.changes.outputs.filter }}
         env:
           POSTGREST_BIN: ${{ needs.changes.outputs.compare == 'true' && format('{0}/postgrest/postgrest', runner.temp) || '' }}
       - name: Run the built library on Node
