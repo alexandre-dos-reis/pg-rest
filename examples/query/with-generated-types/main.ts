@@ -48,7 +48,7 @@ if (createFailed) {
   console.log(createFailed);
 }
 
-// created: Array<{ id: number; priority: "low" | "normal" | "high" }>
+// created: { id: number; priority: "low" | "normal" | "high" } -- one `rows` object, one row back
 console.log(`created ${createFailed ? createFailed.kind : "ok"}:`, created);
 
 // A composite column is an object, both ways: its fields are typed, and a value being written or
