@@ -3,9 +3,9 @@ dist
 *.log
 .DS_Store
 
-examples/*/package-lock.json
-examples/*/bun.lock
-examples/*/bun.lockb
+examples/**/package-lock.json
+examples/**/bun.lock
+examples/**/bun.lockb
 
 bench/results/
 

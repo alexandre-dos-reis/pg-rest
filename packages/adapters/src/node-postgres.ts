@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession, Row } from "../adapter";
+import type { DbAdapter, DbSession, Row } from ".";
 
 /** The subset of node-postgres (`pg`) that is used. */
 interface PgClientLike {

@@ -19,6 +19,7 @@ import {
   lookAhead,
   many,
   many1,
+  manyKeeping,
   map,
   noneOf,
   notFollowedBy,
@@ -76,8 +77,8 @@ const jsonIdx = before(
   bind(option("+", char("-")), () => many1(digit)),
   jsonEnd,
 );
-const jsonOperation = after(alt(tryP(string("->>")), tryP(string("->"))), alt(tryP(jsonIdx), tryP(jsonKeyName)));
-const jsonPath = many(jsonOperation);
+const jsonOperation = after(alt(tryP(string("->>")), tryP(string("->"))), alt(tryP(jsonIdx), jsonKeyName));
+const jsonPath = manyKeeping(jsonOperation);
 const field = lexeme(bind(fieldName, () => option([] as unknown[], jsonPath)));
 
 // ---------------------------------------------------------------------------
@@ -249,6 +250,23 @@ export const checkSelect = (input: string): number | EngineError => {
 export const checkFilter = (input: string): EngineError | undefined => {
   const r = run(opExpr(singleVal), input);
   return r.ok ? undefined : fail("filter", input, r.failure);
+};
+
+/**
+ * The key of a filter (`orders.meta->>a`): fields joined by dots, then a JSON path. Like PostgREST,
+ * whatever follows what parses is ignored: returns where the parse stopped, or the error.
+ */
+const treePath = before(sepBy1(fieldName, delimiter), option([] as unknown[], jsonPath));
+export const checkTreePath = (input: string): number | EngineError => {
+  const r = run(treePath, input);
+  return r.ok ? r.end : fail("tree path", input, r.failure);
+};
+
+/** `columns=` and `on_conflict=`: field names separated by commas; returns where the parse stopped, or the error. */
+const fieldList = sepBy1(lexeme(fieldName), char(","));
+export const checkFieldList = (what: "columns" | "on_conflict", input: string): number | EngineError => {
+  const r = run(fieldList, input);
+  return r.ok ? r.end : fail(`${what} parameter`, input, r.failure);
 };
 
 /** An `order=` value; `undefined` when it parses. */

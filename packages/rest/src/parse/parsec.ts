@@ -41,18 +41,54 @@ const setExpect = (e: PErr, label: string): PErr => {
   return { pos: e.pos, msgs: out };
 };
 
-const showChar = (c: string): string => `'${c}'`;
-/** Haskell `show` of a one-character string. */
-const showStr1 = (c: string): string => {
-  if (c === '"') return '"\\""';
-  if (c === "\\") return '"\\\\"';
-  if (c === "\n") return '"\\n"';
-  if (c === "\t") return '"\\t"';
+/** Haskell's names for the control characters (`show '\0'` is `'\NUL'`). */
+const CONTROL = [
+  "NUL",
+  "SOH",
+  "STX",
+  "ETX",
+  "EOT",
+  "ENQ",
+  "ACK",
+  "a",
+  "b",
+  "t",
+  "n",
+  "v",
+  "f",
+  "r",
+  "SO",
+  "SI",
+  "DLE",
+  "DC1",
+  "DC2",
+  "DC3",
+  "DC4",
+  "NAK",
+  "SYN",
+  "ETB",
+  "CAN",
+  "EM",
+  "SUB",
+  "ESC",
+  "FS",
+  "GS",
+  "RS",
+  "US",
+];
+/** One character as Haskell's `show` writes it inside a char (`'`) or a string (`"`) literal. */
+const escaped = (c: string, quote: "'" | '"'): string => {
   const code = c.codePointAt(0)!;
-  return code > 126 || code < 32 ? `"\\${code}"` : `"${c}"`;
+  if (c === "\\") return "\\\\";
+  if (c === quote) return `\\${c}`;
+  if (code < 32) return `\\${CONTROL[code]}`;
+  if (code === 127) return "\\DEL";
+  return code > 127 ? `\\${code}` : c;
 };
-const showStr = (s: string): string =>
-  s.length === 1 ? showStr1(s) : `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+const showChar = (c: string): string => `'${escaped(c, "'")}'`;
+/** Haskell `show` of a string. */
+const showStr1 = (c: string): string => `"${escaped(c, '"')}"`;
+const showStr = (s: string): string => `"${[...s].map((c) => escaped(c, '"')).join("")}"`;
 
 // ---------------------------------------------------------------------------
 // primitives
@@ -199,6 +235,30 @@ export const many =
       out.push(r.v);
       consumed = true;
       pos = r.i;
+    }
+  };
+/**
+ * `many` that keeps what the last parse that succeeded was still hoping to see: PostgREST's JSON paths
+ * list it (`"-"` after a key) among what they expected.
+ */
+export const manyKeeping =
+  <T>(p: P<T>): P<T[]> =>
+  (s, i) => {
+    const out: T[] = [];
+    let consumed = false;
+    let pos = i;
+    let last: PErr | undefined;
+    for (;;) {
+      const r = p(s, pos);
+      if (!r.ok) {
+        if (r.consumed) return r;
+        return { ok: true, consumed, v: out, i: pos, err: last ? mergeError(last, r.err) : r.err };
+      }
+      if (!r.consumed) throw new Error("combinator 'many' is applied to a parser that accepts an empty string");
+      out.push(r.v);
+      consumed = true;
+      pos = r.i;
+      last = r.err;
     }
   };
 export const many1 = <T>(p: P<T>): P<T[]> => {

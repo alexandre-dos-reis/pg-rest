@@ -12,13 +12,14 @@ import {
   planTable,
   useSchema,
 } from "@tsql/core/core";
-import type { DbSession } from "@tsql/core/adapter";
+import type { DbSession } from "@tsql/adapters";
 import { quoteIdent } from "@tsql/core/quote";
 import type { SqlOperation } from "@tsql/core/parse/sql-options";
+import { EngineError } from "@tsql/core/errors";
 import { PgRestError } from "./errors";
 import { getRelation } from "@tsql/core/schema";
 import { mediaChoices } from "./media";
-import { parseQuery } from "./parse/query-string";
+import { keysChecked, parseQuery } from "./parse/query-string";
 import { buildOpenApi } from "./openapi";
 import {
   parseAccept,
@@ -187,11 +188,38 @@ const toResponse = (
   return new Response(noBody ? null : text, { status, headers });
 };
 
+const unescapeQuery = (s: string): string => {
+  const text = s.replace(/\+/g, " ");
+  let out: string;
+  try {
+    out = decodeURIComponent(text);
+  } catch {
+    out = text;
+  }
+  return out;
+};
+
+/**
+ * The pairs of a query string, split like PostgREST (`http-types`) does: on `&` and on `;`.
+ * A pair without `=` has an empty value.
+ */
+export const queryPairs = (search: string): Array<readonly [string, string]> =>
+  search
+    .slice(1)
+    .split(/[&;]/)
+    .filter((kv) => kv !== "")
+    .map((kv) => {
+      const eq = kv.indexOf("=");
+      return eq < 0
+        ? ([unescapeQuery(kv), ""] as const)
+        : ([unescapeQuery(kv.slice(0, eq)), unescapeQuery(kv.slice(eq + 1))] as const);
+    });
+
 /** The bare keys of a query string: `?a&b=1` -> `{a}`. They are arguments, never filters. */
 export const bareKeys = (search: string): Set<string> => {
   const out = new Set<string>();
-  for (const kv of search.slice(1).split("&")) {
-    if (kv !== "" && !kv.includes("=")) out.add(decodeURIComponent(kv));
+  for (const kv of search.slice(1).split(/[&;]/)) {
+    if (kv !== "" && !kv.includes("=")) out.add(unescapeQuery(kv));
   }
   return out;
 };
@@ -263,15 +291,26 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
     request.headers.get("accept"),
     false,
     env.config.planEnabled,
-    mediaChoices(env.cache, schema, target, url.searchParams.has("select")),
+    mediaChoices(
+      env.cache,
+      schema,
+      target,
+      queryPairs(url.search).some(([k]) => k === "select"),
+    ),
   );
   const format = requested.kind === "plan" ? requested.inner : requested;
   const engineFormat = toEngineFormat(format);
   const wantsPlan = requested.kind === "plan" ? requested : undefined;
   const range = parseRange(request.headers.get("range"), request.headers.get("range-unit"));
-  const body = await parseBody(request, method);
+  if (target.type === "rpc" && method !== "GET" && method !== "HEAD" && method !== "POST") {
+    throw new PgRestError(405, "PGRST101", `Cannot use the ${method} method on RPC`);
+  }
+  const body = await parseBody(request, method, target.type === "rpc");
 
-  const params = [...url.searchParams];
+  const pairs = queryPairs(url.search);
+  const bare = bareKeys(url.search);
+  // a key without `=` is no filter on a table; it is an argument of a function
+  const params = target.type === "rpc" ? keysChecked(pairs) : pairs.filter(([k, v]) => !(v === "" && bare.has(k)));
   const qp: SqlQueryParams = {
     params,
     bare: bareKeys(url.search),
@@ -283,6 +322,12 @@ export const handleRequest = async (env: HttpEnv, request: Request, ctx: Request
   };
   let plan: SqlPlan;
   if (target.type === "table") {
+    // PostgREST reads the query string before it looks for the table: a syntax error is answered first
+    try {
+      qp.parse();
+    } catch (e) {
+      if (e instanceof EngineError && e.reason === "invalid_input") throw e;
+    }
     plan = planTable(env, operationOf(method), schema, target.name, qp, prefer, engineFormat, range, body);
   } else {
     if (method !== "GET" && method !== "HEAD" && method !== "POST") {

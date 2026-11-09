@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession } from "./adapter";
+import type { DbAdapter, DbSession } from "@tsql/adapters";
 import type { CoreConfig } from "./core";
 import { normalizeDbError } from "./errors";
 import type { SchemaCache } from "./schema";

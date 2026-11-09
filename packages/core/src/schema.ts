@@ -1,4 +1,4 @@
-import type { DbSession } from "./adapter";
+import type { DbSession } from "@tsql/adapters";
 import { EngineError } from "./errors";
 import { literal } from "./quote";
 

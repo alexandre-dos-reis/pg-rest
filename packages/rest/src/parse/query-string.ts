@@ -15,7 +15,7 @@ import {
 } from "@tsql/core/parse/filter";
 import { type SelectItem, parseSelect } from "@tsql/core/parse/select";
 import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER, scanList } from "@tsql/core/parse/syntax";
-import { checkFilter, checkLogicTree, checkOrder, checkSelect } from "./grammar";
+import { checkFieldList, checkFilter, checkLogicTree, checkOrder, checkSelect, checkTreePath } from "./grammar";
 
 // What PostgREST reads from a query string, parsed with the grammars of `grammar.ts`. The result is
 // the engine's own `ParsedQuery`; `@tsql/query` builds the same thing from an object and never comes here.
@@ -75,7 +75,7 @@ export const parseOperatorExpr = (field: FieldRef, expr: string, unquoteValue = 
       }
       quantifier = modifier;
     } else if (FTS.has(op)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(modifier)) {
+      if (!/^[\p{L}\p{N}_ $]+$/u.test(modifier)) {
         throw parseError(`failed to parse filter (${expr})`, `"${modifier}" is not a valid text search configuration`);
       }
       lang = modifier;
@@ -130,7 +130,7 @@ export const parseLogic = (op: "and" | "or", negate: boolean, value: string): Lo
   }
   const inner = v.slice(1, -1);
   if (inner.trim() === "") throw parseError(`failed to parse logic tree (${value})`, "empty tree");
-  return { kind: "logic", op, negate, children: splitTopLevel(inner, ",").map(parseLogicItem) };
+  return { kind: "logic", op, negate, children: splitTopLevel(inner, ",", true).map(parseLogicItem) };
 };
 
 export const parseOrder = (input: string): OrderTerm[] => {
@@ -145,6 +145,27 @@ export const parseOrder = (input: string): OrderTerm[] => {
 
 const RESERVED_TERMINALS = new Set(["limit", "offset", "order", "and", "or"]);
 
+/** The name a key stands for: what PostgREST's grammar reads of it, or the error when it reads nothing. */
+const nameOfKey = (key: string): string => {
+  const end = checkTreePath(key);
+  if (end instanceof EngineError) throw end;
+  return key.slice(0, end);
+};
+
+/**
+ * Function arguments are read from the query string too: their names go through the grammar of a
+ * filter's key, like PostgREST's, before they are looked for.
+ */
+export const keysChecked = (params: ReadonlyArray<readonly [string, string]>): Array<readonly [string, string]> =>
+  params.map(([key, value]) =>
+    key === "select" ||
+    key === "on_conflict" ||
+    key === "columns" ||
+    RESERVED_TERMINALS.has(key.slice(key.lastIndexOf(".") + 1))
+      ? ([key, value] as const)
+      : ([nameOfKey(key), value] as const),
+  );
+
 /** Parse everything PostgREST reads from the query string, except function arguments. */
 export const parseQuery = (
   params: ReadonlyArray<readonly [string, string]>,
@@ -158,10 +179,20 @@ export const parseQuery = (
       // PostgREST's parser stops at the first thing it cannot continue with and ignores the rest.
       const end = checkSelect(v);
       if (end instanceof EngineError) throw end;
-      const used = v.slice(0, end).trim();
+      let used = v.slice(0, end).trim();
+      // a number ends a JSON path only before `,`, `.`, `->`, `::` or the end: before anything else it is a key
+      if (end < v.length && !/^(,|\.|->|::)/.test(v.slice(end))) used = used.replace(/(->>?)(-?\d+)$/, '$1"$2"');
       select = used === "" ? [{ kind: "star" }] : parseSelect(used);
-    } else if (k === "on_conflict") onConflict = splitTopLevel(v, ",").map(unquote).filter(Boolean);
-    else if (k === "columns") columns = splitTopLevel(v, ",").map(unquote).filter(Boolean);
+    } else if (k === "on_conflict" || k === "columns") {
+      // the names end up in the statement: they are read with PostgREST's grammar, which ignores what follows
+      const end = v === "" ? 0 : checkFieldList(k, v);
+      if (end instanceof EngineError) throw end;
+      const names = splitTopLevel(v === "" ? v : v.slice(0, end), ",")
+        .map(unquote)
+        .filter(Boolean);
+      if (k === "on_conflict") onConflict = names;
+      else columns = names;
+    }
   }
 
   const known = new Map<string, string>();
@@ -194,7 +225,8 @@ export const parseQuery = (
     if (key === "select" || key === "on_conflict" || key === "columns") continue;
     if (opts.allowFilterKey && !opts.allowFilterKey(key)) continue;
 
-    const parts = key.split(".");
+    const reserved = RESERVED_TERMINALS.has(key.slice(key.lastIndexOf(".") + 1));
+    const parts = (reserved ? key : nameOfKey(key)).split(".");
     const last = parts[parts.length - 1]!;
 
     if (RESERVED_TERMINALS.has(last)) {

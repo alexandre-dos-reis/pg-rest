@@ -23,6 +23,8 @@ export interface AnyRelation {
   readonly row: Record<string, unknown>;
   readonly insert: Record<string, unknown>;
   readonly update: Record<string, unknown>;
+  /** The columns that have a `DEFAULT`, and so the ones `{ $default: true }` may be used on. */
+  readonly defaults: string;
   readonly pk: ReadonlyArray<string>;
   readonly insertable: boolean;
   readonly updatable: boolean;
@@ -58,6 +60,8 @@ type Table<Db extends AnyDatabase, S extends Schema<Db>> = keyof Relations<Db, S
 type Row<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["row"];
 type Column<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = keyof Row<Db, S, T> & string;
 type Embeds<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["rel"];
+/** The columns of `T` that have a `DEFAULT`. */
+type Defaults<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["defaults"];
 /** The relation an embedded name points at, if it is one of this schema's. */
 type Target<Db extends AnyDatabase, S extends Schema<Db>, E> = E extends { rel: infer R }
   ? R extends Table<Db, S>
@@ -412,7 +416,8 @@ interface Common {
   readonly offset?: number;
   /**
    * Return one object instead of an array. Anything other than exactly one row is a `not_single_row`
-   * error, so `data` is the row itself, never `undefined`.
+   * error, so `data` is the row itself, never `undefined`. An insert of a single `rows` object does
+   * this on its own; `single: false` asks it for the array.
    */
   readonly single?: boolean;
   /**
@@ -489,6 +494,9 @@ type TableInsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<D
     /**
      * What to insert: one object or many. Generated and `GENERATED ALWAYS AS IDENTITY` columns are
      * absent, and a column with a default or a nullable one is optional.
+     *
+     * It decides the answer's shape too: one object comes back as that object, an array of them as
+     * an array of rows.
      */
     readonly rows: Relations<Db, S>[T]["insert"] | ReadonlyArray<Relations<Db, S>[T]["insert"]>;
     /** Insert only these columns, ignoring any other key in `rows` (and so making a bulk insert uniform). */
@@ -507,7 +515,7 @@ type TableUpsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<D
 type TableUpdate<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
   Returning<Db, S, T> & {
     /** The columns to change. The rows are the ones `where` matches. */
-    readonly set: SetOf<Relations<Db, S>[T]["update"]>;
+    readonly set: SetOf<Relations<Db, S>[T]["update"], Defaults<Db, S, T>>;
   };
 
 /** A delete of the rows `where` matches. */
@@ -549,9 +557,13 @@ export type NoExtraKeys<Q, Allowed> = {
 /**
  * What an update may set: the columns of the relation, each to its type or to an expression the
  * database computes (`{ $add: [{ $col: "total" }, 10] }`, `{ $default: true }`).
+ *
+ * `D` is the columns that have a `DEFAULT`, and `{ $default: true }` is offered on those alone:
+ * `SET col = DEFAULT` on a column without one is a null, which is a refusal on a `NOT NULL` column
+ * and a silent loss anywhere else.
  */
-type SetOf<U> = {
-  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | DefaultValue;
+type SetOf<U, D extends string> = {
+  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | (K extends D ? DefaultValue : never);
 };
 
 /** The columns of `U` that hold a `T`, for `$col`. */
@@ -652,7 +664,9 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
         : R & NoExtraKeys<R, WriteShape<Db, Q, "insert">>;
     }
   : unknown) &
-  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">>> } : unknown);
+  (Q extends { set: infer U }
+    ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">, string>> }
+    : unknown);
 
 /** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
 type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =
@@ -762,17 +776,28 @@ type TableRowOut<Db extends AnyDatabase, Q, T extends Table<Db, SchemaIn<Db, Q>>
 /**
  * What `data` holds: the rows, one object with `single`, and `null` for a write that was asked to
  * return nothing or a function that returns `void`.
+ *
+ * An insert needs no `single`: one `rows` object is one row by construction, so it answers with that
+ * object, and an array of them answers with an array. `single: false` asks for the array anyway.
  */
 export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minimal" }
   ? null
   : Q extends { single: true }
     ? RowOut<Db, Q>
-    : Q extends { rpc: string }
-      ? // a set-returning function answers with rows, a scalar one with the value itself
-        [Signatures<Db, Q>["set"]] extends [true]
-        ? RowOut<Db, Q>[]
-        : RowOut<Db, Q>
-      : RowOut<Db, Q>[];
+    : Q extends { single: false }
+      ? RowOut<Db, Q>[]
+      : Q extends { rpc: string }
+        ? // a set-returning function answers with rows, a scalar one with the value itself
+          [Signatures<Db, Q>["set"]] extends [true]
+          ? RowOut<Db, Q>[]
+          : RowOut<Db, Q>
+        : // an insert of one object answers with that object, of many with as many (`rows` is
+          // an insert's and an upsert's alone, so it identifies them)
+          Q extends { rows: infer R }
+          ? R extends ReadonlyArray<unknown>
+            ? RowOut<Db, Q>[]
+            : RowOut<Db, Q>
+          : RowOut<Db, Q>[];
 
 // ---------------------------------------------------------------------------
 // the instance
@@ -816,8 +841,12 @@ export interface TypedOperations<Db extends AnyDatabase, Mode extends "result" |
    * Insert one row or several. `rows` is required and takes the relation's writable columns; the
    * rows come back unless `returning: "minimal"`; `returning: ["id"]` returns only those columns.
    *
+   * `rows` decides the answer's shape: one object comes back as that object, an array of them as an
+   * array of rows. `single: false` asks a one-object insert for the array.
+   *
    * @example
-   * const { data } = await pgRest.insert({ table: "todos", rows: { title: "ship it" }, single: true });
+   * const { data } = await pgRest.insert({ table: "todos", rows: { title: "ship it" } });
+   * data.id; // one row in, one row out
    */
   insert<const Q extends TypedInsert<Db>>(
     input: Guard<Db, Q, TypedInsert<Db>>,
@@ -927,7 +956,7 @@ export interface TypedQueryInstance<Db extends AnyDatabase>
    *
    * @example
    * const { data, error } = await pgRest.transaction(async (tx) => {
-   *   const client = await tx.insert({ table: "clients", rows: { name: "Ada" }, single: true });
+   *   const client = await tx.insert({ table: "clients", rows: { name: "Ada" } });
    *   await tx.insert({ table: "orders", rows: { client_id: client.data.id, total: 10 } });
    *   return client.data.id;
    * }, { role: "authenticated" });

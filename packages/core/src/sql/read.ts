@@ -6,8 +6,7 @@ import { type Relation, type SchemaCache, resolveRelationship } from "../schema"
 import type { OrderTerm } from "../parse/filter";
 import { fieldSql, whereSql } from "./filters";
 import { type Values, inlined } from "./values";
-
-export const ROOT_ALIAS = "pgrst_root";
+import { ALIAS, ROOT_ALIAS } from "../constants";
 
 export interface ReadOptions {
   readonly cache: SchemaCache;
@@ -130,7 +129,7 @@ const orderClause = (
         null,
       );
     }
-    const o = ctx.aliases.next("pgrst_o");
+    const o = ctx.aliases.next(`${ALIAS}_o`);
     if (r.computed) {
       return `(SELECT ${fieldSql(o, t.field, r.to)} FROM ${quoteQualified(r.computed.schema, r.computed.name)}(${q(alias)}) AS ${q(o)} LIMIT 1) ${tail}`;
     }
@@ -216,8 +215,8 @@ const buildEmbed = (
   const params = ctx.query.embeds.get(childPath.join("."));
   const toOne = relationship.kind === "m2o" || relationship.kind === "o2o";
   const child = relationship.to;
-  const cAlias = ctx.aliases.next("pgrst_c");
-  const eAlias = ctx.aliases.next("pgrst_j");
+  const cAlias = ctx.aliases.next(`${child.name}_`);
+  const eAlias = ctx.aliases.next(`${ALIAS}_j`);
   const inner = buildItems(ctx, item.items, child, cAlias, childPath);
   const hasCols = inner.cols.length > 0;
 
@@ -230,7 +229,7 @@ const buildEmbed = (
     conds.push("TRUE");
   } else if (relationship.junction) {
     const j = relationship.junction;
-    const jAlias = ctx.aliases.next("pgrst_m");
+    const jAlias = ctx.aliases.next(`${ALIAS}_m`);
     const onTo = j.fkTo.cols.map((c, i) => `${q(jAlias)}.${q(c)} = ${q(cAlias)}.${q(j.fkTo.fcols[i]!)}`);
     from = `${quoteQualified(child.schema, child.name)} AS ${q(cAlias)} JOIN ${quoteQualified(j.relation.schema, j.relation.name)} AS ${q(jAlias)} ON ${onTo.join(" AND ")}`;
     conds.push(...j.fkFrom.cols.map((c, i) => `${q(jAlias)}.${q(c)} = ${q(parentAlias)}.${q(j.fkFrom.fcols[i]!)}`));

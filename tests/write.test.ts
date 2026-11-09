@@ -115,10 +115,10 @@ describe.skipIf(!hasDb)("writes", () => {
       ).toBe(400);
       expect((await t.post("/clients", [1, 2], { ctx })).json().code).toBe("PGRST102");
     });
-    test("unsupported Content-Type is 415", async () => {
+    test("unsupported Content-Type is 400 PGRST102, as PostgREST answers", async () => {
       const r = await t.post("/clients", "x", { ctx, headers: { "Content-Type": "application/xml" } });
-      expect(r.status).toBe(415);
-      expect(r.json().code).toBe("PGRST107");
+      expect(r.status).toBe(400);
+      expect(r.json().code).toBe("PGRST102");
     });
     test("constraint violations map to HTTP statuses", async () => {
       const dup = await t.post("/clients", { name: "Ada2", email: "ada@example.com" }, { ctx });

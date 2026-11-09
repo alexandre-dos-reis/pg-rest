@@ -63,7 +63,7 @@ export const appliedHeader = (p: Prefer, honoredTx: boolean): string | undefined
   if (p.resolution) parts.push(`resolution=${p.resolution}`);
   if (p.missing) parts.push(`missing=${p.missing}`);
   if (p.handling) parts.push(`handling=${p.handling}`);
-  if (p.timezone) parts.push(`timezone=${p.timezone}`);
+  if (p.timezone !== undefined) parts.push(`timezone=${p.timezone}`);
   if (p.maxAffected !== undefined && p.handling === "strict") parts.push(`max-affected=${p.maxAffected}`);
   return parts.length ? parts.join(", ") : undefined;
 };

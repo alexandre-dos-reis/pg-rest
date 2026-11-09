@@ -1,4 +1,4 @@
-import type { DbAdapter } from "@tsql/core/adapter";
+import type { DbAdapter } from "@tsql/adapters";
 import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 import { DbQueryError, EngineError } from "@tsql/core/errors";
 import { type ApiError, PgRestError, toApiError } from "./errors";

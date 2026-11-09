@@ -166,6 +166,11 @@ const shapes = (
     for (const c of writable) push(depth + 1, `${key(c.name)}?: ${written(c)};`);
     push(depth, "};");
   }
+  // Which columns `{ $default: true }` may be used on. Optionality above cannot say: a nullable
+  // column is optional too, and `SET col = DEFAULT` without a default is a null, not a default.
+  const withDefault = writable.filter((c) => c.hasDefault);
+  const union = withDefault.map((c) => JSON.stringify(c.name)).join(" | ");
+  push(depth, `defaults: ${union === "" ? "never" : union};`);
 };
 
 /**
