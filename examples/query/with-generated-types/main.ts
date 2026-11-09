@@ -3,7 +3,11 @@
 //   node main.ts
 import { close, pgRest } from "./client.ts";
 
-const { data: todos, count, error } = await pgRest.select({
+const {
+  data: todos,
+  count,
+  error,
+} = await pgRest.select({
   table: "todos", //                             the relations of the exposed schema: "todos" | "tags"
   columns: ["id", "title", "priority", { tags: ["label"] }], //  this table's columns, and `tags` because a foreign key leads there
   where: { done: false }, //                     this table's columns too, each with its own value type
@@ -36,9 +40,14 @@ console.log("high priority:", urgent);
 
 const { data: created, error: createFailed } = await pgRest.insert({
   table: "todos", //                           the table to insert into
-  rows: { title: "Generated types", priority: "high" }, //  the insert shape: `title` is required, `id` is generated and absent
+  rows: { title: "Generated types", priority: "high", done: false }, //  the insert shape: `title` is required, `id` is generated and absent
   returning: ["id", "priority"], //                 what a write gives back, when it gives anything
 });
+
+if (createFailed) {
+  console.log(createFailed);
+}
+
 // created: Array<{ id: number; priority: "low" | "normal" | "high" }>
 console.log(`created ${createFailed ? createFailed.kind : "ok"}:`, created);
 
@@ -51,9 +60,29 @@ const { data: placed } = await pgRest.select({
 });
 if (placed?.[0]) console.log(`in ${placed[0].at?.room} on floor ${placed[0].at?.floor}:`, placed[0].title);
 
+const { data: toggledTodo1 } = await pgRest.update({
+  table: "todos",
+  // This is toggling `done`
+  set: { done: { $not: { $col: "done" } } },
+  where: { id: 2 },
+  single: true,
+});
+
+console.log("toggle1:", toggledTodo1);
+
+const { data: toggledTodo2 } = await pgRest.update({
+  table: "todos",
+  // This is toggling `done`
+  set: { done: { $not: { $col: "done" } } },
+  where: { id: 2 },
+  single: true,
+});
+
+console.log("toggle2:", toggledTodo2);
+
 const { data: moved } = await pgRest.update({
   table: "todos",
-  set: { at: { room: "Lab", floor: 3 } }, //     a nested object is the composite value
+  set: { done: { $not: { $col: "done" } } },
   where: { title: "Try pg-rest" },
   returning: ["at"],
 });
