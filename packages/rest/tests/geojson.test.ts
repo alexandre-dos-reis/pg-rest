@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb, requirePostgis } from "./support/db";
-import { makeApi, type TestApi } from "./support/api";
+import { hasDb, requirePostgis } from "../../../tests/support/db";
+import { makeApi, type TestApi } from "../../../tests/support/api";
 
 describe.skipIf(!hasDb)("application/geo+json", () => {
   let t: TestApi;

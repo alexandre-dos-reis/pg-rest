@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb } from "./support/db";
-import { authed, makeApi, type TestApi } from "./support/api";
+import { hasDb } from "../../../tests/support/db";
+import { authed, makeApi, type TestApi } from "../../../tests/support/api";
 
 describe.skipIf(!hasDb)("rpc", () => {
   let t: TestApi;

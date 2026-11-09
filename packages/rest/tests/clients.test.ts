@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PostgrestClient } from "@supabase/postgrest-js";
 import { NeonPostgrestClient } from "@neondatabase/postgrest-js";
-import type { RequestContext } from "./support/pgrest";
-import { hasDb } from "./support/db";
-import { authed, makeApi, type TestApi } from "./support/api";
+import type { RequestContext } from "../../../tests/support/pgrest";
+import { hasDb } from "../../../tests/support/db";
+import { authed, makeApi, type TestApi } from "../../../tests/support/api";
 
 /**
  * The PostgREST client libraries, driving `handle()` directly: they take a `fetch`, so the whole

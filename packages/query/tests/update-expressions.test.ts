@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb } from "./support/db";
-import { authed, makeApi, type TestApi } from "./support/api";
+import { hasDb } from "../../../tests/support/db";
+import { authed, makeApi, type TestApi } from "../../../tests/support/api";
 
 describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
   let t: TestApi;
@@ -104,7 +104,8 @@ describe.skipIf(!hasDb)("update: expressions and DEFAULT", () => {
   test("DEFAULT on a column that has none is refused, not sent as a null", async () => {
     // `SET col = DEFAULT` without a default is `SET col = NULL`: the database refuses it on a
     // NOT NULL column (23502) and takes it quietly anywhere else, which is the worse of the two
-    const bad = async (set: object) => (await t.api.update({ table: "clients", set, where: { id: 1 } } as never, authed())).error;
+    const bad = async (set: object) =>
+      (await t.api.update({ table: "clients", set, where: { id: 1 } } as never, authed())).error;
 
     const notNull = await bad({ name: { $default: true } }); // text NOT NULL, no default
     expect(notNull?.kind).toBe("invalid_query");

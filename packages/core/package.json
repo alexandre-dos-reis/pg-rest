@@ -7,6 +7,9 @@
   "exports": {
     "./*": "./src/*.ts"
   },
+  "scripts": {
+    "test": "bun test"
+  },
   "devDependencies": {
     "@tsql/adapters": "workspace:*"
   }

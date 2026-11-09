@@ -30,7 +30,7 @@ reference lives in `docs/`.
 - Driver-agnostic: the core only knows the `DbAdapter` interface (`packages/core/src/adapter.ts`). Adapters live in `packages/core/src/adapters/*` (each published package re-exports them) and **must not import
   their driver** (structural types only); drivers are optional peer dependencies. Never add a driver import to `packages/*/src/` outside tests.
 - **No runtime dependencies.** Don't add one. (Effect was removed on purpose: see PR #5.) The two PostgREST client
-  libraries in `devDependencies` are there for `tests/clients.test.ts`, which checks that real clients still work
+  libraries in `devDependencies` are there for `packages/rest/tests/clients.test.ts`, which checks that real clients still work
   against `handle()`; they never reach `packages/*/src/`.
 - Target runtimes: Bun and Node (tested on Node 22). Don't use `Bun.*` APIs in `packages/*/src/`.
 
@@ -56,15 +56,16 @@ reference lives in `docs/`.
 | `packages/rest/src/parse/*` | PostgREST's query-string grammar (`parsec.ts`, `grammar.ts`) and `parseQuery` |
 | `packages/core/src/sql/*` | SQL generation (`read`, `write`, `rpc`, `filters`, `statement`, `expression`) |
 | `packages/core/src/schema.ts` | schema introspection and cache |
-| `tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
+| `packages/query/tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
 | `tests/support/tsapi.ts` | the virtual TypeScript project `completions.test.ts` and `docs.test.ts` compile in: TypeScript 7 ships no in-process compiler, so both drive the native one over `typescript/async` |
 | `docs/*.md` | the reference: `query`, `types`, `options`, `adapters`, `design`, `architecture`, `security`, `performance`, `development`. **Every `ts` block is compiled** by `tests/docs.test.ts` -- the README's against `examples/query/with-generated-types/db.generated.ts`, everything in `docs/` against `tests/support/fixture.types.ts` -- so an example that drifts fails the build; the ones meant to be refused carry `@ts-expect-error`, and a block that cannot compile is fenced ```` ```ts ignore ````. The same test asserts every relative link resolves, and that each page is linked from the README |
 | `packages/core/src/service.ts` | schema store (serialized reload), error mapping |
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
 | `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`) |
-| `tests/` | `bun test` suites, importing the packages' sources; `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery` |
-| `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
+| `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`) and PostgREST's grammar (`parse`), `query` the object API, the typed layer and the generator, `core` schema introspection |
+| `tests/` | what belongs to no single package: the cross-package suites (`query.test.ts`, `security.test.ts`, `docs.test.ts`, `agnostic.test.ts`, `compare/`) and the shared harness. `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery`; a package's tests reach it as `../../../tests/support/*` |
+| `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `packages/query/tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
 | `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
@@ -133,7 +134,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
   the payload an operation needs (`rows`, `set`) is required by its own member and absent from the others. Put two members
   with the same `table` into one union, and the editor silently starts offering every table's columns while the compiler
   stays right.
-  `tests/completions.test.ts` asks the compiler and pins it.
+  `packages/query/tests/completions.test.ts` asks the compiler and pins it.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
   check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type

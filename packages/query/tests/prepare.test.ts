@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createQuery, type QueryInput, type QueryInstance, type SelectInput } from "../packages/query/src/index";
-import { exec } from "./support/pgrest";
-import { introspect, toDescriptor } from "../packages/core/src/schema";
-import { createTestDb, hasDb, type TestDb } from "./support/db";
+import { createQuery, type QueryInput, type QueryInstance, type SelectInput } from "../src/index";
+import { exec } from "../../../tests/support/pgrest";
+import { introspect, toDescriptor } from "../../core/src/schema";
+import { createTestDb, hasDb, type TestDb } from "../../../tests/support/db";
 
 const authed = { role: "authenticated", claims: { sub: "user-1" } };
 
@@ -281,7 +281,7 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
 
   test("the HTTP route keeps its literals", async () => {
     // `@tsql/rest` has not changed: only `query` binds (see `tests/compare`, which pins HTTP against PostgREST)
-    const { createRest } = await import("../packages/rest/src/index");
+    const { createRest } = await import("../../rest/src/index");
     const rest = await createRest({ db: db.adapter, schemas: ["api"] });
     const res = await rest.handle(new Request("http://x/orders?status=eq.paid&select=id"));
     expect(res.status).toBe(200);

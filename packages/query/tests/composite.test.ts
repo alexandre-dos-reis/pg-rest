@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb } from "./support/db";
-import { authed, makeApi, type TestApi } from "./support/api";
-import {} from "../packages/query/src/query";
-import { toParams } from "./support/render";
-import type { QueryInput } from "./support/pgrest";
+import { hasDb } from "../../../tests/support/db";
+import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import {} from "../src/query";
+import { toParams } from "../../../tests/support/render";
+import type { QueryInput } from "../../../tests/support/pgrest";
 
 /** The query string the object describes, as `handle()` would receive it. */
 const qs = (input: QueryInput): string => new URLSearchParams(toParams(input) as Array<[string, string]>).toString();

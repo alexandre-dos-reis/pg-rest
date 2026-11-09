@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createPgRest, type TypedPgRestInstance } from "./support/pgrest";
-import { createTestDb, hasDb, type TestDb } from "./support/db";
-import type { DatabasePgRest } from "./support/fixture.types";
+import { createPgRest, type TypedPgRestInstance } from "../../../tests/support/pgrest";
+import { createTestDb, hasDb, type TestDb } from "../../../tests/support/db";
+import type { DatabasePgRest } from "../../../tests/support/fixture.types";
 
 /**
  * Types are checked by `bun run typecheck`, which compiles this file; `bun test` runs the calls, so
@@ -279,7 +279,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(asked.data).toHaveLength(1);
 
     const upserted = ok(
-      await pgRest.upsert({ table: "clients", rows: { id: one.data.id, name: "Upserted" }, returning: ["name"] }, authed),
+      await pgRest.upsert(
+        { table: "clients", rows: { id: one.data.id, name: "Upserted" }, returning: ["name"] },
+        authed,
+      ),
     );
     assertType<Equal<typeof upserted.data, { name: string }>>();
     expect(upserted.data.name).toBe("Upserted");

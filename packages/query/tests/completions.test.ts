@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { virtualProject } from "./support/tsapi";
+import { virtualProject } from "../../../tests/support/tsapi";
 
 /**
  * What an editor offers inside a typed query, asked of the TypeScript compiler itself.
@@ -40,8 +40,8 @@ afterAll(() => project.dispose());
 
 const ask = async (snippet: string): Promise<Asked> => {
   const marked = `
-import { createPgRest } from "./support/pgrest";
-import type { DatabasePgRest } from "./support/fixture.types";
+import { createPgRest } from "../../../tests/support/pgrest";
+import type { DatabasePgRest } from "../../../tests/support/fixture.types";
 declare const pgRest: Awaited<ReturnType<typeof createPgRest<DatabasePgRest>>>;
 ${snippet}
 `;

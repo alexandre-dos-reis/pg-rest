@@ -12,7 +12,7 @@ import { createFileSystemLayer } from "typescript/fs";
  * packages' sources, the fixture's types, `lib.d.ts`).
  *
  * Every call is a round trip to that binary, so both callers ask one project as few times as they
- * can: `tests/docs.test.ts` compiles every page in one project, `tests/completions.test.ts` keeps
+ * can: `tests/docs.test.ts` compiles every page in one project, `packages/query/tests/completions.test.ts` keeps
  * one project and swaps the file's content.
  */
 export interface VirtualProject {

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseSelect } from "../packages/core/src/parse/select";
-import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../packages/rest/src/parse/query-string";
-import { parseField } from "../packages/core/src/parse/field";
-import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../packages/rest/src/request";
-import { toApiError } from "../packages/rest/src/errors";
+import { parseSelect } from "../../core/src/parse/select";
+import { parseLogic, parseOperatorExpr, parseOrder, parseQuery } from "../src/parse/query-string";
+import { parseField } from "../../core/src/parse/field";
+import { parseAccept, parseCsv, parsePrefer, parseRange, parseTarget } from "../src/request";
+import { toApiError } from "../src/errors";
 
 const q = (qs: string) => parseQuery([...new URLSearchParams(qs)]);
 const code = (fn: () => unknown) => {

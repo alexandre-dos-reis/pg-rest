@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { generateModule, generateTypes } from "../packages/query/src/types";
+import { generateModule, generateTypes } from "../src/types";
 import {
   fromDescriptor,
   introspect,
@@ -8,8 +8,8 @@ import {
   type CompositeType,
   type Relation,
   type SchemaCache,
-} from "../packages/core/src/schema";
-import { createTestDb, hasDb, requirePostgis, type TestDb } from "./support/db";
+} from "../../core/src/schema";
+import { createTestDb, hasDb, requirePostgis, type TestDb } from "../../../tests/support/db";
 
 const column = (name: string, type: string, extra: Partial<Column> = {}): Column => ({
   name,
@@ -166,7 +166,7 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
   test("the committed types are exactly what the generator produces", async () => {
     // tests/support/fixture.types.ts is typechecked by `bun run typecheck`, so this pins both the
     // generator's output and the fact that the output compiles
-    const committed = await Bun.file(new URL("./support/fixture.types.ts", import.meta.url)).text();
+    const committed = await Bun.file(new URL("../../../tests/support/fixture.types.ts", import.meta.url)).text();
     expect(generateTypes(cache, { name: "DatabasePgRest" })).toBe(committed);
   });
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { hasDb } from "./support/db";
-import { makeApi, type TestApi } from "./support/api";
+import { hasDb } from "../../../tests/support/db";
+import { makeApi, type TestApi } from "../../../tests/support/api";
 
 // Custom media type handlers that would change every other test's default (the catch-all) or need binary output.
 // The plain `text/plain`, `text/xml` and `application/octet-stream` handlers are covered by the comparison tests.
