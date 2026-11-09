@@ -50,6 +50,7 @@ type DatabaseApiRelations = {
     row: { id: number; title: string; done: boolean; priority: "low" | "normal" | "high"; due: string | null };
     insert: { title: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
     update: { title?: string; done?: boolean; priority?: "low" | "normal" | "high"; due?: string | null };
+    defaults: "done" | "priority";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -74,6 +75,7 @@ export type Database = {
 | `row` | every column, with `\| null` where the catalog says nullable |
 | `insert` | what a write accepts: a generated or `GENERATED ALWAYS AS IDENTITY` column is **absent**, one with a default or a nullable one is optional. `never` when the relation cannot be written |
 | `update` | the same, all optional |
+| `defaults` | the columns that have a `DEFAULT`, as a union of names (`never` when none). They are the ones `{ $default: true }` may be set to: without a default, `SET col = DEFAULT` is a null. Optionality in `insert` cannot say which they are, since a nullable column is optional too |
 | `pk`, `insertable`, `updatable`, `deletable` | the primary key, and what `pg_relation_is_updatable` says the relation accepts |
 | `rel` | every name you may embed, with `to: "one" \| "many"` — resolved by `findRelationships`, **the same function the query path uses**, so a `columns` the types accept is one the library can resolve. An ambiguous pair carries `hints`, because the query will need one (an `invalid_embed` error otherwise) |
 | `functions` | arguments with their optionality, overloads as a tuple, and the result: a relation's `row`, a scalar, or `null` for `void` |

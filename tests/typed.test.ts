@@ -481,6 +481,17 @@ describe.skipIf(!hasDb)("a typed instance", () => {
         table: "orders",
         set: { total: { $add: [{ $col: "total" }, 1] }, status: { $default: true } },
       }));
+    // ... but DEFAULT only on a column that has one: `clients.name` and `clients.email` have none,
+    // and `SET col = DEFAULT` without one is a null, not a default
+    // @ts-expect-error
+    void (() => pgRest.update({ table: "clients", set: { name: { $default: true } } }));
+    // @ts-expect-error -- nullable, so the database would take the null in silence
+    void (() => pgRest.update({ table: "clients", set: { email: { $default: true } } }));
+    // the ones that do have a default are still offered (clients: id, created_at)
+    void (() => pgRest.update({ table: "clients", set: { created_at: { $default: true } } }));
+    // and a view, whose columns have none, offers it nowhere
+    // @ts-expect-error
+    void (() => pgRest.update({ table: "big_orders", set: { status: { $default: true } } }));
     // ... and the expression has to give the column's type
     void (() =>
       pgRest.update({

@@ -906,8 +906,11 @@ const booleans = await untyped.update({
 });
 ```
 
-**`DEFAULT`** is a whole assignment, never part of an expression. Several columns are several keys, and a plain value
-and an expression can share one update:
+**`DEFAULT`** is a whole assignment, never part of an expression, and only on a column that has a default. Without
+one, `SET col = DEFAULT` is PostgreSQL for `SET col = NULL` -- refused on a `NOT NULL` column and taken quietly
+anywhere else -- so the generated types offer `{ $default: true }` on the columns that have a default and the library
+refuses the rest before any statement runs. Several columns are several keys, and a plain value and an expression can
+share one update:
 
 ```ts
 const reset = await pgRest.update({
@@ -934,7 +937,7 @@ const reset = await pgRest.update({
 | `$lower` `$upper` `$trim` `$length` `$abs` `$round`    | the functions, see above                               |
 | `$now` `$arrayAppend` `$arrayRemove`                   | `now()`, `array_append`, `array_remove`                |
 | `{ $cast: [expression, "numeric"] }`                   | `::type`, from the allowlist of a column cast        |
-| `{ $default: true }`                                   | `DEFAULT`, as a whole assignment                       |
+| `{ $default: true }`                                   | `DEFAULT`, on a column that has one, as a whole assignment |
 
 Nothing is raw SQL: a column is checked against the schema, a type against an allowlist, a value is escaped, and an
 unknown `$` key is refused, in an expression and as a key of `set`. An object with `$` keys that is meant as a `jsonb`
@@ -1482,7 +1485,7 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 | `maxAffected`     | refuse and roll back beyond this many affected rows                                                       |
 | `timezone`        | the time zone the statement runs in                                                                       |
 | `rows`            | the payload of an `insert` or `upsert`: one object or many, which is also the shape of `data`             |
-| `set`             | the columns an `update` changes: values, or `$` expressions and `$default`                              |
+| `set`             | the columns an `update` changes: values, `$` expressions, or `$default` on a column that has one       |
 | `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
 | `columns`         | on an `insert` or `upsert`: insert only these, whatever else `rows` carries                               |
 | `missing`         | a column absent from `rows`: its `"default"` or `"null"`                                                  |

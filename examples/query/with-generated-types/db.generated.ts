@@ -28,6 +28,7 @@ type DatabasePgRestApiRelations = {
       todo_id?: number;
       label?: string;
     };
+    defaults: never;
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -60,6 +61,7 @@ type DatabasePgRestApiRelations = {
       due?: string | null;
       at?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiPlace> | null;
     };
+    defaults: "done" | "priority";
     pk: ["id"];
     insertable: true;
     updatable: true;

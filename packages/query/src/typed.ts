@@ -23,6 +23,8 @@ export interface AnyRelation {
   readonly row: Record<string, unknown>;
   readonly insert: Record<string, unknown>;
   readonly update: Record<string, unknown>;
+  /** The columns that have a `DEFAULT`, and so the ones `{ $default: true }` may be used on. */
+  readonly defaults: string;
   readonly pk: ReadonlyArray<string>;
   readonly insertable: boolean;
   readonly updatable: boolean;
@@ -58,6 +60,8 @@ type Table<Db extends AnyDatabase, S extends Schema<Db>> = keyof Relations<Db, S
 type Row<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["row"];
 type Column<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = keyof Row<Db, S, T> & string;
 type Embeds<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["rel"];
+/** The columns of `T` that have a `DEFAULT`. */
+type Defaults<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = Relations<Db, S>[T]["defaults"];
 /** The relation an embedded name points at, if it is one of this schema's. */
 type Target<Db extends AnyDatabase, S extends Schema<Db>, E> = E extends { rel: infer R }
   ? R extends Table<Db, S>
@@ -511,7 +515,7 @@ type TableUpsert<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<D
 type TableUpdate<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> = TableBase<Db, S, T> &
   Returning<Db, S, T> & {
     /** The columns to change. The rows are the ones `where` matches. */
-    readonly set: SetOf<Relations<Db, S>[T]["update"]>;
+    readonly set: SetOf<Relations<Db, S>[T]["update"], Defaults<Db, S, T>>;
   };
 
 /** A delete of the rows `where` matches. */
@@ -553,9 +557,13 @@ export type NoExtraKeys<Q, Allowed> = {
 /**
  * What an update may set: the columns of the relation, each to its type or to an expression the
  * database computes (`{ $add: [{ $col: "total" }, 10] }`, `{ $default: true }`).
+ *
+ * `D` is the columns that have a `DEFAULT`, and `{ $default: true }` is offered on those alone:
+ * `SET col = DEFAULT` on a column without one is a null, which is a refusal on a `NOT NULL` column
+ * and a silent loss anywhere else.
  */
-type SetOf<U> = {
-  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | DefaultValue;
+type SetOf<U, D extends string> = {
+  readonly [K in keyof U]?: U[K] | ExpressionFor<U, U[K]> | (K extends D ? DefaultValue : never);
 };
 
 /** The columns of `U` that hold a `T`, for `$col`. */
@@ -656,7 +664,9 @@ type NoExtraPayload<Db extends AnyDatabase, Q> = (Q extends { rows: infer R }
         : R & NoExtraKeys<R, WriteShape<Db, Q, "insert">>;
     }
   : unknown) &
-  (Q extends { set: infer U } ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">>> } : unknown);
+  (Q extends { set: infer U }
+    ? { readonly set: U & NoExtraKeys<U, SetOf<WriteShape<Db, Q, "update">, string>> }
+    : unknown);
 
 /** What a `where` may be keyed by: this relation's columns, a group, or an embedded dotted path. */
 type WhereKeys<Db extends AnyDatabase, S extends Schema<Db>, T extends Table<Db, S>> =

@@ -208,10 +208,23 @@ export const compileExpression = (node: unknown, scope: Scope): string => {
 // SET
 // ---------------------------------------------------------------------------
 
-/** The right-hand side of `column = …`: an expression, or `DEFAULT`. */
-const assigned = (node: unknown, scope: Scope): string => {
+/**
+ * The right-hand side of `column = …`: an expression, or `DEFAULT`.
+ *
+ * `SET col = DEFAULT` on a column that has none is `SET col = NULL` as far as PostgreSQL is
+ * concerned, which is a refusal on a `NOT NULL` column and a silent null everywhere else -- so it is
+ * refused here, where the column is still named.
+ */
+const assigned = (node: unknown, column: string, scope: Scope): string => {
   if (isObject(node) && Object.keys(node).length === 1 && "$default" in node) {
     if (node["$default"] !== true) throw bad("Write { $default: true } for DEFAULT");
+    const col = scope.rel.columns.find((c) => c.name === column);
+    if (col && !col.hasDefault) {
+      throw bad(
+        `The '${column}' column of '${scope.rel.name}' has no DEFAULT`,
+        "Without one, DEFAULT is null: set the value you mean, or null outright",
+      );
+    }
     return "DEFAULT";
   }
   return compileExpression(node, scope);
@@ -237,7 +250,7 @@ export const compileSet = (set: Record<string, unknown>, rel: Relation, alias: s
       throw bad(`Unknown key '${key}' in set`, "The keys of set are the columns of the table");
     } else if (isExpression(value)) {
       columnOf(rel, key);
-      clauses.push(`${quoteIdent(key)} = ${assigned(value, scope)}`);
+      clauses.push(`${quoteIdent(key)} = ${assigned(value, key, scope)}`);
     } else {
       plain[key] = value;
     }

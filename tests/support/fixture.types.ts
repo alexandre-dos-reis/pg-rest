@@ -43,6 +43,7 @@ type DatabasePgRestApiRelations = {
       total?: number | null;
       placed_at?: string | null;
     };
+    defaults: never;
     pk: [];
     insertable: true;
     updatable: true;
@@ -62,6 +63,7 @@ type DatabasePgRestApiRelations = {
     };
     insert: never;
     update: never;
+    defaults: never;
     pk: [];
     insertable: false;
     updatable: false;
@@ -96,6 +98,7 @@ type DatabasePgRestApiRelations = {
       tags?: string[] | null;
       created_at?: string;
     };
+    defaults: "id" | "created_at";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -125,6 +128,7 @@ type DatabasePgRestApiRelations = {
       name?: string;
       manager_id?: number | null;
     };
+    defaults: "id";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -150,6 +154,7 @@ type DatabasePgRestApiRelations = {
       seen?: ("sad" | "ok" | "happy")[] | null;
       note?: string | null;
     };
+    defaults: "mood";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -172,6 +177,7 @@ type DatabasePgRestApiRelations = {
       owner?: string;
       body?: string;
     };
+    defaults: "id" | "owner";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -194,6 +200,7 @@ type DatabasePgRestApiRelations = {
       product_id?: number;
       qty?: number;
     };
+    defaults: "qty";
     pk: ["order_id", "product_id"];
     insertable: true;
     updatable: true;
@@ -228,6 +235,7 @@ type DatabasePgRestApiRelations = {
       total?: number;
       placed_at?: string | null;
     };
+    defaults: "id" | "status" | "total" | "placed_at";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -254,6 +262,7 @@ type DatabasePgRestApiRelations = {
       id?: number | null;
       name?: string | null;
     };
+    defaults: never;
     pk: [];
     insertable: true;
     updatable: true;
@@ -279,6 +288,7 @@ type DatabasePgRestApiRelations = {
       geom?: unknown;
       area?: unknown;
     };
+    defaults: never;
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -301,6 +311,7 @@ type DatabasePgRestApiRelations = {
       name?: string;
       price?: number;
     };
+    defaults: "id";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -324,6 +335,7 @@ type DatabasePgRestApiRelations = {
       client_id?: number;
       bio?: string | null;
     };
+    defaults: never;
     pk: ["client_id"];
     insertable: true;
     updatable: true;
@@ -355,6 +367,7 @@ type DatabasePgRestApiRelations = {
       branches?: DatabasePgRestCompositeInput<DatabasePgRestCompositeApiAddress[]> | null;
       meta?: unknown;
     };
+    defaults: "id";
     pk: ["id"];
     insertable: true;
     updatable: true;
@@ -410,6 +423,7 @@ type DatabasePgRestV2Relations = {
       id?: number;
       label?: string;
     };
+    defaults: "id";
     pk: ["id"];
     insertable: true;
     updatable: true;
