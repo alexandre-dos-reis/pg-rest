@@ -26,7 +26,7 @@ import {
 import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
-export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
+export type { DbAdapter, DbSession, Row } from "@tsql/adapters";
 export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 export type { PreRequest, PreRequestInfo } from "./query";
 export { describeErrorKind } from "./kinds";
@@ -181,7 +181,7 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
    *
    * ```ts ignore
    * const { data, error } = await pgRest.transaction(async (tx) => {
-   *   const order = await tx.insert({ table: "orders", rows: { client_id: 1 }, single: true });
+   *   const order = await tx.insert({ table: "orders", rows: { client_id: 1 } });
    *   await tx.insert({ table: "order_items", rows: itemsFor(order.data.id) });
    *   return order.data;
    * }, { role: "authenticated", claims: { sub: user.id } });

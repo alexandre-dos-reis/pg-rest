@@ -5,7 +5,7 @@ import type { SchemaCache } from "@tsql/core/schema";
 import type { HttpConfig, PreRequest } from "./http";
 import { errorResponse, handleSafely } from "./serve";
 
-export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
+export type { DbAdapter, DbSession, Row } from "@tsql/adapters";
 export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 export type { PreRequest, PreRequestInfo } from "./http";
 export type { EngineOptions } from "@tsql/core/engine";

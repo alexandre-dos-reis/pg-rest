@@ -1,3 +1,5 @@
+import { ALIAS } from "../../packages/core/src/constants";
+
 /**
  * Requests replayed against both PostgREST 16 and pg-rest on the same database.
  * `as`: who is calling (anon by default). `known`: documented, intentional difference —
@@ -633,6 +635,14 @@ const allCases: Case[] = [
   get("/rpc/add?a=1&bb=2", { name: "rpc partially matching parameters" }),
   get("/rpc/addd?a=1&b=2", { name: "rpc function name typo with parameters" }),
   get("/rpc/order_client", { name: "rpc function taking a row" }),
+  get("/clients?id=eq.1;id=eq.2", { name: "semicolon separates query parameters" }),
+  get("/clients/", { name: "trailing slash on a table" }),
+  get("/rpc/", { name: "rpc without a name" }),
+  get("/clients?order=id", { name: "Accept with unsupported type", headers: { Accept: "application/foo, text/bar" } }),
+  post("/clients", { name: "x" }, { name: "unsupported Content-Type", headers: { "Content-Type": "application/foo" } }),
+  get("/clients?name=fts(a b).x", { name: "fts config forwarded as is" }),
+  get("/clients?select=id", { name: "empty timezone preference", headers: { Prefer: "timezone=" } }),
+  post("/rpc/echo_json", 5, { name: "rpc scalar JSON body" }),
   post("/rpc/echo_json", { body: { k: "v" } }),
   post("/rpc/nothing", {}, { as: "alice" }),
   post("/rpc/boom", {}),
@@ -652,7 +662,43 @@ const allCases: Case[] = [
   { name: "PATCH unknown table", method: "PATCH", path: "/nope", body: {}, headers: J },
   { name: "TRACE not supported", method: "TRACE", path: "/clients" },
   get("/", { name: "OpenAPI root status", ignoreBody: true }),
+
+  // ── hostile names: the key of a filter, columns and on_conflict are read with PostgREST's grammar ──
+  get("/clients?%27%20OR%20%271%27%3D%271=eq.1", { name: "filter key that is not a name" }),
+  get("/clients?id%3B%20DROP%20TABLE%20api.clients=eq.1", {
+    name: "filter key followed by SQL (ignored after the name)",
+  }),
+  get("/clients?id%2C(select%20pg_sleep(3))=eq.1", { name: "filter key followed by a subquery" }),
+  get("/clients?meta-%3E%3E%22=eq.1", { name: "filter key with an open quote in a JSON path" }),
+  get("/clients?select=id,orders(id)&orders.%27%20OR%20%271%27%3D%271=eq.1", {
+    name: "embedded filter key that is not a name",
+  }),
+  get("/rpc/orders_by_status?s=x&%27%20OR%20%271%27%3D%271=eq.1", { name: "rpc filter key that is not a name" }),
+  get("/rpc/add?%27%20OR%20%271%27%3D%271=1", { name: "rpc argument that is not a name" }),
+  get("/rpc/add?a%3B%20DROP%20TABLE%20api.clients=1&b=1", { name: "rpc argument followed by SQL" }),
+  post(
+    "/clients?columns=%27%20OR%20%271%27%3D%271",
+    { name: "x" },
+    { as: "alice", headers: { Prefer: "tx=rollback" } },
+  ),
+  post(
+    "/clients?columns=name%3B%20DROP%20TABLE%20api.clients",
+    { name: "x" },
+    { as: "alice", headers: { Prefer: "tx=rollback" } },
+  ),
+  post(
+    "/clients?on_conflict=%27%20OR%20%271%27%3D%271",
+    { id: 1, name: "x" },
+    { as: "alice", headers: { Prefer: "resolution=merge-duplicates,tx=rollback" } },
+  ),
+  get("/clients?order=id.desc.nullsfoo", { name: "order nulls that is not first or last" }),
+  get("/clients?order=id.desc.nullsfirst%3B%20SELECT%20pg_sleep(3)", { name: "order nulls followed by SQL" }),
 ];
+
+/** The CSV header of a scalar result: our internal alias, not PostgREST's. */
+const CSV_SCALAR_HEADER =
+  "the CSV header is the column name of the scalar result, which is an internal alias: " +
+  `\`${ALIAS}_scalar\` here, \`pgrst_scalar\` in PostgREST`;
 
 /**
  * Differences that are understood and accepted (or not implemented yet), keyed by case name.
@@ -661,6 +707,12 @@ const allCases: Case[] = [
 const KNOWN: Record<string, string> = {
   "GET /clients?select=id::int4%20from%20x":
     "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
+  // CSV takes its header from the row's column names, so the alias the engine gives a scalar result
+  // leaks into the body: PostgREST calls it `pgrst_scalar`, we call it `tsql_scalar` (ALIAS).
+  "csv of a scalar function": CSV_SCALAR_HEADER,
+  "csv of a set of scalars": CSV_SCALAR_HEADER,
+  "csv of a json function": CSV_SCALAR_HEADER,
+  "scalar as csv": CSV_SCALAR_HEADER,
 };
 
 export const cases: Case[] = allCases.map((c) => {

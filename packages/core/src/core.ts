@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession } from "./adapter";
+import type { DbAdapter, DbSession } from "@tsql/adapters";
 import { DbQueryError, EngineError } from "./errors";
 import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
@@ -6,10 +6,11 @@ import { type SqlOperation, type SqlOutputFormat, type SqlPreferences } from "./
 import { literal, quoteIdent } from "./quote";
 import { getRelation, type Relation, type SchemaCache } from "./schema";
 import { buildRead } from "./sql/read";
-import { buildRpc, isSingleUnnamedParam, resolveFunction, type RpcCall } from "./sql/rpc";
+import { type BodyType, buildRpc, isSingleUnnamedParam, resolveFunction, type RpcCall } from "./sql/rpc";
 import { buildStatement, type BodyShape } from "./sql/statement";
 import { type Values, bindFrom, inlined } from "./sql/values";
 import { buildDelete, buildInsert, upsertColumns, buildUpdate, type JsonObject, type Returning } from "./sql/write";
+import { ALIAS, ROOT_ALIAS } from "./constants";
 
 /** Who is making the call, as far as the database is concerned. */
 export interface SqlRequestContext {
@@ -177,7 +178,7 @@ const ctxEntries = (
   const where: Array<[string, string]> = call.settings ? call.settings.map(([k, v]) => [k, v]) : [];
   const searchPath = [schema, ...env.config.extraSearchPath].map(quoteIdent).join(", ");
   where.push(["search_path", searchPath]);
-  if (prefer.timezone) where.push(["timezone", prefer.timezone]);
+  if (prefer.timezone !== undefined) where.push(["timezone", prefer.timezone]);
   if (part === "statement") return where;
   return [...whoEntries(role, claims), ...where, ...settingsEntries(ctx)];
 };
@@ -318,10 +319,10 @@ export const planTable = (
       // The call's filters selected the rows to write; they must not be applied
       // again to the rows that were written (an UPDATE may no longer match them).
       const resultQuery: ParsedQuery = { ...query, root: { ...query.root, filters: [], presence: [] } };
-      const read = buildRead({ cache: env.cache, rel, from: "pgrst_source", query: resultQuery });
+      const read = buildRead({ cache: env.cache, rel, from: `${ALIAS}_source`, query: resultQuery });
       return { rows: read.rows, shape: shapeFor(r) };
     }
-    return { rows: "SELECT * FROM pgrst_source", shape: shapeFor(r) };
+    return { rows: `SELECT * FROM ${ALIAS}_source`, shape: shapeFor(r) };
   };
 
   const common = {
@@ -359,7 +360,7 @@ export const planTable = (
         shape,
         stripNulls: strip,
         ...formatOptions(format, qp),
-        upsertColumns: insertSql.includes("pgrst_inserted") ? upsertColumns(rel, returning) : undefined,
+        upsertColumns: insertSql.includes(`${ALIAS}_inserted`) ? upsertColumns(rel, returning) : undefined,
       }),
     };
   }
@@ -392,7 +393,7 @@ export const planTable = (
         shape: emptyShape,
         statement: buildStatement({
           source: "SELECT 1 WHERE FALSE",
-          rows: "SELECT * FROM pgrst_source",
+          rows: `SELECT * FROM ${ALIAS}_source`,
           shape: emptyShape,
           ...formatOptions(format, qp),
         }),
@@ -527,20 +528,29 @@ export const planRpc = (
   prefer: SqlPreferences,
   format: SqlOutputFormat,
   range: { offset: number; limit?: number } | undefined,
-  body: { kind: string; value: unknown } | undefined,
+  givenBody: { kind: string; value: unknown; raw?: string; mime?: string } | undefined,
 ): SqlPlan => {
   let argValues: Record<string, unknown> = {};
-  let nonObjectBody = false;
   const isObj = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
   const getArgKeys = new Set<string>();
   const bare = qp.bare;
+  // PostgREST reads a JSON body that is neither an object nor an array (`"a"`, `1`, `null`) as an empty array
+  const scalar = givenBody?.kind === "json" && (givenBody.value === null || typeof givenBody.value !== "object");
+  const body = scalar ? { kind: "json", value: [] as unknown[], raw: "[]" } : givenBody;
+  const bodyType: BodyType =
+    body?.kind !== "raw"
+      ? "json"
+      : body.mime === "text/xml"
+        ? "xml"
+        : body.mime === "application/octet-stream"
+          ? "bytea"
+          : "text";
 
   if (write) {
     if (body) {
       const v = body.value;
       if (isObj(v)) argValues = v;
       else {
-        nonObjectBody = true;
         if (Array.isArray(v) && v.length > 0) {
           // PostgREST reads the function arguments from the objects of an array body; they must agree on their keys
           const keysOf = (o: unknown) => (isObj(o) ? Object.keys(o).sort().join("\u0000") : undefined);
@@ -565,14 +575,14 @@ export const planRpc = (
     }
   }
   const provided = Object.keys(argValues);
-  const fn = resolveFunction(env.cache, schema, name, new Set(provided), nonObjectBody, write);
+  const fn = resolveFunction(env.cache, schema, name, new Set(provided), body !== undefined && write, write, bodyType);
   // GET: repeated parameters make a list, and a variadic parameter always takes one
   for (const a of fn.args) {
     if (a.variadic && getArgKeys.has(a.name) && !Array.isArray(argValues[a.name]))
       argValues[a.name] = [argValues[a.name]];
   }
-  const rawBody = nonObjectBody && isSingleUnnamedParam(fn);
-  const call = buildRpc(env.cache, fn, provided, rawBody);
+  const rawBody = write && body !== undefined && isSingleUnnamedParam(fn, bodyType);
+  const call = buildRpc(env.cache, fn, provided, rawBody, bodyType);
 
   const fnArgNames = new Set(fn.args.map((a) => a.name));
   const query = qp.parse({
@@ -580,10 +590,9 @@ export const planRpc = (
     // On GET, parameters that name function arguments are not filters.
     allowFilterKey: (k) => write || !fnArgNames.has(k),
   });
-  const argsJson = rawBody ? JSON.stringify(body!.value) : JSON.stringify(argValues);
-  const params = call.usesBody
-    ? [rawBody && body!.kind === "json" && typeof body!.value === "string" ? (body!.value as string) : argsJson]
-    : [];
+  // a single unnamed parameter gets the body as it came, not as it parses
+  const argsJson = rawBody ? (body!.raw ?? JSON.stringify(body!.value)) : JSON.stringify(argValues);
+  const params = call.usesBody ? [argsJson] : [];
   const strip = format.kind === "json" || format.kind === "object" ? format.stripNulls : false;
   // the function's arguments are `$1` when it has a body, and the filters' parameters come after
   const values = valuesFor(qp, params.length);
@@ -799,7 +808,7 @@ export const execute = async (
       // The root table is aliased internally; PostgreSQL error texts should name the real table.
       if (e instanceof DbQueryError && plan.kind !== "rpc" && plan.rel) {
         const fix = (t: string | undefined) =>
-          t?.replace(/"pgrst_root"/g, `"${plan.rel!.name}"`).replace(/pgrst_root\./g, `${plan.rel!.name}.`);
+          t?.replaceAll(`"${ROOT_ALIAS}"`, `"${plan.rel!.name}"`).replaceAll(`${ROOT_ALIAS}.`, `${plan.rel!.name}.`);
         throw new DbQueryError(e.sqlState, fix(e.message) ?? e.message, fix(e.detail), fix(e.hint));
       }
       throw e;

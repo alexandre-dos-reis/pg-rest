@@ -21,14 +21,22 @@
         "typescript": "7.1.0-beta",
       },
     },
+    "packages/adapters": {
+      "name": "@tsql/adapters",
+      "version": "0.0.0",
+    },
     "packages/core": {
       "name": "@tsql/core",
       "version": "0.0.0",
+      "devDependencies": {
+        "@tsql/adapters": "workspace:*",
+      },
     },
     "packages/query": {
       "name": "@tsql/query",
       "version": "0.0.0",
       "devDependencies": {
+        "@tsql/adapters": "workspace:*",
         "@tsql/core": "workspace:*",
       },
       "peerDependencies": {
@@ -46,6 +54,7 @@
       "name": "@tsql/rest",
       "version": "0.0.0",
       "devDependencies": {
+        "@tsql/adapters": "workspace:*",
         "@tsql/core": "workspace:*",
       },
       "peerDependencies": {
@@ -238,6 +247,8 @@
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
 
     "@supabase/postgrest-js": ["@supabase/postgrest-js@2.119.0", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-qBmcjEFO7Ptyf5qvOXYJa1s4bfA4zsMIFf2i+h2zd6RRTDLwquX8z1mnS9djNOJjbiO1OGFh5Y2Lc2k2pA8TMw=="],
+
+    "@tsql/adapters": ["@tsql/adapters@workspace:packages/adapters"],
 
     "@tsql/core": ["@tsql/core@workspace:packages/core"],
 

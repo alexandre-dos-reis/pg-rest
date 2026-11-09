@@ -70,21 +70,17 @@ export const parseTarget = (pathname: string, basePath = ""): Target => {
     else if (path.startsWith(`${base}/`)) path = path.slice(base.length);
     else throw new PgRestError(404, "PGRST125", `Invalid path specified in request URL`);
   }
-  const segs = path
-    .split("/")
-    .filter(Boolean)
-    .map((s) => {
-      try {
-        return decodeURIComponent(s);
-      } catch {
-        throw new PgRestError(400, "PGRST100", "Invalid URL encoding in path");
-      }
-    });
-  if (segs.length === 0) return { type: "root" };
-  if (segs[0] === "rpc") {
-    if (segs.length !== 2) throw new PgRestError(404, "PGRST125", "Invalid path specified in request URL");
-    return { type: "rpc", name: segs[1]! };
-  }
+  // PostgREST splits what is left after the leading slashes: `/clients/` is two segments, the second one empty
+  const rest = path.replace(/^\/+/, "");
+  if (rest === "") return { type: "root" };
+  const segs = rest.split("/").map((s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      throw new PgRestError(400, "PGRST100", "Invalid URL encoding in path");
+    }
+  });
+  if (segs.length === 2 && segs[0] === "rpc") return { type: "rpc", name: segs[1]! };
   if (segs.length !== 1) throw new PgRestError(404, "PGRST125", "Invalid path specified in request URL");
   return { type: "table", name: segs[0]! };
 };
@@ -177,13 +173,26 @@ const parseAcceptEntry = (entry: string) => {
     else if (k === "for") forType = v;
     else if (k === "options") options = v.split("|").filter((o) => PLAN_OPTIONS.has(o));
   }
-  return { type: type.toLowerCase(), q: Number.isNaN(q) ? 1 : q, stripNulls, forType, options };
+  // an entry that is nothing PostgREST knows is told back as it came, without its spaces
+  return {
+    type: type.toLowerCase(),
+    q: Number.isNaN(q) ? 1 : q,
+    stripNulls,
+    forType,
+    options,
+    raw: entry.replace(/\s+/g, ""),
+  };
 };
 
 const PLAN_OPTIONS: ReadonlySet<string> = new Set(["analyze", "verbose", "settings", "buffers", "wal"]);
 
-const describeEntry = (e: { type: string; forType: string | undefined; options: ReadonlyArray<string> }): string => {
-  if (!e.type.startsWith("application/vnd.pgrst.plan")) return e.type;
+const describeEntry = (e: {
+  type: string;
+  forType: string | undefined;
+  options: ReadonlyArray<string>;
+  raw: string;
+}): string => {
+  if (!e.type.startsWith("application/vnd.pgrst.plan")) return e.raw;
   const fmt = e.type.endsWith("+json") ? "+json" : "+text";
   const opts = e.options.length ? `; options=${e.options.join("|")}` : "";
   return `application/vnd.pgrst.plan${fmt}; for="${e.forType ?? "application/json"}"${opts}`;
@@ -196,13 +205,11 @@ export const parseAccept = (
   planEnabled = false,
   choices: ReadonlyArray<MediaChoice> = [],
 ): Negotiated => {
-  const entries = (accept ?? "*/*")
+  const entries = (accept === null || accept.trim() === "" ? "*/*" : accept)
     .split(",")
     .map((e) => e.trim())
-    .filter(Boolean)
     .map(parseAcceptEntry)
     .sort((a, b) => b.q - a.q);
-  if (entries.length === 0) entries.push({ type: "*/*", q: 1, stripNulls: false, forType: undefined, options: [] });
 
   for (const { type, stripNulls, forType, options } of entries) {
     if (
@@ -211,7 +218,14 @@ export const parseAccept = (
       type === "application/vnd.pgrst.plan+text"
     ) {
       if (!planEnabled || isRoot) continue;
-      const inner = parseAccept(forType ?? "application/json", false, false);
+      let inner: Negotiated;
+      try {
+        inner = parseAccept(forType ?? "application/json", false, false);
+      } catch (e) {
+        // the message names what was asked for, not what the plan was asked about
+        if (e instanceof PgRestError && e.code === "PGRST107") continue;
+        throw e;
+      }
       return {
         kind: "plan",
         format: type.endsWith("+json") ? "json" : "text",
@@ -255,16 +269,32 @@ export type BodyKind = "json" | "urlencoded" | "csv";
 export const parseBody = async (
   request: Request,
   method: Method,
-): Promise<{ readonly kind: BodyKind; readonly value: unknown } | undefined> => {
+  /** A function call: it also takes a raw body. */
+  rpc = false,
+): Promise<
+  | { readonly kind: BodyKind | "raw"; readonly value: unknown; readonly raw?: string; readonly mime?: string }
+  | undefined
+> => {
   // Only writes carry a payload; GET/HEAD/DELETE/OPTIONS bodies are ignored.
   if (method !== "POST" && method !== "PATCH" && method !== "PUT") return undefined;
   const ct = (request.headers.get("content-type") ?? "application/json").split(";")[0]!.trim().toLowerCase();
+  if (rpc && (ct === "text/plain" || ct === "text/xml" || ct === "application/octet-stream")) {
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
+    return {
+      kind: "raw",
+      value: text,
+      raw: ct === "application/octet-stream" ? Buffer.from(bytes).toString("hex") : text,
+      mime: ct,
+    };
+  }
   const text = await request.text();
 
   if (ct === "application/json" || ct === "application/vnd.pgrst.array+json") {
-    if (text.trim() === "") return undefined;
+    // a function that takes the body whole gets it empty, and the database refuses it
+    if (text.trim() === "") return rpc ? { kind: "json", value: {}, raw: text } : undefined;
     try {
-      return { kind: "json", value: JSON.parse(text) };
+      return { kind: "json", value: JSON.parse(text), raw: text };
     } catch {
       throw new PgRestError(400, "PGRST102", "Empty or invalid json");
     }
@@ -277,7 +307,7 @@ export const parseBody = async (
   if (ct === "text/csv") {
     return { kind: "csv", value: parseCsv(text) };
   }
-  throw new PgRestError(415, "PGRST107", `Content-Type not acceptable: ${ct}`);
+  throw new PgRestError(400, "PGRST102", `Content-Type not acceptable: ${request.headers.get("content-type") ?? ""}`);
 };
 
 /** Minimal RFC 4180 CSV → array of objects (first row is the header). */

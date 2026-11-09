@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession, Row } from "../adapter";
+import type { DbAdapter, DbSession, Row } from ".";
 
 /** All that is needed to run a query, inside a transaction or outside one. */
 interface PostgresJsQueryable {

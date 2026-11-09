@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession, Row } from "../adapter";
+import type { DbAdapter, DbSession, Row } from ".";
 
 /** The subset of PGlite (`@electric-sql/pglite`) that is used. */
 interface PGliteQueryable {

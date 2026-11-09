@@ -1,3 +1,4 @@
+import { ALIAS } from "../constants";
 import { literal } from "../quote";
 /**
  * How the rows produced by the call are turned into a body.
@@ -41,9 +42,9 @@ const bodyExpr = (shape: BodyShape, strip: boolean, render?: string): string => 
     case "object":
       return `coalesce((${wrap("json_agg(_t)")} -> 0), 'null'::json)::text`;
     case "scalar-array":
-      return `coalesce(json_agg(_t.pgrst_scalar), '[]'::json)::text`;
+      return `coalesce(json_agg(_t.${ALIAS}_scalar), '[]'::json)::text`;
     case "scalar":
-      return `coalesce((json_agg(_t.pgrst_scalar) -> 0)::text, 'null')`;
+      return `coalesce((json_agg(_t.${ALIAS}_scalar) -> 0)::text, 'null')`;
     case "none":
       return `''::text`;
   }
@@ -60,11 +61,11 @@ export const buildStatement = (o: StatementOptions): string => {
   const up = o.upsertColumns;
   const ctes = [
     ...(o.source && up
-      ? [`pgrst_ins AS (${o.source})`, `pgrst_source AS (SELECT ${up.join(", ")} FROM pgrst_ins)`]
+      ? [`${ALIAS}_ins AS (${o.source})`, `${ALIAS}_source AS (SELECT ${up.join(", ")} FROM ${ALIAS}_ins)`]
       : o.source
-        ? [`pgrst_source AS (${o.source})`]
+        ? [`${ALIAS}_source AS (${o.source})`]
         : []),
-    `pgrst_body AS (${o.rows})`,
+    `${ALIAS}_body AS (${o.rows})`,
   ];
   return (
     `WITH ${ctes.join(", ")} SELECT ` +
@@ -73,8 +74,8 @@ export const buildStatement = (o: StatementOptions): string => {
     `${o.count ? `(${o.count})::text` : "NULL::text"} AS total_result_set, ` +
     (o.read ?? []).map((name, i) => `nullif(current_setting(${literal(name)}, true), '') AS setting_${i}, `).join("") +
     (up
-      ? `(EXISTS (SELECT 1 FROM pgrst_ins) AND NOT EXISTS (SELECT 1 FROM pgrst_ins WHERE pgrst_inserted)) AS none_inserted `
+      ? `(EXISTS (SELECT 1 FROM ${ALIAS}_ins) AND NOT EXISTS (SELECT 1 FROM ${ALIAS}_ins WHERE ${ALIAS}_inserted)) AS none_inserted `
       : `false AS none_inserted `) +
-    `FROM pgrst_body AS _t`
+    `FROM ${ALIAS}_body AS _t`
   );
 };

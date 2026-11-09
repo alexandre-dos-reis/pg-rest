@@ -241,12 +241,31 @@ describe.skipIf(!hasDb)("query()", () => {
 
   describe("writes", () => {
     test("insert returns its rows, unlike HTTP, and returning: minimal restores that", async () => {
-      const inserted = await t.api.insert<Array<{ id: number; name: string }>>(
+      // one object in, one object out; `rows` says the cardinality, so `single` has nothing to add
+      const inserted = await t.api.insert<{ id: number; name: string }>(
         { table: "clients", rows: { name: "Hopper" }, returning: ["id", "name"] },
         authed(),
       );
-      expect(inserted.data).toEqual([{ id: expect.any(Number), name: "Hopper" }]);
+      expect(inserted.data).toEqual({ id: expect.any(Number), name: "Hopper" });
       expect(inserted.error).toBeNull();
+
+      const bulk = await t.api.insert<Array<{ name: string }>>(
+        { table: "clients", rows: [{ name: "Lovelace" }, { name: "Babbage" }], returning: ["name"] },
+        authed(),
+      );
+      expect(bulk.data).toEqual([{ name: "Lovelace" }, { name: "Babbage" }]);
+
+      const listed = await t.api.insert<Array<{ name: string }>>(
+        { table: "clients", rows: [{ name: "Alone" }], returning: ["name"] },
+        authed(),
+      );
+      expect(listed.data).toEqual([{ name: "Alone" }]);
+
+      const asked = await t.api.insert<Array<{ name: string }>>(
+        { table: "clients", rows: { name: "Listed" }, returning: ["name"], single: false },
+        authed(),
+      );
+      expect(asked.data).toEqual([{ name: "Listed" }]);
 
       const quiet = await t.api.insert({ table: "clients", rows: { name: "Quiet" }, returning: "minimal" }, authed());
       expect(quiet.data).toBeNull();
@@ -255,7 +274,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
     test("upsert, update and delete", async () => {
       await t.api.insert({ table: "products", rows: { id: 90, name: "Pad", price: 5 } }, authed());
-      const up = await t.api.upsert<Array<{ name: string }>>(
+      const up = await t.api.upsert<{ name: string }>(
         {
           table: "products",
           rows: { id: 90, name: "Pad mk2", price: 6 },
@@ -264,7 +283,7 @@ describe.skipIf(!hasDb)("query()", () => {
         },
         authed(),
       );
-      expect(up.data).toEqual([{ name: "Pad mk2" }]);
+      expect(up.data).toEqual({ name: "Pad mk2" });
 
       const patched = await t.api.update<Array<{ price: number }>>(
         { table: "products", set: { price: 7 }, where: { id: 90 }, returning: ["price"] },
@@ -278,6 +297,37 @@ describe.skipIf(!hasDb)("query()", () => {
       );
       expect(deleted.data).toEqual([{ id: 90 }]);
       expect((await t.api.select({ table: "products", where: { id: 90 } })).data).toEqual([]);
+    });
+
+    test("an insert of one object whose row never arrives is not_single_row", async () => {
+      // the shape comes from `rows`, so a trigger that skips the row leaves the object unsatisfied --
+      // the one case where inferring the shape turns an empty answer into an error
+      const own = await makeApi();
+      try {
+        await own.db.adapter.query(`
+          CREATE FUNCTION api.skip() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+          CREATE TABLE api.skipped (id serial PRIMARY KEY, name text);
+          CREATE TRIGGER skip_it BEFORE INSERT ON api.skipped FOR EACH ROW EXECUTE FUNCTION api.skip();
+          GRANT ALL ON api.skipped TO authenticated;
+          GRANT USAGE ON SEQUENCE api.skipped_id_seq TO authenticated;
+        `);
+        await own.api.reloadSchema();
+
+        const one = await own.api.insert({ table: "skipped", rows: { name: "x" } }, authed());
+        expect(one.error?.kind).toBe("not_single_row");
+
+        // an array asked for a list, and an empty list is an answer
+        const many = await own.api.insert({ table: "skipped", rows: [{ name: "x" }] }, authed());
+        expect(many.error).toBeNull();
+        expect(many.data).toEqual([]);
+
+        // so is `single: false` on the object form
+        const asked = await own.api.insert({ table: "skipped", rows: { name: "x" }, single: false }, authed());
+        expect(asked.error).toBeNull();
+        expect(asked.data).toEqual([]);
+      } finally {
+        await own.close();
+      }
     });
 
     test("maxAffected refuses a too wide update", async () => {

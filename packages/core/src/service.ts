@@ -1,4 +1,4 @@
-import type { DbAdapter } from "./adapter";
+import type { DbAdapter } from "@tsql/adapters";
 import { type SchemaCache, introspect } from "./schema";
 
 /** The schema could not be read from the database catalog. */

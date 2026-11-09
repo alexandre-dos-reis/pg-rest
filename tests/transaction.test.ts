@@ -35,15 +35,16 @@ describe.skipIf(!hasDb)("transaction()", () => {
         rows: { name: "Ada" },
         single: true,
       });
-      const order = await tx.insert<Array<{ id: number }>>({
+      // the same shape without asking: one `rows` object answers with one row
+      const order = await tx.insert<{ id: number }>({
         table: "orders",
         rows: { client_id: client.data.id, total: 10 },
       });
-      return { client: client.data.id, orders: order.data.length };
+      return { client: client.data.id, order: order.data.id };
     }, authed());
 
     expect(r.error).toBeNull();
-    expect(r.data).toEqual({ client: expect.any(Number), orders: 1 });
+    expect(r.data).toEqual({ client: expect.any(Number), order: expect.any(Number) });
     expect(r.count).toBeUndefined();
     expect(r.error).toBeNull();
     expect(await names()).toContain("Ada");

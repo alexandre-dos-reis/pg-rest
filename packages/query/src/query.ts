@@ -1,4 +1,4 @@
-import type { DbSession } from "@tsql/core/adapter";
+import type { DbSession } from "@tsql/adapters";
 import {
   type SqlCall,
   type CoreConfig,
@@ -38,7 +38,7 @@ import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from 
 import { getRelation } from "@tsql/core/schema";
 import { literal, quoteIdent } from "@tsql/core/quote";
 import { compileSet } from "@tsql/core/sql/expression";
-import { ROOT_ALIAS } from "@tsql/core/sql/read";
+import { ROOT_ALIAS } from "@tsql/core/constants";
 import type { SqlOperation, SqlOutputFormat, SqlPreferences } from "@tsql/core/parse/sql-options";
 import type { JsonObject } from "@tsql/core/sql/write";
 
@@ -264,7 +264,10 @@ export type QueryReturning = "representation" | "minimal" | Select;
 interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
-  /** Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. */
+  /**
+   * Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. An insert of a
+   * single `rows` object does this on its own; `single: false` asks it for the array.
+   */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
   readonly count?: "exact" | "planned" | "estimated" | undefined;
@@ -746,6 +749,11 @@ const conditionsOf = (w: Where): FilterNode[] =>
 
 const orderOf = (o: Order): OrderTerm[] => {
   if (typeof o === "string") return parseOrderTerms(o);
+  // `nulls` ends up in the statement as a keyword: the type says "first" | "last", but a value that
+  // came from JSON is not checked by the type
+  if (o.nulls !== undefined && o.nulls !== "first" && o.nulls !== "last") {
+    throw bad(`Invalid nulls placement ${JSON.stringify(o.nulls)}`, 'Use "first" or "last".');
+  }
   return [{ field: parseField(o.column), dir: o.desc ? "desc" : "asc", ...(o.nulls ? { nulls: o.nulls } : {}) }];
 };
 
@@ -866,8 +874,29 @@ const columnsOf = (input: QueryInput): Select | undefined => {
   return asked === undefined || typeof asked === "string" ? undefined : asked;
 };
 
+/**
+ * The names a query carries are identifiers: they are quoted later, but a value that is not a string
+ * must not be turned into one by `String()` (an object with its own `toString`).
+ */
+const assertNames = (input: QueryInput): void => {
+  // a typed API does not cut a value where the database would: a NUL byte is refused
+  try {
+    if (JSON.stringify(input).includes("\\u0000")) throw bad("A NUL byte cannot be part of a query");
+  } catch (e) {
+    if (e instanceof EngineError) throw e;
+  }
+  for (const [what, v] of [
+    ["table", (input as SelectQuery).table],
+    ["rpc", (input as RpcQuery).rpc],
+    ["schema", input.schema],
+  ] as const) {
+    if (v !== undefined && typeof v !== "string") throw bad(`"${what}" must be a string`);
+  }
+};
+
 /** `input` as the engine's parsed form: what a query string with the same meaning parses to. */
 export const toParsed = (input: QueryInput): ParsedQuery => {
+  assertNames(input);
   const embeds: Array<{ readonly node: Embed; readonly path: ReadonlyArray<string> }> = [];
   const listed = columnsOf(input);
   const select: SelectItem[] = listed?.length ? selectOf(listed, [], embeds) : [{ kind: "star" }];
@@ -939,6 +968,18 @@ const returningOf = (input: QueryInput): "representation" | "minimal" | undefine
   return typeof asked === "string" ? asked : "representation";
 };
 
+/**
+ * Whether the answer is one object rather than a list. `single` says so outright; an insert of one
+ * object says so by itself -- `rows` is the only write input that states its own cardinality, an
+ * object being exactly one row by construction. `single: false` asks for the list back.
+ */
+const singleOf = (input: QueryInput): boolean => {
+  if (input.single !== undefined) return input.single;
+  if (isRpc(input) || !("action" in input)) return false;
+  if (input.action !== "insert" && input.action !== "upsert") return false;
+  return !Array.isArray((input as InsertQuery).rows);
+};
+
 const preferencesOf = (input: QueryInput): SqlPreferences => ({
   ...(returningOf(input) ? { return: returningOf(input) } : {}),
   ...(input.count ? { count: input.count } : {}),
@@ -953,6 +994,7 @@ const preferencesOf = (input: QueryInput): SqlPreferences => ({
 const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext): Promise<Omit<QueryOk, "error">> => {
   if (isPrepared(given)) return runPrepared(env, given, ctx);
   const input = given;
+  assertNames(input);
   assertRole(env, ctx);
   if (isRpc(input) && "table" in input) {
     throw bad("A query names either a table or an rpc, not both");
@@ -960,7 +1002,7 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
   const schema = useSchema(env, input.schema);
   const operation = tableOperationOf(input);
   const prefer = preferencesOf(input);
-  const format: SqlOutputFormat = input.single
+  const format: SqlOutputFormat = singleOf(input)
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);

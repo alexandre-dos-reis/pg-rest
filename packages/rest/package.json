@@ -45,6 +45,7 @@
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
+    "@tsql/adapters": "workspace:*",
     "@tsql/core": "workspace:*"
   },
   "peerDependencies": {

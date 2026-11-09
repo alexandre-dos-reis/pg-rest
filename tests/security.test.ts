@@ -102,10 +102,14 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await t.db.adapter.query("DELETE FROM api.clients WHERE name = $1::text", [name]);
   });
 
-  test("NUL bytes are rejected, not forwarded", async () => {
-    const r = await t.get(`/clients?name=eq.${encodeURIComponent("a\u0000b")}`);
-    expect(r.status).toBeGreaterThanOrEqual(400);
-    expect(r.status).toBeLessThan(500);
+  test("a NUL byte ends a name or a value, as it does for PostgREST, and is never forwarded", async () => {
+    const cut = await t.get(`/clients?select=id&name=eq.${encodeURIComponent("Ada\u0000; DROP TABLE api.clients")}`);
+    const plain = await t.get("/clients?select=id&name=eq.Ada");
+    expect(cut.json()).toEqual(plain.json());
+    await intact();
+    // a typed call refuses it instead
+    const r = await t.api.select({ table: "clients", where: { name: "a\u0000b" } });
+    expect(r.error?.kind).toBe("invalid_query");
   });
 
   test("rpc arguments and headers are data", async () => {
@@ -144,7 +148,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
   });
 
   // query() builds the query parameters itself, so a value must never be able to end up read as syntax.
-  test("query(): hostile values stay values, hostile column names are refused", async () => {
+  test("select(): hostile values stay values, hostile column names are refused", async () => {
     for (const p of PAYLOADS) {
       expect((await t.api.select({ table: "clients", columns: ["id"], where: { name: p } })).data).toEqual([]);
       expect(
@@ -161,7 +165,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await intact();
   });
 
-  test("query(): hostile values and names in the expressions of set stay values or are refused", async () => {
+  test("select(): hostile values and names in the expressions of set stay values or are refused", async () => {
     const run = (set: object) => t.api.update({ table: "clients", set, where: { id: 3 } } as never, authed());
     for (const p of PAYLOADS) {
       // a string is a literal, whatever it says
@@ -177,13 +181,37 @@ describe.skipIf(!hasDb)("hostile input", () => {
     await intact();
   });
 
-  test("query(): a string with quotes round-trips unchanged", async () => {
+  // `nulls` is a keyword in the statement: a value that did not come through the type (JSON) must not reach it
+  test("select(): order's nulls only takes first or last, and names are strings", async () => {
+    for (const p of PAYLOADS) {
+      const r = await t.api.select({ table: "clients", order: [{ column: "id", nulls: p as never }] });
+      expect(r.error?.kind).toBe("invalid_query");
+    }
+    const timed = performance.now();
+    const r = await t.api.select({
+      table: "clients",
+      order: [{ column: "id", nulls: "first, (select pg_sleep(1)::text)" as never }],
+    });
+    expect(r.error?.kind).toBe("invalid_query");
+    expect(performance.now() - timed).toBeLessThan(900);
+    for (const nulls of ["first", "last"] as const) {
+      expect((await t.api.select({ table: "clients", order: [{ column: "id", nulls }] })).error).toBeNull();
+    }
+    // an object with its own toString is not a name
+    const name = { toString: () => "clients" };
+    expect((await t.api.select({ table: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.rpc({ rpc: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.select({ table: "clients", schema: name as never })).error?.kind).toBe("invalid_query");
+    await intact();
+  });
+
+  test("select(): a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x, (y)`;
-    const created = await t.api.insert<Array<{ name: string }>>(
+    const created = await t.api.insert<{ name: string }>(
       { table: "clients", rows: { name }, returning: ["name"] },
       { role: "authenticated" },
     );
-    expect(created.data).toEqual([{ name }]);
+    expect(created.data).toEqual({ name });
     const found = await t.api.select({ table: "clients", columns: ["name"], where: { name } });
     expect(found.data).toEqual([{ name }]);
     await t.db.adapter.query("DELETE FROM api.clients WHERE name = $1::text", [name]);

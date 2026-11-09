@@ -651,6 +651,14 @@ The method says what to do. A write returns the rows it touched unless you ask f
 that gives nothing back is of little use in a program. `returning` also takes a list, the same one `columns` takes on a
 read -- `returning: ["id", "name"]` -- and `data` is typed from it.
 
+An insert answers in the shape of its `rows`: one object comes back as that object, an array of them as an array of
+rows. `rows` is the only write input that states its own cardinality -- one object is exactly one row by construction --
+so there is no `single: true` to remember, and no `data[0]` to write. `single: false` asks for the array anyway.
+
+The one consequence worth knowing: an object asks for an object, so a row that never arrives is a `not_single_row`
+error rather than an empty list. That takes a `BEFORE INSERT` trigger returning `NULL`, or an `INSTEAD OF` trigger on a
+view; pass `rows` as an array (or `single: false`) where a write is allowed to produce nothing.
+
 ```ts
 // insert one, and get it back
 const created = await pgRest.insert({
@@ -658,7 +666,7 @@ const created = await pgRest.insert({
   rows: { name: "Hopper", email: "grace@example.com" },
   returning: ["id", "name"],
 });
-// created.data: Array<{ id: number; name: string }>
+// created.data: { id: number; name: string } -- one row in, one row out
 
 // insert many
 const bulk = await pgRest.insert({
@@ -666,6 +674,7 @@ const bulk = await pgRest.insert({
   rows: [{ name: "A" }, { name: "B" }],
   returning: ["id"],
 });
+// bulk.data: Array<{ id: number }> -- an array of one is still an array
 
 // only these columns, whatever else the payload carries (and a uniform bulk insert)
 const narrowed = await pgRest.insert({
@@ -688,6 +697,7 @@ const upserted = await pgRest.upsert({
   onConflict: ["id"],
   returning: ["name"],
 });
+// upserted.data: { name: string } -- an upsert reads its `rows` the same way
 
 // update the rows `where` matches
 const patched = await pgRest.update({
@@ -1128,7 +1138,6 @@ const { data, error } = await pgRest.transaction(async (tx) => {
   const order = await tx.insert({
     table: "orders",
     rows: { client_id: 1, total: 42 },
-    single: true,
   });
 
   await tx.insert({
@@ -1239,7 +1248,7 @@ nested scope is where an `error` is a thing you can read and decide about:
 
 ```ts
 await pgRest.transaction(async (tx) => {
-  const client = await tx.insert({ table: "clients", rows: { name: "Ada" }, single: true });
+  const client = await tx.insert({ table: "clients", rows: { name: "Ada" } });
 
   // the profile is optional: if it collides, the client still stands
   const profile = await tx.transaction((nested) =>
@@ -1371,10 +1380,7 @@ compiler rather than by a table of codes you keep yourself. For a database error
 
 ```ts
 const addClient = async (name: string, email: string) => {
-  const { data, error } = await pgRest.insert(
-    { table: "clients", rows: { name, email }, single: true },
-    ctx,
-  );
+  const { data, error } = await pgRest.insert({ table: "clients", rows: { name, email } }, ctx);
   if (!error) return { ok: true as const, client: data };
 
   switch (error.kind) {
@@ -1470,12 +1476,12 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 | `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |
 | `order`           | `"column"`, `"column.desc"`, `"column.desc.nullsfirst"`, or `{ column, desc, nulls }`                     |
 | `limit`, `offset` | paging                                                                                                    |
-| `single`          | one object instead of an array (`not_single_row` otherwise)                                                            |
+| `single`          | one object instead of an array (`not_single_row` otherwise); an insert of one `rows` object already does  |
 | `count`           | `"exact"`, `"planned"`, `"estimated"` → `count`. The mode decides its type: see [below](#what-comes-back) |
 | `stripNulls`      | leave null fields out of the result                                                                       |
 | `maxAffected`     | refuse and roll back beyond this many affected rows                                                       |
 | `timezone`        | the time zone the statement runs in                                                                       |
-| `rows`            | the payload of an `insert` or `upsert`: one object or many                                                |
+| `rows`            | the payload of an `insert` or `upsert`: one object or many, which is also the shape of `data`             |
 | `set`             | the columns an `update` changes: values, or `$` expressions and `$default`                              |
 | `onConflict`      | the columns an upsert resolves on (default: the primary key)                                              |
 | `columns`         | on an `insert` or `upsert`: insert only these, whatever else `rows` carries                               |
@@ -1485,8 +1491,8 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 
 ### What comes back
 
-`{ data, count, error }` — the rows, one object with `single`, or `null` for a minimal write; the total when a `count`
-was asked for; and `error`, which is `null` when the query worked.
+`{ data, count, error }` — the rows, one object with `single` or after an insert of one `rows` object, or `null` for a
+minimal write; the total when a `count` was asked for; and `error`, which is `null` when the query worked.
 
 On a [typed instance](types.md) `count` is typed from the mode the query asked for, which is exactly what the runtime
 answers:
