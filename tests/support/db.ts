@@ -40,6 +40,12 @@ const ensureTemplate = (admin: SQL): Promise<void> =>
     const sql = new SQL(url.toString());
     try {
       await sql.unsafe(fixture);
+    } catch (e) {
+      // A half-loaded template would be reused by every later run, and every test would fail on a
+      // missing table instead of on this error. Drop it, so the next run builds it again.
+      await sql.close();
+      await admin.unsafe(`DROP DATABASE IF EXISTS ${templateName} WITH (FORCE)`);
+      throw e;
     } finally {
       // nothing may be connected to a database used as a template
       await sql.close();
