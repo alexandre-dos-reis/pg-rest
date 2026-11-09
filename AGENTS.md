@@ -100,9 +100,17 @@ bun run link:examples  # point the examples at the local build, without touching
 - Examples depend on `@tsql/rest` or `@tsql/query` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
   Use `bun run link:examples [name]`. `bun run version` moves them onto each new release, and `scripts/githooks/pre-commit` (wired up by the
   `prepare` script on `bun install`) refuses a commit that leaves them out of step with the root `package.json`.
-- CI (`.github/workflows/ci.yml`): typecheck + build + tests on PostgreSQL 16, a Node job (`scripts/node-smoke.ts` against the built `packages/*/dist`),
-  an examples matrix (`scripts/check-example.sh`, one job per example -- the two PGlite ones need no database service),
-  and the PostgREST differential test.
+- CI (`.github/workflows/ci.yml`): four jobs -- `changes` (which suites this pull request has to run), `checks`
+  (lint, format, typecheck), `test` (the suite on PostgreSQL 16 with PostGIS, the PostgREST differential test, and
+  `scripts/node-smoke.ts` against the built `packages/*/dist`) and `examples` (`scripts/check-example.sh` for all
+  seven in one job -- the three PGlite ones need no database service).
+- **A pull request runs only the suites its change can reach**, which is what `changes` decides. A change under
+  `packages/query` alone runs `./packages/query/tests/ ./tests/`, a change under `packages/rest` alone runs
+  `./packages/rest/tests/ ./tests/`, and **anything else runs everything** -- `packages/core` is what both packages
+  are built on, and `tests/support` is what both are tested through, so neither can be narrowed. The root `./tests/`
+  always runs: those five suites are cross-package by construction. A push to `main` always runs everything, and so
+  does `checks`. `./tests/` is spelled with the leading `./` on purpose -- `bun test tests/` is a substring filter
+  that matches `packages/*/tests` too.
 - Typecheck runs before the build in CI, so `packages/*/src` and `tests` code must not import from `dist`.
 
 ## Releasing
