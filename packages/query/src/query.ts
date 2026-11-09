@@ -318,7 +318,8 @@ export interface DeleteQuery extends Common {
 
 /** Call a function, like `POST /rpc/name`. `columns`, `where` and `order` apply to its result. */
 export interface RpcQuery extends Common {
-  readonly rpc: string;
+  /** The function to call, like `POST /rpc/name`. */
+  readonly name: string;
   readonly args?: Readonly<Record<string, unknown>> | undefined;
   readonly columns?: Select | undefined;
 }
@@ -442,7 +443,7 @@ export type QueryResult<T = unknown, C extends number | undefined = number | und
 const operationOf = (input: QueryInput): string => {
   if (input === TRANSACTION) return "transaction";
   const at = input.schema ? `${input.schema}.` : "";
-  if ("rpc" in input) return `rpc "${at}${input.rpc}"`;
+  if ("name" in input) return `rpc "${at}${input.name}"`;
   const target = "table" in input ? `"${at}${input.table}"` : "the database";
   return `${input.action ?? "select"} on ${target}`;
 };
@@ -887,7 +888,7 @@ const assertNames = (input: QueryInput): void => {
   }
   for (const [what, v] of [
     ["table", (input as SelectQuery).table],
-    ["rpc", (input as RpcQuery).rpc],
+    ["name", (input as RpcQuery).name],
     ["schema", input.schema],
   ] as const) {
     if (v !== undefined && typeof v !== "string") throw bad(`"${what}" must be a string`);
@@ -923,7 +924,7 @@ export const toParsed = (input: QueryInput): ParsedQuery => {
 // running
 // ---------------------------------------------------------------------------
 
-const isRpc = (input: QueryInput): input is RpcQuery => "rpc" in input;
+const isRpc = (input: QueryInput): input is RpcQuery => "name" in input;
 
 const tableOperationOf = (input: QueryInput): SqlOperation => {
   switch (isRpc(input) ? "select" : (input.action ?? "select")) {
@@ -1016,10 +1017,10 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
   }
 
   const plan: SqlPlan = isRpc(input)
-    ? planRpc(env, true, schema, input.rpc, qp, prefer, format, undefined, body)
+    ? planRpc(env, true, schema, input.name, qp, prefer, format, undefined, body)
     : planTable(env, operation, schema, input.table, qp, prefer, format, undefined, body);
 
-  const path = isRpc(input) ? `/rpc/${input.rpc}` : `/${input.table}`;
+  const path = isRpc(input) ? `/rpc/${input.name}` : `/${input.table}`;
   const outcome = await execute(
     env,
     ctx,

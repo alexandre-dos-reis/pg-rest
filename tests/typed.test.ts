@@ -218,10 +218,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     await pgRest.delete({ table: "venues", where: { label: "Typed hall" } }, authed);
 
     // a function taking one, and one returning one
-    const city = ok(await pgRest.rpc({ rpc: "city_of", args: { who: { home: { city: "Delft" } } } }));
+    const city = ok(await pgRest.rpc({ name: "city_of", args: { who: { home: { city: "Delft" } } } }));
     assertType<Equal<typeof city.data, string>>();
     expect(city.data).toBe("Delft");
-    const made = ok(await pgRest.rpc({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } }));
+    const made = ok(await pgRest.rpc({ name: "make_address", args: { city: "Lyon", zip: "69001" } }));
     assertType<Equal<typeof made.data, Address>>();
     expect(made.data).toEqual({ city: "Lyon", zip: "69001" });
   });
@@ -329,15 +329,15 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   });
 
   test("rpc: the arguments and the result come from the function", async () => {
-    const sum = ok(await pgRest.rpc({ rpc: "add", args: { a: 2, b: 3 } }));
+    const sum = ok(await pgRest.rpc({ name: "add", args: { a: 2, b: 3 } }));
     assertType<Equal<typeof sum.data, number>>();
     expect(sum.data).toBe(5);
 
-    const greeting = ok(await pgRest.rpc({ rpc: "greet" }));
+    const greeting = ok(await pgRest.rpc({ name: "greet" }));
     assertType<Equal<typeof greeting.data, string>>();
     expect(greeting.data).toBe("hello world");
 
-    const mood = ok(await pgRest.rpc({ rpc: "cheer_up", args: { m: "sad" } }));
+    const mood = ok(await pgRest.rpc({ name: "cheer_up", args: { m: "sad" } }));
     assertType<Equal<typeof mood.data, "sad" | "ok" | "happy">>();
     expect(mood.data).toBe("ok");
   });
@@ -345,7 +345,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
   test("a set-returning function answers with rows, narrowed by its select", async () => {
     const { data, count } = ok(
       await pgRest.rpc({
-        rpc: "orders_by_status",
+        name: "orders_by_status",
         args: { s: "paid" },
         columns: ["total"],
         order: ["total.desc"],
@@ -357,9 +357,9 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(data).toEqual([{ total: 250 }, { total: 99.99 }]);
 
     // void is null, and a function returning a table row gives that row
-    const nothing = ok(await pgRest.rpc({ rpc: "nothing" }, authed));
+    const nothing = ok(await pgRest.rpc({ name: "nothing" }, authed));
     assertType<Equal<typeof nothing.data, null>>();
-    const first = ok(await pgRest.rpc({ rpc: "first_client", columns: ["name"] }));
+    const first = ok(await pgRest.rpc({ name: "first_client", columns: ["name"] }));
     assertType<Equal<typeof first.data, { name: string }>>();
     expect(first.data).toEqual({ name: "Ada" });
   });
@@ -552,11 +552,11 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     // @ts-expect-error a table of another schema needs `schema`
     void (() => pgRest.select({ table: "things", columns: ["label"] }));
     // @ts-expect-error the function does not exist
-    void (() => pgRest.rpc({ rpc: "nope" }));
+    void (() => pgRest.rpc({ name: "nope" }));
     // @ts-expect-error the argument is an integer
-    void (() => pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } }));
+    void (() => pgRest.rpc({ name: "add", args: { a: "two", b: 3 } }));
     // @ts-expect-error a scalar function has no columns to select
-    void (() => pgRest.rpc({ rpc: "hello", columns: ["anything"] }));
+    void (() => pgRest.rpc({ name: "hello", columns: ["anything"] }));
     // @ts-expect-error a field that is in no query is dropped in silence at runtime, so it is refused here
     void (() => pgRest.select({ table: "clients", columns: ["id"], limitt: 10 }));
     // @ts-expect-error the payload is checked the same way: no such column
@@ -580,7 +580,7 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     // @ts-expect-error there is nothing to return from a read
     void (() => pgRest.select({ table: "clients", columns: ["id"], returning: "minimal" }));
     // @ts-expect-error a query names a table or a function, not both
-    void (() => pgRest.rpc({ table: "clients", rpc: "add" }));
+    void (() => pgRest.rpc({ table: "clients", name: "add" }));
     // @ts-expect-error a field of a composite type is checked like any other value
     void (() => pgRest.select({ table: "venues", where: { owner: { name: 42 } } }));
     // @ts-expect-error ... and a field the composite type does not have is refused

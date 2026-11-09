@@ -212,8 +212,8 @@ describe.skipIf(!hasDb)("transaction()", () => {
     t = await makeApi();
     const r = await t.api.transaction(
       async (tx) => {
-        const a = await tx.rpc<{ role: string; claims: Record<string, string>; tenant: string }>({ rpc: "whoami" });
-        const b = await tx.rpc<{ role: string }>({ rpc: "whoami" });
+        const a = await tx.rpc<{ role: string; claims: Record<string, string>; tenant: string }>({ name: "whoami" });
+        const b = await tx.rpc<{ role: string }>({ name: "whoami" });
         return [a.data, b.data.role] as const;
       },
       { role: "authenticated", claims: { sub: "u-9" }, settings: { "app.tenant": "acme" } },
@@ -299,7 +299,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
 
     const iso = async (options: Record<string, unknown>) => {
       const r = await t!.api.transaction(
-        async (tx) => (await tx.rpc<{ level: string; readOnly: string }>({ rpc: "iso" })).data,
+        async (tx) => (await tx.rpc<{ level: string; readOnly: string }>({ name: "iso" })).data,
         { ...authed(), ...options },
       );
       if (r.error) throw r.error;
@@ -365,7 +365,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     let runs = 0;
     const fn = async (tx: Pick<Transaction, "rpc">) => {
       runs++;
-      await tx.rpc({ rpc: "flaky" });
+      await tx.rpc({ name: "flaky" });
       return runs;
     };
 
@@ -401,7 +401,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
     const store = new AsyncLocalStorage<RequestContext>();
     const bound = t.api.setContextQuery(() => store.getStore());
     const whoami = async (tx: Pick<Transaction, "rpc">) =>
-      (await tx.rpc<{ role: string; claims: { sub: string } }>({ rpc: "whoami" })).data;
+      (await tx.rpc<{ role: string; claims: { sub: string } }>({ name: "whoami" })).data;
 
     const inside = await store.run(authed("u-1"), () => bound.transaction(async (tx) => (await whoami(tx)).claims.sub));
     expect(inside.data).toBe("u-1");

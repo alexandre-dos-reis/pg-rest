@@ -121,7 +121,7 @@ const renderSelect = (items: Select, path: ReadonlyArray<string>, out: Params): 
 
 /** The `columns` of a read or a function call, and the list a write's `returning` may be. */
 const columnsOf = (input: QueryInput): Select | undefined => {
-  if ("rpc" in input) return input.columns;
+  if ("name" in input) return input.columns;
   if (input.action === undefined || input.action === "select") return (input as SelectQuery).columns;
   const asked = (input as InsertQuery | UpdateQuery | DeleteQuery).returning;
   return typeof asked === "object" ? asked : undefined;

@@ -37,4 +37,4 @@ void pgRest.select({ table: "todos", where: { at: { floor: "2" } } });
 void pgRest.insert({ table: "todos", rows: { title: "x", at: { building: "A" } } });
 
 // @ts-expect-error no such function
-void pgRest.rpc({ rpc: "closed_todos" });
+void pgRest.rpc({ name: "closed_todos" });

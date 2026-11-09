@@ -192,11 +192,11 @@ describe.skipIf(!hasDb)("composite types", () => {
 
   describe("functions", () => {
     test("a composite argument travels as JSON", async () => {
-      expect((await t.api.rpc({ rpc: "city_of", args: { who: ADA } })).data).toBe("Paris");
+      expect((await t.api.rpc({ name: "city_of", args: { who: ADA } })).data).toBe("Paris");
     });
 
     test("a function returning a composite type answers with the object", async () => {
-      expect((await t.api.rpc({ rpc: "make_address", args: { city: "Lyon", zip: "69001" } })).data).toEqual({
+      expect((await t.api.rpc({ name: "make_address", args: { city: "Lyon", zip: "69001" } })).data).toEqual({
         city: "Lyon",
         zip: "69001",
       });

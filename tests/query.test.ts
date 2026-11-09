@@ -347,21 +347,21 @@ describe.skipIf(!hasDb)("query()", () => {
 
   describe("rpc", () => {
     test("scalar, set-returning with a select, and void", async () => {
-      expect((await t.api.rpc({ rpc: "add", args: { a: 2, b: 3 } })).data).toBe(5);
-      expect((await t.api.rpc({ rpc: "hello" })).data).toBe("hello");
+      expect((await t.api.rpc({ name: "add", args: { a: 2, b: 3 } })).data).toBe(5);
+      expect((await t.api.rpc({ name: "hello" })).data).toBe("hello");
       const rows = await t.api.rpc({
-        rpc: "orders_by_status",
+        name: "orders_by_status",
         args: { s: "paid" },
         columns: ["total"],
         order: [{ column: "total", desc: true }],
       });
       expect(rows.data).toEqual([{ total: 250 }, { total: 99.99 }]);
-      expect((await t.api.rpc({ rpc: "nothing" }, authed())).data).toBeNull();
+      expect((await t.api.rpc({ name: "nothing" }, authed())).data).toBeNull();
     });
 
     test("the function sees no request.* settings: there is no request", async () => {
       const r = await t.api.rpc<{ method: string | null; path: string | null; header: string | null }>({
-        rpc: "req_info",
+        name: "req_info",
         single: true,
       });
       if (r.error) throw r.error;
@@ -385,7 +385,7 @@ describe.skipIf(!hasDb)("query()", () => {
 
     test("extra settings are applied", async () => {
       const r = await t.api.rpc<{ tenant: string }>(
-        { rpc: "whoami", single: true },
+        { name: "whoami", single: true },
         { role: "authenticated", claims: { sub: "u" }, settings: { "app.tenant": "acme" } },
       );
       if (r.error) throw r.error;
@@ -428,7 +428,7 @@ describe.skipIf(!hasDb)("query()", () => {
       );
       // the schema cache
       expect(await kindOf({ table: "cients" })).toBe("undefined_object");
-      expect(await kindOf({ rpc: "nope" })).toBe("undefined_object");
+      expect(await kindOf({ name: "nope" })).toBe("undefined_object");
       expect(await kindOf({ table: "clients", action: "insert", rows: { nope: 1 } }, authed())).toBe("invalid_payload");
       // the response shaping
       expect(await kindOf({ table: "clients", where: { id: 999 }, single: true })).toBe("not_single_row");
@@ -440,7 +440,7 @@ describe.skipIf(!hasDb)("query()", () => {
       expect(
         await kindOf({ table: "clients", action: "insert", rows: { name: "dup", email: "ada@example.com" } }, authed()),
       ).toBe("conflict");
-      expect(await kindOf({ rpc: "boom" }, authed())).toBe("raised");
+      expect(await kindOf({ name: "boom" }, authed())).toBe("raised");
     });
 
     test("the kind of an error the library cannot map, and of a missing context", async () => {
@@ -462,7 +462,7 @@ describe.skipIf(!hasDb)("query()", () => {
       expect(dup.error?.kind).toBe("conflict");
       expect(dup.error?.sqlState).toBe("23505");
 
-      const raised = await t.api.rpc({ rpc: "boom" }, authed());
+      const raised = await t.api.rpc({ name: "boom" }, authed());
       expect(raised.error).toMatchObject({
         kind: "raised",
         message: "teapot",
@@ -572,7 +572,7 @@ describe.skipIf(!hasDb)("query()", () => {
     test("concurrent calls each see their own context", async () => {
       // one bound `db`, one store, two requests in flight: this is the whole point of the shape
       const db = t.api.setContextQuery(() => store.getStore());
-      const who = () => db.rpc<{ claims: { sub: string } }>({ rpc: "whoami" });
+      const who = () => db.rpc<{ claims: { sub: string } }>({ name: "whoami" });
       const [a, b] = await Promise.all([store.run(authed("user-a"), who), store.run(authed("user-b"), who)]);
       expect(a.data?.claims.sub).toBe("user-a");
       expect(b.data?.claims.sub).toBe("user-b");
@@ -598,8 +598,8 @@ describe.skipIf(!hasDb)("query()", () => {
     test("a context passed to the call wins over the source", async () => {
       // what the database saw is the proof: current_user is the overriding role, not the source's
       const db = t.api.setContextQuery({ role: "anon" });
-      expect((await db.rpc<{ role: string }>({ rpc: "whoami" })).data?.role).toBe("anon");
-      expect((await db.rpc<{ role: string }>({ rpc: "whoami" }, authed())).data?.role).toBe("authenticated");
+      expect((await db.rpc<{ role: string }>({ name: "whoami" })).data?.role).toBe("anon");
+      expect((await db.rpc<{ role: string }>({ name: "whoami" }, authed())).data?.role).toBe("authenticated");
     });
 
     test("an empty source is an error, not the anonymous role", async () => {
@@ -684,7 +684,7 @@ describe.skipIf(!hasDb)("query()", () => {
       ],
       [
         "rpc with a select",
-        { rpc: "orders_by_status", args: { s: "paid" }, columns: ["id"], order: ["id"] },
+        { name: "orders_by_status", args: { s: "paid" }, columns: ["id"], order: ["id"] },
         "/rpc/orders_by_status?s=paid&select=id&order=id",
       ],
       ["unknown table", { table: "nope" }, "/nope"],

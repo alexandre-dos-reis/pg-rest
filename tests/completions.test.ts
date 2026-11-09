@@ -103,7 +103,7 @@ describe("what an editor offers in a typed query", () => {
   });
 
   test("a function that returns a table's rows offers that table's columns", async () => {
-    expect(await completionsAt(`void pgRest.rpc({ rpc: "orders_by_status", columns: ["#"] });`)).toEqual([
+    expect(await completionsAt(`void pgRest.rpc({ name: "orders_by_status", columns: ["#"] });`)).toEqual([
       "*",
       "client_id",
       "id",
@@ -111,10 +111,10 @@ describe("what an editor offers in a typed query", () => {
       "status",
       "total",
     ]);
-    expect(await completionsAt(`void pgRest.rpc({ rpc: "#" });`)).toContain("orders_by_status");
+    expect(await completionsAt(`void pgRest.rpc({ name: "#" });`)).toContain("orders_by_status");
     // a TABLE(...) function is the known gap: the catalog does not carry its output columns, so
     // there is nothing to offer and any name is accepted (the request path knows no more)
-    expect(await completionsAt(`void pgRest.rpc({ rpc: "client_summary", columns: ["#"] });`)).toEqual([""]);
+    expect(await completionsAt(`void pgRest.rpc({ name: "client_summary", columns: ["#"] });`)).toEqual([""]);
   });
 
   test("the properties carry their documentation, in the list and on hover", async () => {
@@ -127,7 +127,7 @@ describe("what an editor offers in a typed query", () => {
     expect(keys.docOf("single")).toContain("one object instead of an array");
 
     const call = await ask(`void pgRest.rpc({ # });`);
-    expect(call.docOf("rpc")).toContain("The function to call");
+    expect(call.docOf("name")).toContain("The function to call");
 
     // hovering the method gives the orientation, failures included
     const method = (await ask(`void pgRest.sel#ect({ table: "profiles" });`)).doc;
