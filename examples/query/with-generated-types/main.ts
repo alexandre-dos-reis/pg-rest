@@ -91,7 +91,7 @@ console.log("moved:", moved);
 // and is not described by the types, like any other JSON path: use an untyped instance for those.
 
 const { data: open } = await pgRest.rpc({
-  rpc: "open_todos", //                          the functions of the schema, instead of `table`
+  name: "open_todos", //                         the functions of the schema, instead of `table`
   columns: ["title"], //                          its result is a row like any other: todos', here
 });
 // open: Array<{ title: string }>

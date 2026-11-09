@@ -169,7 +169,7 @@ describe.skipIf(!hasDb)("prepared queries", () => {
         (a: { s: string }) => ({ table: "orders", action: "delete" as const, where: { status: a.s } }) as never,
       ),
     ).toThrow("only a select");
-    expect(() => q.prepare((a: { s: string }) => ({ rpc: "orders_by_status", args: { s: a.s } }) as never)).toThrow(
+    expect(() => q.prepare((a: { s: string }) => ({ name: "orders_by_status", args: { s: a.s } }) as never)).toThrow(
       "only a select",
     );
     // a table that is not there

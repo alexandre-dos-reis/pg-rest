@@ -87,7 +87,7 @@ const same: Array<[string, unknown]> = [
   ["upsert odd columns", { table: "orders", action: "upsert", rows: { a: 1 }, columns: ["a b"] }],
   ["update", { table: "orders", action: "update", set: { a: 1 }, where: { id: 1 } }],
   ["delete", { table: "orders", action: "delete", where: { id: { $in: [1, 2] } } }],
-  ["rpc", { rpc: "f", args: { a: 1 }, where: { x: 1 }, columns: ["a"] }],
+  ["rpc", { name: "f", args: { a: 1 }, where: { x: 1 }, columns: ["a"] }],
 ];
 
 // What the string route refuses, `toParsed` refuses too -- in `query`'s own words.

@@ -32,7 +32,7 @@ export const exec = <T = unknown>(
   input: QueryInput,
   ctx?: RequestContext,
 ): Promise<QueryResult<T>> => {
-  const op = "rpc" in input ? "rpc" : (input.action ?? "select");
+  const op = "name" in input ? "rpc" : (input.action ?? "select");
   return (api as unknown as Record<string, (i: QueryInput, c?: RequestContext) => Promise<QueryResult<T>>>)[op]!(
     input,
     ctx,

@@ -960,25 +960,25 @@ void pgRest.update({ table: "orders", set: { total: { $add: [{ $col: "status" },
 
 ## Calling a function
 
-`rpc` replaces `table`. The arguments and the result come from the signature the catalog carries:
+`name` replaces `table`. The arguments and the result come from the signature the catalog carries:
 
 ```ts
 // a scalar
-const sum = await pgRest.rpc({ rpc: "add", args: { a: 2, b: 3 } });
+const sum = await pgRest.rpc({ name: "add", args: { a: 2, b: 3 } });
 // sum.data: number
 
 // a parameter with a DEFAULT is optional
-const hello = await pgRest.rpc({ rpc: "greet" });
-const hi = await pgRest.rpc({ rpc: "greet", args: { name: "Ada" } });
+const hello = await pgRest.rpc({ name: "greet" });
+const hi = await pgRest.rpc({ name: "greet", args: { name: "Ada" } });
 // hello.data: string
 
 // void gives null
-const nothing = await pgRest.rpc({ rpc: "nothing" });
+const nothing = await pgRest.rpc({ name: "nothing" });
 // nothing.data: null
 
 // a set-returning function answers with rows, and takes the same columns/where/order as a table
 const paid = await pgRest.rpc({
-  rpc: "orders_by_status",
+  name: "orders_by_status",
   args: { s: "paid" },
   columns: ["id", "total"],
   where: { total: { $gte: 100 } },
@@ -988,19 +988,19 @@ const paid = await pgRest.rpc({
 // paid.data: Array<{ id: number; total: number }>
 
 // an overloaded function takes either signature
-const asInt = await pgRest.rpc({ rpc: "ovl", args: { a: 1 } });
-const asText = await pgRest.rpc({ rpc: "ovl", args: { a: "one" } });
+const asInt = await pgRest.rpc({ name: "ovl", args: { a: 1 } });
+const asText = await pgRest.rpc({ name: "ovl", args: { a: "one" } });
 ```
 
 ```ts
 // @ts-expect-error that function does not exist
-void pgRest.rpc({ rpc: "nope" });
+void pgRest.rpc({ name: "nope" });
 
 // @ts-expect-error `a` is an integer
-void pgRest.rpc({ rpc: "add", args: { a: "two", b: 3 } });
+void pgRest.rpc({ name: "add", args: { a: "two", b: 3 } });
 
 // @ts-expect-error a scalar function has no columns to ask for
-void pgRest.rpc({ rpc: "greet", columns: ["anything"] });
+void pgRest.rpc({ name: "greet", columns: ["anything"] });
 ```
 
 A function declared `RETURNS TABLE(…)` is the one gap: the catalog does not carry its output columns, and neither does
@@ -1473,7 +1473,7 @@ const { data } = await loose.select<Array<{ status: string; sum: number }>>({
 | field             | meaning                                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------------------- |
 | `table`           | the relation to read or write. Restricts everything else                                                  |
-| `rpc`             | the function to call, instead of `table`                                                                  |
+| `name`            | the function to call, instead of `table`                                                                  |
 | `schema`          | one of the exposed schemas; optional for the default one, required for the others                         |
 | `columns`         | on a read or an `rpc`: columns, `"alias:column"`, `"*"`, and embedded resources                             |
 | `where`           | conditions by column (`{ $gte: 1 }`), plus `$and` / `$or` / `$not` groups                                 |

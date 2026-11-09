@@ -207,7 +207,7 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
 export interface CreateQuery {
   (options: QueryOptions): QueryInstance;
   /**
-   * With a database type from `generateTypes` (`@tsql/query/types`), the operations are typed by it: `table` and `rpc` are the ones that exist, `select`, `where` and `order` only
+   * With a database type from `generateTypes` (`@tsql/query/types`), the operations are typed by it: `table` and `name` are the ones that exist, `select`, `where` and `order` only
    * name real columns and relationships, and `data` is inferred from the `select`.
    */
   <Db extends AnyDatabase>(options: QueryOptions): TypedQueryInstance<Db>;

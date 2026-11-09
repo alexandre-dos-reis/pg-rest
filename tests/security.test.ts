@@ -200,7 +200,7 @@ describe.skipIf(!hasDb)("hostile input", () => {
     // an object with its own toString is not a name
     const name = { toString: () => "clients" };
     expect((await t.api.select({ table: name as never })).error?.kind).toBe("invalid_query");
-    expect((await t.api.rpc({ rpc: name as never })).error?.kind).toBe("invalid_query");
+    expect((await t.api.rpc({ name: name as never })).error?.kind).toBe("invalid_query");
     expect((await t.api.select({ table: "clients", schema: name as never })).error?.kind).toBe("invalid_query");
     await intact();
   });

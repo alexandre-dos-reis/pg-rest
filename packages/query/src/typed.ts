@@ -528,7 +528,7 @@ type Rpc<Db extends AnyDatabase, S extends Schema<Db>, F extends keyof Functions
      * The function to call, like `POST /rpc/name`. Its arguments and its result come from the
      * signature the catalog carries, overloads included.
      */
-    readonly rpc: F;
+    readonly name: F;
     /** The arguments, by name. A parameter with a `DEFAULT` is optional. */
     readonly args?: Functions<Db, S>[F][number]["args"];
     /**
@@ -715,7 +715,7 @@ export type TypedDelete<Db extends AnyDatabase> = {
   [S in Schema<Db>]: { [T in Table<Db, S>]: TableDelete<Db, S, T> }[Table<Db, S>];
 }[Schema<Db>];
 
-/** Every function call this database allows, as a union discriminated by `rpc`. */
+/** Every function call this database allows, as a union discriminated by `name`. */
 export type TypedRpc<Db extends AnyDatabase> = {
   [S in Schema<Db>]: { [F in keyof Functions<Db, S> & string]: Rpc<Db, S, F> }[keyof Functions<Db, S> & string];
 }[Schema<Db>];
@@ -740,14 +740,14 @@ type SchemaIn<Db extends AnyDatabase, Q> = Q extends { schema: infer S }
   : Db["default"] & Schema<Db>;
 
 /** The overloads of the function a query calls. */
-type Signatures<Db extends AnyDatabase, Q> = Q extends { rpc: infer F }
+type Signatures<Db extends AnyDatabase, Q> = Q extends { name: infer F }
   ? F extends keyof Functions<Db, SchemaIn<Db, Q>> & string
     ? Functions<Db, SchemaIn<Db, Q>>[F][number]
     : never
   : never;
 
 /** One row of the answer, before `single` decides whether it comes alone. */
-type RowOut<Db extends AnyDatabase, Q> = Q extends { rpc: string }
+type RowOut<Db extends AnyDatabase, Q> = Q extends { name: string }
   ? Q extends { columns: infer Items }
     ? PickedFrom<Signatures<Db, Q>["returns"], Items>
     : Signatures<Db, Q>["returns"]
@@ -786,7 +786,7 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
     ? RowOut<Db, Q>
     : Q extends { single: false }
       ? RowOut<Db, Q>[]
-      : Q extends { rpc: string }
+      : Q extends { name: string }
         ? // a set-returning function answers with rows, a scalar one with the value itself
           [Signatures<Db, Q>["set"]] extends [true]
           ? RowOut<Db, Q>[]
@@ -804,7 +804,7 @@ export type QueryData<Db extends AnyDatabase, Q> = Q extends { returning: "minim
 // ---------------------------------------------------------------------------
 
 /**
- * The six operations typed by a generated database type: `table` and `rpc` are the ones that exist,
+ * The six operations typed by a generated database type: `table` and `name` are the ones that exist,
  * `columns` and `where` only name real columns and relationships, `rows` and `set` its writable
  * columns, and `data` is inferred from the `columns`, nesting included.
  *
