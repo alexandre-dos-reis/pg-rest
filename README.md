@@ -112,7 +112,7 @@ Two writes that must land together get one transaction, with the context applied
 
 ```ts
 const { data, error } = await pgRest.transaction(async (tx) => {
-  const todo = await tx.insert({ table: "todos", rows: { title: "ship it" }, single: true });
+  const todo = await tx.insert({ table: "todos", rows: { title: "ship it" } });
   await tx.insert({ table: "tags", rows: { todo_id: todo.data.id, label: "release" } });
   return todo.data.id;
 }, { role: "authenticated", claims: { sub: user.id } });

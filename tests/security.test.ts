@@ -207,11 +207,11 @@ describe.skipIf(!hasDb)("hostile input", () => {
 
   test("select(): a string with quotes round-trips unchanged", async () => {
     const name = `O'Brien "the" \\ ; -- $$ x, (y)`;
-    const created = await t.api.insert<Array<{ name: string }>>(
+    const created = await t.api.insert<{ name: string }>(
       { table: "clients", rows: { name }, returning: ["name"] },
       { role: "authenticated" },
     );
-    expect(created.data).toEqual([{ name }]);
+    expect(created.data).toEqual({ name });
     const found = await t.api.select({ table: "clients", columns: ["name"], where: { name } });
     expect(found.data).toEqual([{ name }]);
     await t.db.adapter.query("DELETE FROM api.clients WHERE name = $1::text", [name]);

@@ -230,15 +230,15 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     const inserted = ok(
       await pgRest.insert({ table: "clients", rows: { name: "Typed" }, returning: ["id", "name"] }, authed),
     );
-    assertType<Equal<typeof inserted.data, Array<{ id: number; name: string }>>>();
-    expect(inserted.data[0]!.name).toBe("Typed");
+    assertType<Equal<typeof inserted.data, { id: number; name: string }>>();
+    expect(inserted.data.name).toBe("Typed");
 
     const quiet = ok(
       await pgRest.update(
         {
           table: "clients",
           set: { name: "Quiet" },
-          where: { id: inserted.data[0]!.id },
+          where: { id: inserted.data.id },
           returning: "minimal",
         },
         authed,
@@ -248,10 +248,46 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(quiet.data).toBeNull();
 
     const deleted = ok(
-      await pgRest.delete({ table: "clients", where: { id: inserted.data[0]!.id }, returning: ["id"] }, authed),
+      await pgRest.delete({ table: "clients", where: { id: inserted.data.id }, returning: ["id"] }, authed),
     );
     assertType<Equal<typeof deleted.data, Array<{ id: number }>>>();
     expect(deleted.data).toHaveLength(1);
+  });
+
+  test("an insert answers in the shape of its rows", async () => {
+    // one object is one row by construction, so it comes back as that row and not as a list of one
+    const one = ok(await pgRest.insert({ table: "clients", rows: { name: "One" }, returning: ["id"] }, authed));
+    assertType<Equal<typeof one.data, { id: number }>>();
+    expect(typeof one.data.id).toBe("number");
+
+    const many = ok(
+      await pgRest.insert({ table: "clients", rows: [{ name: "Two" }, { name: "Three" }], returning: ["id"] }, authed),
+    );
+    assertType<Equal<typeof many.data, Array<{ id: number }>>>();
+    expect(many.data).toHaveLength(2);
+
+    // an array of one is still an array: the input says the cardinality, not the outcome
+    const listed = ok(await pgRest.insert({ table: "clients", rows: [{ name: "Four" }], returning: ["id"] }, authed));
+    assertType<Equal<typeof listed.data, Array<{ id: number }>>>();
+    expect(listed.data).toHaveLength(1);
+
+    // and `single` still decides it outright, in both directions
+    const asked = ok(
+      await pgRest.insert({ table: "clients", rows: { name: "Five" }, returning: ["id"], single: false }, authed),
+    );
+    assertType<Equal<typeof asked.data, Array<{ id: number }>>>();
+    expect(asked.data).toHaveLength(1);
+
+    const upserted = ok(
+      await pgRest.upsert({ table: "clients", rows: { id: one.data.id, name: "Upserted" }, returning: ["name"] }, authed),
+    );
+    assertType<Equal<typeof upserted.data, { name: string }>>();
+    expect(upserted.data.name).toBe("Upserted");
+
+    // nothing to return is still null, whatever the rows look like
+    const quiet = ok(await pgRest.insert({ table: "clients", rows: { name: "Six" }, returning: "minimal" }, authed));
+    assertType<Equal<typeof quiet.data, null>>();
+    expect(quiet.data).toBeNull();
   });
 
   test("an insert's columns are what it inserts, and its returning is what it answers with", async () => {
@@ -267,15 +303,15 @@ describe.skipIf(!hasDb)("a typed instance", () => {
         authed,
       ),
     );
-    assertType<Equal<typeof inserted.data, Array<{ id: number }>>>();
+    assertType<Equal<typeof inserted.data, { id: number }>>();
 
     const everything = ok(await pgRest.insert({ table: "clients", rows: { name: "Wide" }, columns: ["name"] }, authed));
-    assertType<Equal<(typeof everything.data)[number]["id"], number>>();
-    assertType<Equal<(typeof everything.data)[number]["name"], string>>();
+    assertType<Equal<(typeof everything.data)["id"], number>>();
+    assertType<Equal<(typeof everything.data)["name"], string>>();
 
     const same = ok(
       await pgRest.update(
-        { table: "clients", set: { name: "Same" }, where: { id: inserted.data[0]!.id }, returning: "representation" },
+        { table: "clients", set: { name: "Same" }, where: { id: inserted.data.id }, returning: "representation" },
         authed,
       ),
     );
@@ -569,13 +605,13 @@ describe.skipIf(!hasDb)("a typed instance", () => {
           rows: { client_id: client.data.id, total: 5 },
           returning: ["id", { clients: ["name"] }],
         });
-        assertType<Equal<typeof order.data, Array<{ id: number; clients: { name: string } | null }>>>();
+        assertType<Equal<typeof order.data, { id: number; clients: { name: string } | null }>>();
 
         // the count a query asked for is a number, not a maybe
         const counted = await tx.select({ table: "clients", columns: ["id"], count: "exact" });
         assertType<Equal<typeof counted.count, number>>();
 
-        return order.data[0]!.clients?.name;
+        return order.data.clients?.name;
       }, authed),
     );
     assertType<Equal<typeof data, string | undefined>>();

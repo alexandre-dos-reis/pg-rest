@@ -264,7 +264,10 @@ export type QueryReturning = "representation" | "minimal" | Select;
 interface Common extends NodeFields {
   /** One of the exposed schemas. Defaults to the first one. */
   readonly schema?: string | undefined;
-  /** Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. */
+  /**
+   * Return one object instead of an array. 0 or 2+ rows is a `not_single_row` error. An insert of a
+   * single `rows` object does this on its own; `single: false` asks it for the array.
+   */
   readonly single?: boolean | undefined;
   /** Also count the matching rows, ignoring paging (`Prefer: count=`). */
   readonly count?: "exact" | "planned" | "estimated" | undefined;
@@ -965,6 +968,18 @@ const returningOf = (input: QueryInput): "representation" | "minimal" | undefine
   return typeof asked === "string" ? asked : "representation";
 };
 
+/**
+ * Whether the answer is one object rather than a list. `single` says so outright; an insert of one
+ * object says so by itself -- `rows` is the only write input that states its own cardinality, an
+ * object being exactly one row by construction. `single: false` asks for the list back.
+ */
+const singleOf = (input: QueryInput): boolean => {
+  if (input.single !== undefined) return input.single;
+  if (isRpc(input) || !("action" in input)) return false;
+  if (input.action !== "insert" && input.action !== "upsert") return false;
+  return !Array.isArray((input as InsertQuery).rows);
+};
+
 const preferencesOf = (input: QueryInput): SqlPreferences => ({
   ...(returningOf(input) ? { return: returningOf(input) } : {}),
   ...(input.count ? { count: input.count } : {}),
@@ -987,7 +1002,7 @@ const run = async (env: Env, given: QueryInput | Prepared, ctx: RequestContext):
   const schema = useSchema(env, input.schema);
   const operation = tableOperationOf(input);
   const prefer = preferencesOf(input);
-  const format: SqlOutputFormat = input.single
+  const format: SqlOutputFormat = singleOf(input)
     ? { kind: "object", stripNulls: Boolean(input.stripNulls) }
     : { kind: "json", stripNulls: Boolean(input.stripNulls) };
   const parsed = toParsed(input);

@@ -181,7 +181,7 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
    *
    * ```ts ignore
    * const { data, error } = await pgRest.transaction(async (tx) => {
-   *   const order = await tx.insert({ table: "orders", rows: { client_id: 1 }, single: true });
+   *   const order = await tx.insert({ table: "orders", rows: { client_id: 1 } });
    *   await tx.insert({ table: "order_items", rows: itemsFor(order.data.id) });
    *   return order.data;
    * }, { role: "authenticated", claims: { sub: user.id } });
