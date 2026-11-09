@@ -26,7 +26,7 @@ import {
 import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
-export type { DbAdapter, DbSession, Row } from "@tsql/core/adapter";
+export type { DbAdapter, DbSession, Row } from "@tsql/adapters";
 export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
 export type { PreRequest, PreRequestInfo } from "./query";
 export { describeErrorKind } from "./kinds";

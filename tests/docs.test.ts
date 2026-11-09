@@ -22,7 +22,7 @@ const root = new URL("..", import.meta.url).pathname;
 const preamble = (dbTypes: string) => `
 import { createQuery, createRest, QueryError } from "./support/pgrest";
 import type { RequestContext, RestInstance, SchemaDescriptor } from "./support/pgrest";
-import type { DbAdapter } from "../packages/core/src/adapter";
+import type { DbAdapter } from "../packages/adapters/src";
 import type { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabasePgRest } from "${dbTypes}";
 

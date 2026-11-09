@@ -38,7 +38,7 @@ The libraries never close your driver: `rest.close()` stops the handler, the poo
 
 ## Writing one
 
-About twenty lines; the sources in [`packages/core/src/adapters`](../packages/core/src/adapters) are good templates. Two things make it easy:
+About twenty lines; the sources in [`packages/adapters/src`](../packages/adapters/src) are good templates. Two things make it easy:
 
 - **Parameters are always text**, with an explicit `$n::text` cast in the SQL, so an adapter needs no type inference and
   no driver-specific binding. Values arrive as `string | null`.

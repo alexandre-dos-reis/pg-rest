@@ -1,0 +1,10 @@
+{
+  "name": "@tsql/adapters",
+  "version": "0.0.0",
+  "private": true,
+  "description": "What @tsql/rest and @tsql/query share: parsing, SQL, schema cache, errors, adapters. Not published: both packages bundle it.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

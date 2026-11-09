@@ -1,4 +1,4 @@
-import type { DbSession } from "@tsql/core/adapter";
+import type { DbSession } from "@tsql/adapters";
 import {
   type SqlCall,
   type CoreConfig,

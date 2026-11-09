@@ -12,7 +12,7 @@ import {
   planTable,
   useSchema,
 } from "@tsql/core/core";
-import type { DbSession } from "@tsql/core/adapter";
+import type { DbSession } from "@tsql/adapters";
 import { quoteIdent } from "@tsql/core/quote";
 import type { SqlOperation } from "@tsql/core/parse/sql-options";
 import { EngineError } from "@tsql/core/errors";

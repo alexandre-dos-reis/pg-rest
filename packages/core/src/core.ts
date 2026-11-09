@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession } from "./adapter";
+import type { DbAdapter, DbSession } from "@tsql/adapters";
 import { DbQueryError, EngineError } from "./errors";
 import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
