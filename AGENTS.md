@@ -68,7 +68,7 @@ reference lives in `docs/`.
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
 | `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
-| `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
+| `scripts/` | `docs-sql.ts` (the SQL blocks under the examples of `docs/query.md`, recorded from the fixture database), `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
 | `mise.toml` | the pinned PostgREST binary, and the tasks that run a Postgres 16 + PostGIS cluster |
 
 ## Commands
@@ -78,6 +78,7 @@ bun install
 mise install           # the pinned PostgREST binary (tests/compare) and micromamba; see mise.toml
 mise run db:start      # Postgres 16 + PostGIS on $PGPORT, under .cache/ (also db:stop, db:reset)
 mise run test          # the whole suite against that cluster and that binary
+bun run docs:sql       # rewrite the SQL blocks of docs/query.md from the fixture database (--check: fail if stale)
 bun run typecheck      # tsc --noEmit (src and tests only; bench/, scripts/ and examples/ are not typechecked)
 bun run lint           # oxlint on src and tests (config: .oxlintrc.json)
 bun run fmt            # oxfmt --write (config: .oxfmtrc.json); fmt:check is what CI runs

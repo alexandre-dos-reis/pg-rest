@@ -16,6 +16,7 @@
     "build": "bun --filter '@tsql/rest' --filter '@tsql/query' build",
     "dev": "bun --filter '@tsql/rest' --filter '@tsql/query' dev",
     "test": "bun test",
+    "docs:sql": "bun scripts/docs-sql.ts",
     "typecheck": "tsc --noEmit",
     "test:compare": "bun test tests/compare",
     "bench": "bun bench/run.ts",
