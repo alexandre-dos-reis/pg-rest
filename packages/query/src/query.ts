@@ -529,7 +529,7 @@ export const bad = (message: string, hint?: string): EngineError =>
  * Render a value the way the query string carries it. A lone value is taken verbatim --
  * `name=eq.a,b` is the text `a,b` and `name=eq.null` is the text `null`, which is why
  * only a *delimited* context (a list or a logic tree, where `,` `)` and `.` separate)
- * needs quoting. `tests/compare` pins both.
+ * needs quoting. `packages/rest/tests/compare` pins both.
  */
 export const lit = (v: FilterValue | undefined, delimited: boolean): string => {
   if (v === undefined || v === null) return "null";

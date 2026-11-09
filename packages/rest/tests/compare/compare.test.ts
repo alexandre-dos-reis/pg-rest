@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { hasDb, requirePostgis } from "../support/db";
-import { makeApi, type TestApi } from "../support/api";
+import { hasDb, requirePostgis } from "../../../../tests/support/db";
+import { makeApi, type TestApi } from "../../../../tests/support/api";
 import { cases, type Case } from "./cases";
 import { POSTGREST_BIN, signJwt, startPostgrest, type RunningPostgrest } from "./postgrest";
 
 /**
  * Differential test: every case is sent to the real PostgREST 16 and to pg-rest, both on the same
  * database, and the responses are compared. Run with:
- *   POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=postgres://... bun test tests/compare
+ *   POSTGREST_BIN=/path/to/postgrest TEST_DATABASE_URL=postgres://... bun test ./packages/rest/tests/compare/
  */
 const enabled = hasDb && Boolean(POSTGREST_BIN);
 

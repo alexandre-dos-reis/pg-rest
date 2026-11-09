@@ -33,7 +33,7 @@ describe("input -> query string", () => {
   });
 
   test("a lone value is verbatim; a delimited one is quoted", () => {
-    // tests/compare pins this against PostgREST: on its own, a value is taken as it is
+    // packages/rest/tests/compare pins this against PostgREST: on its own, a value is taken as it is
     expect(qs({ table: "clients", where: { name: "null" } })).toBe("name=eq.null");
     expect(qs({ table: "clients", where: { name: "a,b" } })).toBe("name=eq.a%2Cb");
     expect(qs({ table: "clients", where: { email: "a.b@c.d" } })).toBe("email=eq.a.b%40c.d");

@@ -62,15 +62,16 @@ jobs:
             fi
           fi
 
-          # The filter `bun test` is given. `./tests/` is anchored, so it is the five cross-package
+          # The filter `bun test` is given. `./tests/` is anchored, so it is the four cross-package
           # suites at the root and not every path containing "tests": a narrowed run still pins the
           # two entry points against each other (tests/query.test.ts), hostile input through both
           # (security), the compiled docs and the adapters -- it only drops the *other* package's
           # suite. An empty filter is the whole suite.
           case "$scope" in
             all)   filter=""; compare=true ;;
+            # the differential cases live in packages/rest/tests/compare, so a rest-scoped run has them
             rest)  filter="./packages/rest/tests/ ./tests/"; compare=true ;;
-            # the differential test drives handle(), which a change under packages/query cannot reach
+            # they drive handle(), which a change under packages/query cannot reach: not collected here
             query) filter="./packages/query/tests/ ./tests/"; compare=false ;;
             none)  filter=""; compare=false ;;
           esac
@@ -135,7 +136,7 @@ jobs:
             | tar -xJ -C "$RUNNER_TEMP/postgrest"
           "$RUNNER_TEMP/postgrest/postgrest" --version
       - run: bun run build
-      # The suite the `changes` job chose, tests/compare included: it skips itself without POSTGREST_BIN.
+      # The suite the `changes` job chose. The differential cases skip themselves without POSTGREST_BIN.
       #
       # `--timeout` because a runner is far slower than a developer's machine at what these suites do
       # -- `createTestDb` makes a database from a template and drops it again per test, with PostGIS

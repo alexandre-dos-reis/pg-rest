@@ -1,4 +1,4 @@
-import { ALIAS } from "../../packages/core/src/constants";
+import { ALIAS } from "../../../core/src/constants";
 
 /**
  * Requests replayed against both PostgREST 16 and pg-rest on the same database.

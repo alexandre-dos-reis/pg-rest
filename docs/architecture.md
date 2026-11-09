@@ -55,7 +55,7 @@ What each side hands the core, and what it takes back:
 | **Beyond one call** | content negotiation, `Range`, plans, `OPTIONS`, the OpenAPI document, custom media types | `transaction()` and `setContextQuery()`; the typed layer; at build time `introspect` and the generators (`types.ts`) |
 
 Three consequences worth remembering. A change to parsing, planning, SQL or `execute` is a change to both packages,
-and the comparison against PostgREST (`tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
+and the comparison against PostgREST (`packages/rest/tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
 A new way for the engine to refuse something is a new `Reason`, which has to be mapped by both packages (the compiler
 checks it). And a feature that exists for one transport only is not in the core: the core's `SqlCall` and
 `SqlOutputFormat` have no field for it: `SqlCall` is only settings to issue and something to run in the transaction, and each package
@@ -190,7 +190,7 @@ They are the kind that break quietly, so each has a test that fails loudly:
 
 - **One pipeline.** A feature must come from the shared code, not from one entry point. `tests/query.test.ts` asserts
   the operations and `handle()` answer identically, error bodies included.
-- **PostgREST's behaviour is the specification.** `tests/compare` replays hundreds of requests against the real
+- **PostgREST's behaviour is the specification.** `packages/rest/tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
 - **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.
   `tests/security.test.ts` is the guard. → [`security.md`](security.md)

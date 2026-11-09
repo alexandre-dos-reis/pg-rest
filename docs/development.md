@@ -28,7 +28,7 @@ care about.
 
 | | |
 | --- | --- |
-| `tests/compare` | hundreds of requests replayed against the real PostgREST 16.5 binary, statuses, headers and bodies compared. Run it whenever you touch parsing, SQL generation, error codes or headers |
+| `packages/rest/tests/compare` | hundreds of requests replayed against the real PostgREST 16.5 binary, statuses, headers and bodies compared. Run it whenever you touch parsing, SQL generation, error codes or headers |
 | `packages/rest/tests/*` | the behaviour of `handle()`, feature by feature: `read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, and `parse` for PostgREST's query-string grammar |
 | `packages/query/tests/*` | the object API's own: `query-direct`, `composite`, `prepare`, `transaction`, `update-expressions`, and the typed layer below |
 | `packages/core/tests/schema.test.ts` | schema introspection, relationship resolution and the cache |

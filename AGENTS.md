@@ -14,7 +14,7 @@ reference lives in `docs/`.
   one way: `rest` and `query` import `@tsql/core/*`, never each other, and `core` imports neither. Never add a
   dependency on `@tsql/core` under `dependencies`, and never import `rest` from `query` or the reverse.
 - **Parity belongs to `@tsql/rest`.** Anything that is not PostgREST -- the `$` filters, the computed `set`, the typed layer --
-  is `@tsql/query` only, and must not change what `handle()` does (`tests/compare` pins that against a real PostgREST).
+  is `@tsql/query` only, and must not change what `handle()` does (`packages/rest/tests/compare` pins that against a real PostgREST).
   HTTP-only settings (`basePath`, `allowTxOverride`, `planEnabled`, `openApi`, `serverUrl`) are `HttpConfig`, in `rest`.
 - Each package keeps its own schema cache: an app that uses both creates both. `tests/support/pgrest.ts` is the test-only
   `createPgRest` that composes the two on one database.
@@ -63,10 +63,10 @@ reference lives in `docs/`.
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
 | `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`) |
-| `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`) and PostgREST's grammar (`parse`), `query` the object API, the typed layer and the generator, `core` schema introspection |
-| `tests/` | what belongs to no single package: the cross-package suites (`query.test.ts`, `security.test.ts`, `docs.test.ts`, `agnostic.test.ts`, `compare/`) and the shared harness. `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery`; a package's tests reach it as `../../../tests/support/*` |
+| `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`), PostgREST's grammar (`parse`) and the differential cases (`compare/`), `query` the object API, the typed layer and the generator, `core` schema introspection |
+| `tests/` | what belongs to no single package: the four cross-package suites (`query.test.ts`, `security.test.ts`, `docs.test.ts`, `agnostic.test.ts`) and the shared harness. `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery`; a package's tests reach it as `../../../tests/support/*` |
 | `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `packages/query/tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
-| `tests/compare/` | differential tests against a real PostgREST 16 binary |
+| `packages/rest/tests/compare/` | differential tests against a real PostgREST 16 binary: `handle()` only, which is why they are the `rest` package's |
 | `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
 | `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
@@ -76,7 +76,7 @@ reference lives in `docs/`.
 
 ```bash
 bun install
-mise install           # the pinned PostgREST binary (tests/compare) and micromamba; see mise.toml
+mise install           # the pinned PostgREST binary (packages/rest/tests/compare) and micromamba; see mise.toml
 mise run db:start      # Postgres 16 + PostGIS on $PGPORT, under .cache/ (also db:stop, db:reset)
 mise run test          # the whole suite against that cluster and that binary
 bun run typecheck      # tsc --noEmit (src and tests only; bench/, scripts/ and examples/ are not typechecked)
@@ -108,7 +108,7 @@ bun run link:examples  # point the examples at the local build, without touching
   `packages/query` alone runs `./packages/query/tests/ ./tests/`, a change under `packages/rest` alone runs
   `./packages/rest/tests/ ./tests/`, and **anything else runs everything** -- `packages/core` is what both packages
   are built on, and `tests/support` is what both are tested through, so neither can be narrowed. The root `./tests/`
-  always runs: those five suites are cross-package by construction. A push to `main` always runs everything, and so
+  always runs: those four suites are cross-package by construction. A push to `main` always runs everything, and so
   does `checks`. `./tests/` is spelled with the leading `./` on purpose -- `bun test tests/` is a substring filter
   that matches `packages/*/tests` too.
 - Typecheck runs before the build in CI, so `packages/*/src` and `tests` code must not import from `dist`.
