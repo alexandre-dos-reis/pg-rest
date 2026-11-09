@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { PostgrestClient } from "@supabase/postgrest-js";
 import { NeonPostgrestClient } from "@neondatabase/postgrest-js";
-import type { RequestContext } from "../../../tests/support/pgrest";
+import type { RequestContext } from "../src/index";
 import { hasDb } from "../../../tests/support/db";
 import { authed, makeApi, type TestApi } from "../../../tests/support/api";
 

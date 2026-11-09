@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { QueryInput } from "../src/query";
 import { toParsed } from "../src/query";
 import { parseQuery } from "../../rest/src/parse/query-string";
-import { toParams } from "../../../tests/support/render";
+import { toParams } from "./support/render";
 
 /** What `@tsql/rest` reads from the query string the input stands for. */
 const viaString = (input: QueryInput) => parseQuery(toParams(input));

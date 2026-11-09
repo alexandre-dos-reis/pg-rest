@@ -672,7 +672,7 @@ export const isEmbed = (v: Select | Embed): v is Embed => !Array.isArray(v);
 // `@tsql/rest` hands the engine what it parsed from a query string. `query` has no string to parse: it
 // builds the same `ParsedQuery` from its object, so none of PostgREST's grammar is in this package and
 // the only text it reads is a column string (`"name->>first"`, `"total::text"`, `"count()"`).
-// `tests/support/render.ts` renders an input the old way, as a query string, and
+// `packages/query/tests/support/render.ts` renders an input the old way, as a query string, and
 // `packages/query/tests/query-direct.test.ts` pins that the string, parsed by `@tsql/rest`, gives the same thing.
 
 const QUANTIFIABLE_OPS: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);

@@ -1,4 +1,6 @@
-import { createPgRest, type PgRestInstance, type PgRestOptions, type RequestContext } from "./pgrest";
+import { createPgRest, type PgRestInstance, type PgRestOptions } from "./pgrest";
+// the context a request carries: `call` hands it to `handle()`, so it is the one `@tsql/rest` declares
+import type { RequestContext } from "../../packages/rest/src/index";
 import { createTestDb, type TestDb } from "./db";
 
 export interface Reply {

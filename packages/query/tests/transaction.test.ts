@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "../../../tests/support/db";
 import { authed, makeApi, type TestApi } from "../../../tests/support/api";
-import { QueryError, type RequestContext, type Transaction } from "../../../tests/support/pgrest";
+import { QueryError, type RequestContext, type Transaction } from "../src/index";
 
 /**
  * `transaction()`: one scope, one transaction. What is pinned here is the boundary -- what lands,

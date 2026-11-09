@@ -32,7 +32,7 @@ care about.
 | `packages/rest/tests/*` | the behaviour of `handle()`, feature by feature: `read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, and `parse` for PostgREST's query-string grammar |
 | `packages/query/tests/*` | the object API's own: `query-direct`, `composite`, `prepare`, `transaction`, `update-expressions`, and the typed layer below |
 | `packages/core/tests/schema.test.ts` | schema introspection, relationship resolution and the cache |
-| `tests/query.test.ts` | the object API, and that it answers exactly what `handle()` does |
+| `packages/query/tests/query.test.ts` | the object API, and that it answers exactly what `handle()` does |
 | `packages/query/tests/typed.test.ts` | the typed input: exact result types, and `@ts-expect-error` on every mistake it must refuse |
 | `packages/query/tests/completions.test.ts` | what an editor offers inside a typed query, asked of the TypeScript compiler |
 | `tests/support/tsapi.ts` | the virtual TypeScript project `completions.test.ts` and `docs.test.ts` compile in: TypeScript 7 ships no in-process compiler, so both drive the native one over `typescript/async` |

@@ -14,18 +14,8 @@ import type {
   SelectQuery,
   UpdateQuery,
   Where,
-} from "../../packages/query/src/query";
-import {
-  GROUPS,
-  type Leaf,
-  bad,
-  checkKey,
-  groupMembers,
-  isGroupKey,
-  listOf,
-  lit,
-  toLeaves,
-} from "../../packages/query/src/query";
+} from "../../src/query";
+import { GROUPS, type Leaf, bad, checkKey, groupMembers, isGroupKey, listOf, lit, toLeaves } from "../../src/query";
 
 /** The right-hand side of one leaf: `[not.]op[(modifier)].value`. */
 const renderLeaf = (leaf: Leaf, delimited: boolean): string => {

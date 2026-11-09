@@ -23,7 +23,7 @@ reference lives in `docs/`.
   `select(object)`, `insert(object)`... `=> { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
   The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tsql/query`), so planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
-  that pipeline: a feature added to one entry point must come from the shared code, and `tests/query.test.ts` pins that the
+  that pipeline: a feature added to one entry point must come from the shared code, and `packages/query/tests/query.test.ts` pins that the
   two answer identically, error bodies included.
 - A web-standard `handle(Request) => Response` (`createRest(options)` in `packages/rest/src/index.ts`). No HTTP server, no JWT: the consumer supplies
   `resolveContext(req)` (or passes a context to `handle`) with the role and claims, and pg-rest applies them with `set_config` so RLS works.
@@ -63,8 +63,8 @@ reference lives in `docs/`.
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
 | `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`) |
-| `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`), PostgREST's grammar (`parse`) and the differential cases (`compare/`), `query` the object API, the typed layer and the generator, `core` schema introspection |
-| `tests/` | what belongs to no single package: the four cross-package suites (`query.test.ts`, `security.test.ts`, `docs.test.ts`, `agnostic.test.ts`) and the shared harness. `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery`; a package's tests reach it as `../../../tests/support/*` |
+| `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`), PostgREST's grammar (`parse`) and the differential cases (`compare/`), `query` the object API (`query`, `query-direct`, `composite`, `prepare`, `transaction`, `update-expressions`), the typed layer and the generator, with its own helpers in `packages/query/tests/support`, `core` schema introspection |
+| `tests/` | what belongs to no single package: the three cross-package suites (`security.test.ts`, `docs.test.ts`, `agnostic.test.ts`) and the shared harness -- the fixture schema (`fixture.sql`), its generated types, `db.ts`, the HTTP helpers of `api.ts`, the virtual TypeScript project of `tsapi.ts`, and `pgrest.ts`, which composes `createRest` and `createQuery` on one database. `pgrest.ts` exports **only** that instance: a suite imports its types and error classes from the package that owns them, so what it depends on is visible in its own imports. A package's tests reach the harness as `../../../tests/support/*` |
 | `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `packages/query/tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `packages/rest/tests/compare/` | differential tests against a real PostgREST 16 binary: `handle()` only, which is why they are the `rest` package's |
 | `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
@@ -108,7 +108,7 @@ bun run link:examples  # point the examples at the local build, without touching
   `packages/query` alone runs `./packages/query/tests/ ./tests/`, a change under `packages/rest` alone runs
   `./packages/rest/tests/ ./tests/`, and **anything else runs everything** -- `packages/core` is what both packages
   are built on, and `tests/support` is what both are tested through, so neither can be narrowed. The root `./tests/`
-  always runs: those four suites are cross-package by construction. A push to `main` always runs everything, and so
+  always runs: those three suites are cross-package by construction. A push to `main` always runs everything, and so
   does `checks`. `./tests/` is spelled with the leading `./` on purpose -- `bun test tests/` is a substring filter
   that matches `packages/*/tests` too.
 - Typecheck runs before the build in CI, so `packages/*/src` and `tests` code must not import from `dist`.

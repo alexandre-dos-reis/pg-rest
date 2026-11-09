@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "../../../tests/support/db";
 import { authed, makeApi, type TestApi } from "../../../tests/support/api";
-import { PgRestError } from "../../../tests/support/pgrest";
+import { PgRestError } from "../src/index";
 
 describe.skipIf(!hasDb)("request context (the library's replacement for JWT)", () => {
   let t: TestApi | undefined;

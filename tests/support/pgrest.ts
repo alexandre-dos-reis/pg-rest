@@ -1,43 +1,16 @@
-// The two entry points side by side, for tests that exercise both on one database.
-// `@tsql/rest` and `@tsql/query` are separate packages; this is what an app that uses both writes.
+// The one thing that is neither package's: `@tsql/rest` and `@tsql/query` composed on one database,
+// which is what an app that uses both writes. It builds the instance and nothing else -- a test that
+// wants a type or an error class imports it from the package that owns it, so that what a suite
+// depends on is visible in its own imports.
 import {
   createQuery,
   type AnyDatabase,
-  type QueryInput,
   type QueryInstance,
   type QueryOptions,
-  type QueryResult,
-  type RequestContext,
   type TypedQueryInstance,
 } from "../../packages/query/src/index";
 import { introspect, toDescriptor } from "../../packages/core/src/schema";
-import {
-  ApiError,
-  DbQueryError,
-  PgRestError,
-  createRest,
-  type RestInstance,
-  type RestOptions,
-} from "../../packages/rest/src/index";
-
-export * from "../../packages/query/src/index";
-export { ApiError, DbQueryError, PgRestError, createRest, type RestInstance, type RestOptions };
-
-/**
- * Run an input whose operation is only known at run time (a table-driven test): the one place a test
- * dispatches on `action` itself, the way the six methods do.
- */
-export const exec = <T = unknown>(
-  api: QueryInstance,
-  input: QueryInput,
-  ctx?: RequestContext,
-): Promise<QueryResult<T>> => {
-  const op = "name" in input ? "rpc" : (input.action ?? "select");
-  return (api as unknown as Record<string, (i: QueryInput, c?: RequestContext) => Promise<QueryResult<T>>>)[op]!(
-    input,
-    ctx,
-  );
-};
+import { createRest, type RestInstance, type RestOptions } from "../../packages/rest/src/index";
 
 export type PgRestOptions = RestOptions;
 export type PgRestInstance = RestInstance & QueryInstance;

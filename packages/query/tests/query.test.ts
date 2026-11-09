@@ -1,16 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-  createPgRest,
-  exec,
-  QueryError,
-  type QueryInput,
-  type RequestContext,
-  type SelectInput,
-} from "./support/pgrest";
-import { createTestDb, hasDb } from "./support/db";
-import { authed, makeApi, type TestApi } from "./support/api";
-import {} from "../packages/query/src/query";
+import { QueryError, type QueryInput, type RequestContext, type SelectInput } from "../src/index";
+import { createPgRest } from "../../../tests/support/pgrest";
+import { exec } from "./support/exec";
+import { createTestDb, hasDb } from "../../../tests/support/db";
+import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import {} from "../src/query";
 import { toParams } from "./support/render";
 
 /** The query string the object describes, as `handle()` would receive it. */

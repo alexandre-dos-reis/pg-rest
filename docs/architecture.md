@@ -188,7 +188,7 @@ result. Neither is a rejection, and neither package knows the other's mapping.
 
 They are the kind that break quietly, so each has a test that fails loudly:
 
-- **One pipeline.** A feature must come from the shared code, not from one entry point. `tests/query.test.ts` asserts
+- **One pipeline.** A feature must come from the shared code, not from one entry point. `packages/query/tests/query.test.ts` asserts
   the operations and `handle()` answer identically, error bodies included.
 - **PostgREST's behaviour is the specification.** `packages/rest/tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.

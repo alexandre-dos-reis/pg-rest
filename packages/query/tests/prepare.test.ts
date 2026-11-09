@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createQuery, type QueryInput, type QueryInstance, type SelectInput } from "../src/index";
-import { exec } from "../../../tests/support/pgrest";
+import { exec } from "./support/exec";
 import { introspect, toDescriptor } from "../../core/src/schema";
 import { createTestDb, hasDb, type TestDb } from "../../../tests/support/db";
 
