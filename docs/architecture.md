@@ -188,12 +188,12 @@ result. Neither is a rejection, and neither package knows the other's mapping.
 
 They are the kind that break quietly, so each has a test that fails loudly:
 
-- **One pipeline.** A feature must come from the shared code, not from one entry point. `packages/query/tests/query.test.ts` asserts
+- **One pipeline.** A feature must come from the shared code, not from one entry point. the shared `ParsedQuery` fixtures assert
   the operations and `handle()` answer identically, error bodies included.
 - **PostgREST's behaviour is the specification.** `packages/rest/tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
 - **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.
-  `tests/security.test.ts` is the guard. → [`security.md`](security.md)
+  the two `security.test.ts` suites are the guard. → [`security.md`](security.md)
 - **One union member per table** in `packages/query/src/typed.ts`, and every member declares `table`. Otherwise the editor silently
   starts offering every table's columns while the compiler stays right; `packages/query/tests/completions.test.ts` asks the
   compiler and pins it. → [`types.md`](types.md#in-your-editor)

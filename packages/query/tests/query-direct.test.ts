@@ -1,94 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type { QueryInput } from "../src/query";
 import { toParsed } from "../src/query";
-import { parseQuery } from "../../rest/src/parse/query-string";
-import { toParams } from "./support/render";
+import { normalizeParsed } from "../../core/tests/support/parsed";
+import { inputs } from "./support/cases";
+import fixtures from "../../core/tests/parsed.fixtures.json";
 
-/** What `@tsql/rest` reads from the query string the input stands for. */
-const viaString = (input: QueryInput) => parseQuery(toParams(input));
-
-// `toParsed` builds the parsed form from the object. For everything a query string can say, it must be
-// what the string parses to: that is what keeps `query` and `rest` one engine.
-const same: Array<[string, unknown]> = [
-  ["bare table", { table: "orders" }],
-  ["empty select", { table: "orders", columns: [] }],
-  ["columns", { table: "orders", columns: ["id", "total", "*"] }],
-  ["aliased column", { table: "orders", columns: ["t:total"] }],
-  ["cast", { table: "orders", columns: ["total::text"] }],
-  ["json path", { table: "orders", columns: ["data->a", "meta->>tier"] }],
-  ["aggregate", { table: "orders", columns: ["count()", "total.sum()", "s:total.avg()"] }],
-  ["equality", { table: "orders", where: { status: "paid", id: 1, ok: true, gone: null } }],
-  ["operators", { table: "orders", where: { total: { $gte: 100, $lt: 500 }, name: { $ilike: "a%" } } }],
-  ["not", { table: "orders", where: { total: { $not: { $gt: 5 } } } }],
-  ["neq null", { table: "orders", where: { a: { $neq: null }, b: { $not: { $neq: null } }, c: { $not: null } } }],
-  ["in", { table: "orders", where: { id: { $in: [1, "a b", "x,y", "", null, 'q"'] } } }],
-  ["contains", { table: "orders", where: { tags: { $cs: ["a", "b,c"] }, r: { $ov: [1, 2] } } }],
-  ["quantifier", { table: "orders", where: { id: { $any: { $eq: [1, 2] } }, n: { $all: { $gt: [1] } } } }],
-  ["fts", { table: "orders", where: { t: { $fts: { query: "a b", config: "english" } }, u: { $wfts: "x" } } }],
-  ["is", { table: "orders", where: { a: { $is: true }, b: { $is: "NULL" }, c: { $is: "unknown" } } }],
-  ["value text", { table: "orders", where: { a: "a,b", b: "null", c: " x ", d: "" } }],
-  ["composite", { table: "orders", where: { a: { x: 1, y: [1, 2] } } }],
-  ["json path filter", { table: "orders", where: { "data->a": 1, "meta->>tier": { $like: "g*" } } }],
-  ["or", { table: "orders", where: { $or: [{ id: 1 }, { id: { $in: [2, 3] } }] } }],
-  ["and in or", { table: "orders", where: { $or: [{ a: 1, b: { $gt: 2, $lt: 5 } }, { c: "x,y" }] } }],
-  ["not group", { table: "orders", where: { $not: { a: 1, b: 2 }, $and: [{ c: 3 }] } }],
-  ["nested groups", { table: "orders", where: { $or: [{ $not: { a: 1 } }, { $and: [{ b: 2 }, { c: 3 }] }] } }],
-  ["order", { table: "orders", order: ["total.desc", "id", "a.asc.nullslast", "b.desc.nullsfirst"] }],
-  ["order objects", { table: "orders", order: [{ column: "a", desc: true, nulls: "first" }, { column: "b" }] }],
-  ["order by a related column", { table: "orders", order: ["client(name).desc", "data->a.asc"] }],
-  ["paging", { table: "orders", limit: 10, offset: 20 }],
-  ["paging that is not a count is ignored", { table: "orders", limit: 1.5, offset: -1 }],
-  ["embed", { table: "orders", columns: ["id", { clients: { columns: ["name"], inner: true } }] }],
-  [
-    "embed shorthand, alias, hint, spread",
-    {
-      table: "orders",
-      columns: [{ clients: ["name"] }, { c2: { columns: ["*"], hint: "fk", spread: true } }, { c3: { as: "buyer" } }],
-    },
-  ],
-  [
-    "embed with its own filters",
-    {
-      table: "orders",
-      columns: [
-        {
-          items: {
-            columns: ["id", { product: { columns: ["name"], where: { name: { $like: "a%" } } } }],
-            where: { qty: { $gt: 1 } },
-            order: ["id.desc"],
-            limit: 5,
-            offset: 1,
-          },
-        },
-      ],
-    },
-  ],
-  ["empty embed", { table: "orders", columns: [{ clients: { columns: [] } }] }],
-  [
-    "a filter through the path of an embed",
-    { table: "orders", columns: [{ clients: ["id"] }], where: { "clients.name": "a" } },
-  ],
-  [
-    "a filter through the alias, and through the table name of an aliased one",
-    { table: "orders", columns: [{ clients: { as: "buyer" } }], where: { "buyer.id": 1, "clients.name": "a" } },
-  ],
-  [
-    "presence of an embed",
-    {
-      table: "orders",
-      columns: [{ clients: ["id"] }, { items: ["id"] }],
-      where: { clients: null, items: { $not: null } },
-    },
-  ],
-  [
-    "insert",
-    { table: "orders", action: "insert", rows: { a: 1 }, returning: ["id"], onConflict: ["id"], columns: ["a", "b"] },
-  ],
-  ["upsert odd columns", { table: "orders", action: "upsert", rows: { a: 1 }, columns: ["a b"] }],
-  ["update", { table: "orders", action: "update", set: { a: 1 }, where: { id: 1 } }],
-  ["delete", { table: "orders", action: "delete", where: { id: { $in: [1, 2] } } }],
-  ["rpc", { name: "f", args: { a: 1 }, where: { x: 1 }, columns: ["a"] }],
-];
+/**
+ * `toParsed` builds `@tsql/core`'s `ParsedQuery` from the object. For everything a query string can
+ * also say, it must build what the string means -- that is what keeps the two packages one engine.
+ *
+ * The expectation is `@tsql/core`'s, committed in `parsed.fixtures.json`, so this suite never runs
+ * `@tsql/rest`: that package is pinned against the same file from its own side.
+ */
 
 // What the string route refuses, `toParsed` refuses too -- in `query`'s own words.
 const refused: Array<[string, unknown]> = [
@@ -108,9 +31,11 @@ const refused: Array<[string, unknown]> = [
 
 // Where `query` is more exact than a query string can be: a name that only a query string reserves.
 describe("query -> ParsedQuery, directly", () => {
-  for (const [name, input] of same) {
+  for (const [name, input] of inputs) {
     test(name, () => {
-      expect(toParsed(input as QueryInput)).toEqual(viaString(input as QueryInput));
+      const expected = (fixtures as Record<string, { parsed: unknown }>)[name];
+      if (!expected) throw new Error(`${name} has no fixture -- run \`bun run gen:parsed\``);
+      expect(normalizeParsed(toParsed(input))).toEqual(expected.parsed);
     });
   }
 

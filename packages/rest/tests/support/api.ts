@@ -1,7 +1,8 @@
-import { createPgRest, type PgRestInstance, type PgRestOptions } from "./pgrest";
-// the context a request carries: `call` hands it to `handle()`, so it is the one `@tsql/rest` declares
-import type { RequestContext } from "../../packages/rest/src/index";
-import { createTestDb, type TestDb } from "./db";
+// `@tsql/rest`'s harness: a throwaway database, `createRest` on it, and the HTTP helpers a suite
+// drives `handle()` with. It names `@tsql/rest` and `@tsql/core` and nothing else -- what the other
+// package does with the same database is not this package's business.
+import { createRest, type RequestContext, type RestInstance, type RestOptions } from "../../src/index";
+import { createTestDb, type TestDb } from "../../../../tests/support/db";
 
 export interface Reply {
   readonly status: number;
@@ -20,7 +21,7 @@ export interface CallOptions {
 
 export interface TestApi {
   readonly db: TestDb;
-  readonly api: PgRestInstance;
+  readonly api: RestInstance;
   call(method: string, path: string, opts?: CallOptions): Promise<Reply>;
   get(path: string, opts?: CallOptions): Promise<Reply>;
   post(path: string, body: unknown, opts?: CallOptions): Promise<Reply>;
@@ -33,9 +34,9 @@ export interface TestApi {
 /** The user used by tests that write: the `authenticated` role. */
 export const authed = (sub = "user-1"): RequestContext => ({ role: "authenticated", claims: { sub } });
 
-export const makeApi = async (options: Partial<PgRestOptions> = {}): Promise<TestApi> => {
+export const makeApi = async (options: Partial<RestOptions> = {}): Promise<TestApi> => {
   const db = await createTestDb();
-  const api = await createPgRest({ db: db.adapter, schemas: ["api", "v2"], ...options });
+  const api = await createRest({ db: db.adapter, schemas: ["api", "v2"], ...options });
 
   const call = async (method: string, path: string, opts: CallOptions = {}): Promise<Reply> => {
     const headers: Record<string, string> = { ...opts.headers };

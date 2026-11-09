@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { hasDb, requirePostgis } from "../../../../tests/support/db";
-import { makeApi, type TestApi } from "../../../../tests/support/api";
+import { makeApi, type TestApi } from "../support/api";
 import { cases, type Case } from "./cases";
 import { POSTGREST_BIN, signJwt, startPostgrest, type RunningPostgrest } from "./postgrest";
 

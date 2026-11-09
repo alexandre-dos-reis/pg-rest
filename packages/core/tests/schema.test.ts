@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createTestDb, hasDb, type TestDb } from "../../../tests/support/db";
 import { findRelationships, getRelation, introspect, resolveRelationship, type SchemaCache } from "../src/schema";
 import { EngineError } from "../src/errors";
-import { toApiError } from "../../rest/src/errors";
 
 describe.skipIf(!hasDb)("schema introspection", () => {
   let db: TestDb;
@@ -83,11 +82,9 @@ describe.skipIf(!hasDb)("schema introspection", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(EngineError);
       const err = e as EngineError;
+      // the reason, and the suggestion built from the catalog: how a reason becomes a status and a
+      // PGRST code is the consuming package's table, pinned in its own suite
       expect(err.reason).toBe("table_not_found");
-      // what it answers with over HTTP is the other package's table
-      const api = toApiError(err, undefined, undefined);
-      expect(api.status).toBe(404);
-      expect(api.body.code).toBe("PGRST205");
       expect(err.hint).toContain("api.clients");
     }
   });

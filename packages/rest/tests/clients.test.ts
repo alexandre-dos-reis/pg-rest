@@ -3,7 +3,7 @@ import { PostgrestClient } from "@supabase/postgrest-js";
 import { NeonPostgrestClient } from "@neondatabase/postgrest-js";
 import type { RequestContext } from "../src/index";
 import { hasDb } from "../../../tests/support/db";
-import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import { authed, makeApi, type TestApi } from "./support/api";
 
 /**
  * The PostgREST client libraries, driving `handle()` directly: they take a `fetch`, so the whole

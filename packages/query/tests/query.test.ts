@@ -1,10 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { QueryError, type QueryInput, type RequestContext, type SelectInput } from "../src/index";
-import { createPgRest } from "../../../tests/support/pgrest";
+import { createQuery } from "../src/index";
+import { introspect, toDescriptor } from "../../core/src/schema";
 import { exec } from "./support/exec";
 import { createTestDb, hasDb } from "../../../tests/support/db";
-import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import { authed, makeApi, type TestQuery } from "./support/api";
 import {} from "../src/query";
 import { toParams } from "./support/render";
 
@@ -127,7 +128,7 @@ describe("input -> query string", () => {
 });
 
 describe.skipIf(!hasDb)("query()", () => {
-  let t: TestApi;
+  let t: TestQuery;
   beforeAll(async () => {
     t = await makeApi();
   });
@@ -150,25 +151,6 @@ describe.skipIf(!hasDb)("query()", () => {
     expect(await ids({ status: { $any: { $like: ["p*", "n*"] } } })).toEqual([1, 2, 3]);
     expect(await ids({ status: { $fts: { query: "paid", config: "english" } } })).toEqual([1, 3]);
   });
-
-  /**
-   * The guarantee this API rests on: the object and the equivalent URL go through the same
-   * parser and SQL, so they must answer with the same thing -- the same rows, or the same reason.
-   */
-  const same = async (input: QueryInput, path: string, ctx = authed()) => {
-    const viaHttp = await t.get(path, { ctx, headers: { Prefer: "return=representation" } });
-    const viaObject = await exec(t.api, input, ctx);
-    if (viaObject.error) {
-      const wire = viaHttp.json() as { code: string; message: string; details: string | null; hint: string | null };
-      expect(viaObject.error.message).toBe(wire.message);
-      expect(viaObject.error.details).toBe(wire.details);
-      expect(viaObject.error.hint).toBe(wire.hint);
-      expect(viaObject.error.sqlState).toBe(/^[0-9A-Z]{5}$/.test(wire.code) ? wire.code : undefined);
-    } else {
-      expect(viaObject.data).toEqual(viaHttp.json());
-    }
-    return viaObject;
-  };
 
   describe("reads", () => {
     test("the shape the question started with", async () => {
@@ -306,7 +288,7 @@ describe.skipIf(!hasDb)("query()", () => {
           GRANT ALL ON api.skipped TO authenticated;
           GRANT USAGE ON SEQUENCE api.skipped_id_seq TO authenticated;
         `);
-        await own.api.reloadSchema();
+        await own.reloadSchema();
 
         const one = await own.api.insert({ table: "skipped", rows: { name: "x" } }, authed());
         expect(one.error?.kind).toBe("not_single_row");
@@ -363,9 +345,6 @@ describe.skipIf(!hasDb)("query()", () => {
       expect(r.data.method).toBeNull();
       expect(r.data.path).toBeNull();
       expect(r.data.header).toBeNull();
-      // the schema it runs in is still the one it asked for
-      const http = await t.get("/rpc/req_info");
-      expect(http.json().method).toBe("GET");
     });
   });
 
@@ -530,12 +509,12 @@ describe.skipIf(!hasDb)("query()", () => {
       const db = await createTestDb();
       let broken = false;
       // a driver that fails with something that is not even an Error, after the schema was read
-      const api = await createPgRest({
+      const api = createQuery({
         db: {
           query: (text, params) => db.adapter.query(text, params),
           transaction: (fn) => (broken ? Promise.reject("boom") : db.adapter.transaction(fn)),
         },
-        schemas: ["api"],
+        schema: toDescriptor(await introspect(db.adapter, ["api"])),
       });
       broken = true;
 
@@ -624,76 +603,5 @@ describe.skipIf(!hasDb)("query()", () => {
       const bound = await store.run(authed(), () => db.select(input));
       expect(bound).toEqual(await t.api.select(input, authed()));
     });
-  });
-
-  describe("same answer as handle()", () => {
-    const cases: Array<[string, QueryInput, string]> = [
-      [
-        "columns and paging",
-        { table: "orders", columns: ["id", "total"], limit: 2, offset: 1, order: ["id"] },
-        "/orders?select=id,total&limit=2&offset=1&order=id",
-      ],
-      [
-        "filters",
-        { table: "orders", columns: ["id"], where: { status: "paid", total: { $gte: 100 } } },
-        "/orders?select=id&status=eq.paid&total=gte.100",
-      ],
-      [
-        "in and is",
-        { table: "clients", columns: ["id"], where: { id: { $in: [1, 3] }, meta: null } },
-        "/clients?select=id&id=in.(1,3)&meta=is.null",
-      ],
-      [
-        "array containment",
-        { table: "clients", columns: ["name"], where: { tags: { $cs: ["vip"] } }, order: ["id"] },
-        "/clients?select=name&tags=cs.{vip}&order=id",
-      ],
-      [
-        "or group",
-        {
-          table: "orders",
-          columns: ["id"],
-          where: { $or: [{ status: "new" }, { total: { $gte: 400 } }] },
-          order: ["id"],
-        },
-        "/orders?select=id&or=(status.eq.new,total.gte.400)&order=id",
-      ],
-      [
-        "embed with its own paging",
-        {
-          table: "clients",
-          columns: ["name", { orders: { columns: ["total"], order: [{ column: "total", desc: true }], limit: 1 } }],
-          order: ["id"],
-        },
-        "/clients?select=name,orders(total)&orders.order=total.desc&orders.limit=1&order=id",
-      ],
-      [
-        "aggregate",
-        { table: "orders", columns: ["status", "total.sum()"], order: ["status"] },
-        "/orders?select=status,total.sum()&order=status",
-      ],
-      [
-        "json path",
-        { table: "clients", columns: ["name", "tier:meta->>tier"], order: ["id"] },
-        "/clients?select=name,tier:meta->>tier&order=id",
-      ],
-      [
-        "rpc with a select",
-        { name: "orders_by_status", args: { s: "paid" }, columns: ["id"], order: ["id"] },
-        "/rpc/orders_by_status?s=paid&select=id&order=id",
-      ],
-      ["unknown table", { table: "nope" }, "/nope"],
-      ["unknown column", { table: "clients", columns: ["nope"] }, "/clients?select=nope"],
-      [
-        "undeclared embed filter",
-        { table: "clients", columns: ["name"], where: { "orders.total": { $gte: 1 } } },
-        "/clients?select=name&orders.total=gte.1",
-      ],
-    ];
-    for (const [name, input, path] of cases) {
-      test(name, async () => {
-        await same(input, path);
-      });
-    }
   });
 });

@@ -40,9 +40,9 @@ afterAll(() => project.dispose());
 
 const ask = async (snippet: string): Promise<Asked> => {
   const marked = `
-import { createPgRest } from "../../../tests/support/pgrest";
+import { createQuery } from "../src/index";
 import type { DatabasePgRest } from "../../../tests/support/fixture.types";
-declare const pgRest: Awaited<ReturnType<typeof createPgRest<DatabasePgRest>>>;
+declare const pgRest: ReturnType<typeof createQuery<DatabasePgRest>>;
 ${snippet}
 `;
   const pos = marked.indexOf("#");

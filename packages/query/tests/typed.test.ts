@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createPgRest, type TypedPgRestInstance } from "../../../tests/support/pgrest";
-import { createTestDb, hasDb, type TestDb } from "../../../tests/support/db";
+import { makeTypedApi } from "./support/api";
+import { hasDb, type TestDb } from "../../../tests/support/db";
+import type { TypedQueryInstance } from "../src/index";
 import type { DatabasePgRest } from "../../../tests/support/fixture.types";
 
 /**
@@ -23,10 +24,11 @@ const ok = <R extends { readonly error: unknown }>(r: R): Extract<R, { readonly 
 
 describe.skipIf(!hasDb)("a typed instance", () => {
   let db: TestDb;
-  let pgRest: TypedPgRestInstance<DatabasePgRest>;
+  let pgRest: TypedQueryInstance<DatabasePgRest>;
   beforeAll(async () => {
-    db = await createTestDb();
-    pgRest = await createPgRest<DatabasePgRest>({ db: db.adapter, schemas: ["api", "v2"] });
+    const t = await makeTypedApi<DatabasePgRest>();
+    db = t.db;
+    pgRest = t.api;
   });
   afterAll(async () => {
     await pgRest.close();
@@ -422,11 +424,6 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     if (!failed.error) throw new Error("expected a failure");
     assertType<Equal<typeof failed.data, null>>();
     assertType<Equal<typeof failed.count, undefined>>();
-  });
-
-  test("handle() is untouched: a request is a string from outside", async () => {
-    const res = await pgRest.handle(new Request("http://localhost/clients?select=name&id=eq.1"));
-    expect(await res.json()).toEqual([{ name: "Ada" }]);
   });
 
   /**

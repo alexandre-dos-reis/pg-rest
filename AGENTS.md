@@ -16,15 +16,22 @@ reference lives in `docs/`.
 - **Parity belongs to `@tsql/rest`.** Anything that is not PostgREST -- the `$` filters, the computed `set`, the typed layer --
   is `@tsql/query` only, and must not change what `handle()` does (`packages/rest/tests/compare` pins that against a real PostgREST).
   HTTP-only settings (`basePath`, `allowTxOverride`, `planEnabled`, `openApi`, `serverUrl`) are `HttpConfig`, in `rest`.
-- Each package keeps its own schema cache: an app that uses both creates both. `tests/support/pgrest.ts` is the test-only
-  `createPgRest` that composes the two on one database.
+- Each package keeps its own schema cache: an app that uses both creates both. **Neither package's tests name the other**:
+  `packages/rest/tests` has its own harness over `createRest`, `packages/query/tests` one over `createQuery`, and the
+  guarantee that the two answer the same thing is pinned where they meet instead -- `ParsedQuery`, which `@tsql/core`
+  owns. `packages/core/tests/parsed.fixtures.json` holds, per case, the query string and the `ParsedQuery` both must
+  produce; `packages/rest/tests/parsed.test.ts` is held to it from the string side and
+  `packages/query/tests/query-direct.test.ts` from the object side. Everything after that boundary is `core`, so
+  agreeing there is what makes them agree at the answer. Regenerate the file with `bun run gen:parsed` -- deliberately,
+  reading the diff: it is generated from `rest`'s grammar, PostgREST being the specification, and the generator refuses
+  to write a case where the object and the string disagree.
 
 - Two entry points over **one** pipeline (in `@tsql/core`): `handle(Request) => Response` and
   `select(object)`, `insert(object)`... `=> { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
   The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tsql/query`), so planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
-  that pipeline: a feature added to one entry point must come from the shared code, and `packages/query/tests/query.test.ts` pins that the
-  two answer identically, error bodies included.
+  that pipeline: a feature added to one entry point must come from the shared code, and the shared `ParsedQuery` fixtures pin that the
+  two front-ends meet at the same input.
 - A web-standard `handle(Request) => Response` (`createRest(options)` in `packages/rest/src/index.ts`). No HTTP server, no JWT: the consumer supplies
   `resolveContext(req)` (or passes a context to `handle`) with the role and claims, and pg-rest applies them with `set_config` so RLS works.
 - Driver-agnostic: the core only knows the `DbAdapter` interface (`packages/core/src/adapter.ts`). Adapters live in `packages/core/src/adapters/*` (each published package re-exports them) and **must not import
@@ -64,7 +71,7 @@ reference lives in `docs/`.
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
 | `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`) |
 | `packages/*/tests/` | each package's own `bun test` suites, importing its `src/` as `../src/*`: `rest` has the behaviour of `handle()` (`read`, `write`, `rpc`, `media`, `geojson`, `plan`, `context`, `clients`), PostgREST's grammar (`parse`) and the differential cases (`compare/`), `query` the object API (`query`, `query-direct`, `composite`, `prepare`, `transaction`, `update-expressions`), the typed layer and the generator, with its own helpers in `packages/query/tests/support`, `core` schema introspection |
-| `tests/` | what belongs to no single package: the three cross-package suites (`security.test.ts`, `docs.test.ts`, `agnostic.test.ts`) and the shared harness -- the fixture schema (`fixture.sql`), its generated types, `db.ts`, the HTTP helpers of `api.ts`, the virtual TypeScript project of `tsapi.ts`, and `pgrest.ts`, which composes `createRest` and `createQuery` on one database. `pgrest.ts` exports **only** that instance: a suite imports its types and error classes from the package that owns them, so what it depends on is visible in its own imports. A package's tests reach the harness as `../../../tests/support/*` |
+| `tests/` | what is no package's: `docs.test.ts` (every `ts` block in the README and `docs/`) and `agnostic.test.ts` (that `packages/*/src` names no runtime or driver, and the examples agree), over the fixture every package's tests share -- `fixture.sql`, its generated types, `db.ts` (a throwaway database) and `tsapi.ts` (the virtual TypeScript project). **No harness here builds either library**: each package's tests reach the fixture as `../../../tests/support/db`, and build their own instance with their own `support/api.ts` |
 | `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `packages/query/tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `packages/rest/tests/compare/` | differential tests against a real PostgREST 16 binary: `handle()` only, which is why they are the `rest` package's |
 | `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
@@ -108,7 +115,7 @@ bun run link:examples  # point the examples at the local build, without touching
   `packages/query` alone runs `./packages/query/tests/ ./tests/`, a change under `packages/rest` alone runs
   `./packages/rest/tests/ ./tests/`, and **anything else runs everything** -- `packages/core` is what both packages
   are built on, and `tests/support` is what both are tested through, so neither can be narrowed. The root `./tests/`
-  always runs: those three suites are cross-package by construction. A push to `main` always runs everything, and so
+  always runs: neither of those two suites belongs to a package. A push to `main` always runs everything, and so
   does `checks`. `./tests/` is spelled with the leading `./` on purpose -- `bun test tests/` is a substring filter
   that matches `packages/*/tests` too.
 - Typecheck runs before the build in CI, so `packages/*/src` and `tests` code must not import from `dist`.
@@ -146,7 +153,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
   check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type
-  inference. Identifiers go through `packages/core/src/quote.ts`. Never interpolate request data into SQL. `tests/security.test.ts` covers this; extend it.
+  inference. Identifiers go through `packages/core/src/quote.ts`. Never interpolate request data into SQL. `packages/rest/tests/security.test.ts` covers the query string and `packages/query/tests/security.test.ts` the object; extend the one whose input you touched.
 - **Errors.** The core has no codes and no statuses: it throws `EngineError(reason, message, details, hint)`, and each
   package consumes it on its own. `@tsql/rest` maps a `reason` to PostgREST's status and `PGRSTxxx` code (`REASONS` in
   `packages/rest/src/errors.ts`) and answers an `ApiError` whose `body` is the wire format and must stay exactly PostgREST's.

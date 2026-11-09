@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "../../../tests/support/db";
-import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import { authed, makeApi, type TestQuery } from "./support/api";
 import { QueryError, type RequestContext, type Transaction } from "../src/index";
 
 /**
@@ -14,7 +14,7 @@ import { QueryError, type RequestContext, type Transaction } from "../src/index"
  * rejects. So most of the tests below read the failure off the *scope*, not off the query.
  */
 describe.skipIf(!hasDb)("transaction()", () => {
-  let t: TestApi | undefined;
+  let t: TestQuery | undefined;
   afterEach(async () => {
     await t?.close();
     t = undefined;
@@ -295,7 +295,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
       $$;
     `);
     await t.db.adapter.query(`GRANT EXECUTE ON FUNCTION api.iso() TO authenticated`);
-    await t.api.reloadSchema();
+    await t.reloadSchema();
 
     const iso = async (options: Record<string, unknown>) => {
       const r = await t!.api.transaction(
@@ -360,7 +360,7 @@ describe.skipIf(!hasDb)("transaction()", () => {
       END $$;
     `);
     await t.db.adapter.query(`GRANT EXECUTE ON FUNCTION api.flaky() TO authenticated`);
-    await t.api.reloadSchema();
+    await t.reloadSchema();
 
     let runs = 0;
     const fn = async (tx: Pick<Transaction, "rpc">) => {

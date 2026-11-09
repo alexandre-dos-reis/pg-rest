@@ -278,13 +278,4 @@ describe.skipIf(!hasDb)("values are bound, not written into the SQL", () => {
     const e = await lastOf({ table: "orders", columns: ["id"], where: { status: "paid" }, count: "planned" });
     expect(e.result.error).toBeNull();
   });
-
-  test("the HTTP route keeps its literals", async () => {
-    // `@tsql/rest` has not changed: only `query` binds (see `packages/rest/tests/compare`, which pins HTTP against PostgREST)
-    const { createRest } = await import("../../rest/src/index");
-    const rest = await createRest({ db: db.adapter, schemas: ["api"] });
-    const res = await rest.handle(new Request("http://x/orders?status=eq.paid&select=id"));
-    expect(res.status).toBe(200);
-    await rest.close();
-  });
 });

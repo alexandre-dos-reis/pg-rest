@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { hasDb } from "../../../tests/support/db";
-import { makeApi, type TestApi } from "../../../tests/support/api";
+import { makeApi, type TestApi } from "./support/api";
 
 describe.skipIf(!hasDb)("execution plan (Accept: application/vnd.pgrst.plan)", () => {
   let t: TestApi | undefined;

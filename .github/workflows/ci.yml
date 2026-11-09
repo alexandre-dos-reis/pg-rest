@@ -62,10 +62,10 @@ jobs:
             fi
           fi
 
-          # The filter `bun test` is given. `./tests/` is anchored, so it is the three cross-package
+          # The filter `bun test` is given. `./tests/` is anchored, so it is the two root
           # suites at the root and not every path containing "tests": a narrowed run still pins the
-          # hostile input through both entry points (security), the compiled docs and the adapters --
-          # it only drops the *other* package's suite. An empty filter is the whole suite.
+          # suites that are no package's -- the compiled docs and the adapters -- and not every path
+          # containing "tests". An empty filter is the whole suite.
           case "$scope" in
             all)   filter=""; compare=true ;;
             # the differential cases live in packages/rest/tests/compare, so a rest-scoped run has them

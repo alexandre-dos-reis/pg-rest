@@ -24,6 +24,7 @@
     "release": "changeset publish",
     "prepare": "git rev-parse --git-dir > /dev/null 2>&1 && git config core.hooksPath scripts/githooks || true",
     "check:examples": "bun run scripts/check-example-versions.ts",
+    "gen:parsed": "bun run scripts/gen-parsed-fixtures.ts",
     "link:examples": "scripts/link-examples.sh",
     "lint": "oxlint packages tests",
     "fmt": "oxfmt packages tests",

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { hasDb } from "../../../tests/support/db";
-import { authed, makeApi, type TestApi } from "../../../tests/support/api";
+import { authed, makeApi, type TestQuery } from "./support/api";
 import {} from "../src/query";
 import { toParams } from "./support/render";
 import type { QueryInput } from "../src/index";
@@ -51,7 +51,7 @@ describe("composite values -> query string", () => {
 });
 
 describe.skipIf(!hasDb)("composite types", () => {
-  let t: TestApi;
+  let t: TestQuery;
   beforeAll(async () => {
     t = await makeApi();
   });
@@ -83,27 +83,6 @@ describe.skipIf(!hasDb)("composite types", () => {
         { id: 2, name: "Grace", city: "Lyon", home: { city: "Lyon", zip: "69002" }, first_branch: "Paris" },
       ]);
     });
-
-    test("a path ending on an index is named after the last key before it", async () => {
-      // PostgREST's own rule (`lastJsonKey`): `owner->tags->>0` is `tags`, `branches->0` is `branches`
-      expect((await t.get("/venues?select=owner->tags->>0&id=eq.1")).json()).toEqual([{ tags: "music" }]);
-      expect((await t.get("/venues?select=branches->0&id=eq.2")).json()).toEqual([
-        { branches: { city: "Paris", zip: "75002" } },
-      ]);
-    });
-
-    test("a jsonb column keeps its arrows, so its indexes still apply", async () => {
-      expect((await t.get("/venues?select=meta->>seats&id=eq.1")).json()).toEqual([{ seats: "900" }]);
-    });
-
-    test("filtering and ordering by a field", async () => {
-      expect((await t.get("/venues?select=id&owner->>name=eq.Ada")).json()).toEqual([{ id: 1 }]);
-      expect((await t.get("/venues?select=id&owner->home->>city=eq.Lyon")).json()).toEqual([{ id: 2 }]);
-      expect((await t.get("/venues?select=label&order=owner->>name.desc")).json()).toEqual([
-        { label: "Back room" },
-        { label: "Concert hall" },
-      ]);
-    });
   });
 
   describe("filtering by a whole composite value", () => {
@@ -132,19 +111,6 @@ describe.skipIf(!hasDb)("composite types", () => {
       expect(
         (await t.api.select({ table: "venues", columns: ["id"], where: { owner: { $isdistinct: ADA } } })).data,
       ).toEqual([{ id: 2 }]);
-    });
-
-    test("the same request over HTTP answers identically", async () => {
-      const reply = await t.get(`/venues?select=id&owner=eq.${encodeURIComponent(JSON.stringify(ADA))}`);
-      expect(reply.status).toBe(200);
-      expect(reply.json()).toEqual([{ id: 1 }]);
-    });
-
-    test("a bare Postgres row literal is refused, as PostgREST refuses it", async () => {
-      // `'(Ada,...)'` has no type to be read as: both answer 0A000 rather than guessing one
-      const reply = await t.get("/venues?select=id&owner=eq.(Ada,,)");
-      expect(reply.status).toBe(400);
-      expect(reply.json().code).toBe("0A000");
     });
 
     test("is.null still tests the column, not its fields", async () => {
@@ -205,7 +171,7 @@ describe.skipIf(!hasDb)("composite types", () => {
 
   describe("the schema cache", () => {
     test("carries the fields of every composite type it reaches, nesting included", async () => {
-      const cache = await t.api.schemaCache();
+      const cache = await t.schemaCache();
       expect(cache.composites.get("api.address")?.attributes.map((a) => [a.name, a.type])).toEqual([
         ["city", "text"],
         ["zip", "text"],
