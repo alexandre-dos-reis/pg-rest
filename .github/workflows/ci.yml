@@ -38,6 +38,7 @@ jobs:
               - 'tsconfig.json'
               - 'bun.lock'
               - '.github/workflows/*.yml'
+              - '.github/actions/**'
             core: &core
               - 'packages/core/**'
             query:
@@ -94,17 +95,6 @@ jobs:
   #   name: Examples
   #   runs-on: ubuntu-latest
   #   timeout-minutes: 15
-  #   services:
-  #     postgres:
-  #       image: postgres:16
-  #       env:
-  #         POSTGRES_PASSWORD: postgres
-  #       ports: ["5432:5432"]
-  #       options: >-
-  #         --health-cmd "pg_isready -U postgres"
-  #         --health-interval 5s
-  #         --health-timeout 5s
-  #         --health-retries 10
   #   steps:
   #     - uses: actions/checkout@v4
   #     - uses: oven-sh/setup-bun@v2
@@ -113,13 +103,14 @@ jobs:
   #     - uses: actions/setup-node@v4
   #       with:
   #         node-version: 22
+  #     # the same server the test jobs get: PGHOST, PGPORT, PGUSER and PGPASSWORD are set for psql
+  #     - uses: ./.github/actions/postgres
   #     - run: bun install --frozen-lockfile
   #     # builds pg-rest once and links it into every example, so the loop below does not rebuild
   #     - name: Link the examples against the local build
   #       run: scripts/link-examples.sh
   #     - name: Run the examples
   #       env:
-  #         PGPASSWORD: postgres
   #         SKIP_LINK: 1
   #       run: |
   #         fail=0
@@ -127,17 +118,17 @@ jobs:
   #         # the ones that need a Postgres server, each on its own database
   #         for example in with-bun with-node-postgres with-postgres-js with-better-auth; do
   #           db="ex_$(echo "$example" | tr -- - _)"
-  #           psql -h localhost -U postgres -q -c "CREATE DATABASE $db"
+  #           psql -q -c "CREATE DATABASE $db"
   #           dir="$(ls -d examples/*/"$example")"
   #           # with-better-auth ships two files, run in order: Better Auth's tables, then the api schema
   #           for f in "$dir/schema.sql" "$dir/1-better-auth.sql" "$dir/2-api.sql"; do
   #             if [ -f "$f" ]; then
-  #               psql -h localhost -U postgres -d "$db" -v ON_ERROR_STOP=1 -q -f "$f"
+  #               psql -d "$db" -v ON_ERROR_STOP=1 -q -f "$f"
   #             fi
   #           done
   #           echo "::group::$example"
   #           port=$((port + 1))
-  #           PORT=$port scripts/check-example.sh "$example" "postgres://postgres:postgres@localhost:5432/$db" || fail=1
+  #           PORT=$port scripts/check-example.sh "$example" "${TEST_DATABASE_URL%/*}/$db" || fail=1
   #           echo "::endgroup::"
   #         done
   #         # and the ones that carry the database in-process (PGlite)
