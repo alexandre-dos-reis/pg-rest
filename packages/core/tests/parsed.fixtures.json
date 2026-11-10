@@ -1,0 +1,1539 @@
+{
+  "bare table": {
+    "qs": "",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "empty select": {
+    "qs": "select=",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "columns": {
+    "qs": "select=id%2Ctotal%2C*",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "id",
+            "json": []
+          }
+        },
+        {
+          "kind": "field",
+          "field": {
+            "name": "total",
+            "json": []
+          }
+        },
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "aliased column": {
+    "qs": "select=t%3Atotal",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "total",
+            "json": []
+          },
+          "alias": "t"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "cast": {
+    "qs": "select=total%3A%3Atext",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "total",
+            "json": []
+          },
+          "cast": "text"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "json path": {
+    "qs": "select=data-%3Ea%2Cmeta-%3E%3Etier",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "data",
+            "json": [
+              {
+                "arrow": "->",
+                "key": "a",
+                "isIndex": false
+              }
+            ]
+          }
+        },
+        {
+          "kind": "field",
+          "field": {
+            "name": "meta",
+            "json": [
+              {
+                "arrow": "->>",
+                "key": "tier",
+                "isIndex": false
+              }
+            ]
+          }
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "aggregate": {
+    "qs": "select=count%28%29%2Ctotal.sum%28%29%2Cs%3Atotal.avg%28%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "aggregate",
+          "fn": "count"
+        },
+        {
+          "kind": "aggregate",
+          "fn": "sum",
+          "field": {
+            "name": "total",
+            "json": []
+          }
+        },
+        {
+          "kind": "aggregate",
+          "fn": "avg",
+          "field": {
+            "name": "total",
+            "json": []
+          },
+          "alias": "s"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "equality": {
+    "qs": "status=eq.paid&id=eq.1&ok=eq.true&gone=is.null",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "status",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "paid"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "1"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "ok",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "true"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "gone",
+              "json": []
+            },
+            "negate": false,
+            "op": "is",
+            "value": "null"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "operators": {
+    "qs": "total=gte.100&total=lt.500&name=ilike.a%25",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "total",
+              "json": []
+            },
+            "negate": false,
+            "op": "gte",
+            "value": "100"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "total",
+              "json": []
+            },
+            "negate": false,
+            "op": "lt",
+            "value": "500"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "name",
+              "json": []
+            },
+            "negate": false,
+            "op": "ilike",
+            "value": "a%"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "not": {
+    "qs": "total=not.gt.5",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "total",
+              "json": []
+            },
+            "negate": true,
+            "op": "gt",
+            "value": "5"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "neq null": {
+    "qs": "a=not.is.null&b=is.null&c=not.is.null",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "negate": true,
+            "op": "is",
+            "value": "null"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "b",
+              "json": []
+            },
+            "negate": false,
+            "op": "is",
+            "value": "null"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "c",
+              "json": []
+            },
+            "negate": true,
+            "op": "is",
+            "value": "null"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "in": {
+    "qs": "id=in.%281%2Ca+b%2C%22x%2Cy%22%2C%22%22%2Cnull%2C%22q%5C%22%22%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "negate": false,
+            "op": "in",
+            "value": ["1", "a b", "x,y", "", "null", "q\""]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "contains": {
+    "qs": "tags=cs.%7Ba%2C%22b%2Cc%22%7D&r=ov.%7B1%2C2%7D",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "tags",
+              "json": []
+            },
+            "negate": false,
+            "op": "cs",
+            "value": "{a,\"b,c\"}"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "r",
+              "json": []
+            },
+            "negate": false,
+            "op": "ov",
+            "value": "{1,2}"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "quantifier": {
+    "qs": "id=eq%28any%29.%7B1%2C2%7D&n=gt%28all%29.%7B1%7D",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "quantifier": "any",
+            "value": "{1,2}"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "n",
+              "json": []
+            },
+            "negate": false,
+            "op": "gt",
+            "quantifier": "all",
+            "value": "{1}"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "fts": {
+    "qs": "t=fts%28english%29.a+b&u=wfts.x",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "t",
+              "json": []
+            },
+            "negate": false,
+            "op": "fts",
+            "lang": "english",
+            "value": "a b"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "u",
+              "json": []
+            },
+            "negate": false,
+            "op": "wfts",
+            "value": "x"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "is": {
+    "qs": "a=is.true&b=is.NULL&c=is.unknown",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "negate": false,
+            "op": "is",
+            "value": "true"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "b",
+              "json": []
+            },
+            "negate": false,
+            "op": "is",
+            "value": "null"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "c",
+              "json": []
+            },
+            "negate": false,
+            "op": "is",
+            "value": "unknown"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "value text": {
+    "qs": "a=eq.a%2Cb&b=eq.null&c=eq.+x+&d=eq.",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "a,b"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "b",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "null"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "c",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": " x "
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "d",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": ""
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "composite": {
+    "qs": "a=eq.%7B%22x%22%3A1%2C%22y%22%3A%5B1%2C2%5D%7D",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "{\"x\":1,\"y\":[1,2]}"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "json path filter": {
+    "qs": "data-%3Ea=eq.1&meta-%3E%3Etier=like.g*",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "data",
+              "json": [
+                {
+                  "arrow": "->",
+                  "key": "a",
+                  "isIndex": false
+                }
+              ]
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "1"
+          },
+          {
+            "kind": "filter",
+            "field": {
+              "name": "meta",
+              "json": [
+                {
+                  "arrow": "->>",
+                  "key": "tier",
+                  "isIndex": false
+                }
+              ]
+            },
+            "negate": false,
+            "op": "like",
+            "value": "g*"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "or": {
+    "qs": "or=%28id.eq.1%2Cid.in.%282%2C3%29%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "logic",
+            "op": "or",
+            "negate": false,
+            "children": [
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "id",
+                  "json": []
+                },
+                "negate": false,
+                "op": "eq",
+                "value": "1"
+              },
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "id",
+                  "json": []
+                },
+                "negate": false,
+                "op": "in",
+                "value": ["2", "3"]
+              }
+            ]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "and in or": {
+    "qs": "or=%28and%28a.eq.1%2Cb.gt.2%2Cb.lt.5%29%2Cc.eq.%22x%2Cy%22%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "logic",
+            "op": "or",
+            "negate": false,
+            "children": [
+              {
+                "kind": "logic",
+                "op": "and",
+                "negate": false,
+                "children": [
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "a",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "eq",
+                    "value": "1"
+                  },
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "b",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "gt",
+                    "value": "2"
+                  },
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "b",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "lt",
+                    "value": "5"
+                  }
+                ]
+              },
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "c",
+                  "json": []
+                },
+                "negate": false,
+                "op": "eq",
+                "value": "x,y"
+              }
+            ]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "not group": {
+    "qs": "not.and=%28a.eq.1%2Cb.eq.2%29&and=%28c.eq.3%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "logic",
+            "op": "and",
+            "negate": true,
+            "children": [
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "a",
+                  "json": []
+                },
+                "negate": false,
+                "op": "eq",
+                "value": "1"
+              },
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "b",
+                  "json": []
+                },
+                "negate": false,
+                "op": "eq",
+                "value": "2"
+              }
+            ]
+          },
+          {
+            "kind": "logic",
+            "op": "and",
+            "negate": false,
+            "children": [
+              {
+                "kind": "filter",
+                "field": {
+                  "name": "c",
+                  "json": []
+                },
+                "negate": false,
+                "op": "eq",
+                "value": "3"
+              }
+            ]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "nested groups": {
+    "qs": "or=%28not.and%28a.eq.1%29%2Cand%28b.eq.2%2Cc.eq.3%29%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "logic",
+            "op": "or",
+            "negate": false,
+            "children": [
+              {
+                "kind": "logic",
+                "op": "and",
+                "negate": true,
+                "children": [
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "a",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "eq",
+                    "value": "1"
+                  }
+                ]
+              },
+              {
+                "kind": "logic",
+                "op": "and",
+                "negate": false,
+                "children": [
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "b",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "eq",
+                    "value": "2"
+                  },
+                  {
+                    "kind": "filter",
+                    "field": {
+                      "name": "c",
+                      "json": []
+                    },
+                    "negate": false,
+                    "op": "eq",
+                    "value": "3"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "order": {
+    "qs": "order=total.desc%2Cid%2Ca.asc.nullslast%2Cb.desc.nullsfirst",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [
+          {
+            "field": {
+              "name": "total",
+              "json": []
+            },
+            "dir": "desc"
+          },
+          {
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "dir": "asc"
+          },
+          {
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "dir": "asc",
+            "nulls": "last"
+          },
+          {
+            "field": {
+              "name": "b",
+              "json": []
+            },
+            "dir": "desc",
+            "nulls": "first"
+          }
+        ],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "order objects": {
+    "qs": "order=a.desc.nullsfirst%2Cb.asc",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [
+          {
+            "field": {
+              "name": "a",
+              "json": []
+            },
+            "dir": "desc",
+            "nulls": "first"
+          },
+          {
+            "field": {
+              "name": "b",
+              "json": []
+            },
+            "dir": "asc"
+          }
+        ],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "order by a related column": {
+    "qs": "order=client%28name%29.desc%2Cdata-%3Ea.asc",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [
+          {
+            "relation": "client",
+            "field": {
+              "name": "name",
+              "json": []
+            },
+            "dir": "desc"
+          },
+          {
+            "field": {
+              "name": "data",
+              "json": [
+                {
+                  "arrow": "->",
+                  "key": "a",
+                  "isIndex": false
+                }
+              ]
+            },
+            "dir": "asc"
+          }
+        ],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "paging": {
+    "qs": "limit=10&offset=20",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": [],
+        "limit": 10,
+        "offset": 20
+      },
+      "embeds": {}
+    }
+  },
+  "paging that is not a count is ignored": {
+    "qs": "limit=1.5&offset=-1",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "embed": {
+    "qs": "select=id%2Cclients%21inner%28name%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "id",
+            "json": []
+          }
+        },
+        {
+          "kind": "embed",
+          "target": "clients",
+          "join": "inner",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "name",
+                "json": []
+              }
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "embed shorthand, alias, hint, spread": {
+    "qs": "select=clients%28name%29%2C...c2%21fk%28*%29%2Cbuyer%3Ac3%28*%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "clients",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "name",
+                "json": []
+              }
+            }
+          ]
+        },
+        {
+          "kind": "embed",
+          "target": "c2",
+          "hint": "fk",
+          "join": "left",
+          "spread": true,
+          "items": [
+            {
+              "kind": "star"
+            }
+          ]
+        },
+        {
+          "kind": "embed",
+          "target": "c3",
+          "alias": "buyer",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "star"
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "embed with its own filters": {
+    "qs": "select=items%28id%2Cproduct%28name%29%29&items.product.name=like.a%25&items.qty=gt.1&items.order=id.desc&items.limit=5&items.offset=1",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "items",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "id",
+                "json": []
+              }
+            },
+            {
+              "kind": "embed",
+              "target": "product",
+              "join": "left",
+              "spread": false,
+              "items": [
+                {
+                  "kind": "field",
+                  "field": {
+                    "name": "name",
+                    "json": []
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {
+        "items": {
+          "filters": [
+            {
+              "kind": "filter",
+              "field": {
+                "name": "qty",
+                "json": []
+              },
+              "negate": false,
+              "op": "gt",
+              "value": "1"
+            }
+          ],
+          "order": [
+            {
+              "field": {
+                "name": "id",
+                "json": []
+              },
+              "dir": "desc"
+            }
+          ],
+          "presence": [],
+          "limit": 5,
+          "offset": 1
+        },
+        "items.product": {
+          "filters": [
+            {
+              "kind": "filter",
+              "field": {
+                "name": "name",
+                "json": []
+              },
+              "negate": false,
+              "op": "like",
+              "value": "a%"
+            }
+          ],
+          "order": [],
+          "presence": []
+        }
+      }
+    }
+  },
+  "empty embed": {
+    "qs": "select=clients%28%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "clients",
+          "join": "left",
+          "spread": false,
+          "items": []
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "a filter through the path of an embed": {
+    "qs": "select=clients%28id%29&clients.name=eq.a",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "clients",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "id",
+                "json": []
+              }
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {
+        "clients": {
+          "filters": [
+            {
+              "kind": "filter",
+              "field": {
+                "name": "name",
+                "json": []
+              },
+              "negate": false,
+              "op": "eq",
+              "value": "a"
+            }
+          ],
+          "order": [],
+          "presence": []
+        }
+      }
+    }
+  },
+  "a filter through the alias, and through the table name of an aliased one": {
+    "qs": "select=buyer%3Aclients%28*%29&buyer.id=eq.1&clients.name=eq.a",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "clients",
+          "alias": "buyer",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "star"
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {
+        "buyer": {
+          "filters": [
+            {
+              "kind": "filter",
+              "field": {
+                "name": "id",
+                "json": []
+              },
+              "negate": false,
+              "op": "eq",
+              "value": "1"
+            },
+            {
+              "kind": "filter",
+              "field": {
+                "name": "name",
+                "json": []
+              },
+              "negate": false,
+              "op": "eq",
+              "value": "a"
+            }
+          ],
+          "order": [],
+          "presence": []
+        }
+      }
+    }
+  },
+  "presence of an embed": {
+    "qs": "select=clients%28id%29%2Citems%28id%29&clients=is.null&items=not.is.null",
+    "parsed": {
+      "select": [
+        {
+          "kind": "embed",
+          "target": "clients",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "id",
+                "json": []
+              }
+            }
+          ]
+        },
+        {
+          "kind": "embed",
+          "target": "items",
+          "join": "left",
+          "spread": false,
+          "items": [
+            {
+              "kind": "field",
+              "field": {
+                "name": "id",
+                "json": []
+              }
+            }
+          ]
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": [
+          {
+            "embed": "clients",
+            "present": false
+          },
+          {
+            "embed": "items",
+            "present": true
+          }
+        ]
+      },
+      "embeds": {}
+    }
+  },
+  "insert": {
+    "qs": "select=id&on_conflict=id&columns=a%2Cb",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "id",
+            "json": []
+          }
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {},
+      "onConflict": ["id"],
+      "columns": ["a", "b"]
+    }
+  },
+  "upsert odd columns": {
+    "qs": "columns=a+b",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {},
+      "columns": ["a b"]
+    }
+  },
+  "update": {
+    "qs": "id=eq.1",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "1"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "delete": {
+    "qs": "id=in.%281%2C2%29",
+    "parsed": {
+      "select": [
+        {
+          "kind": "star"
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "id",
+              "json": []
+            },
+            "negate": false,
+            "op": "in",
+            "value": ["1", "2"]
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  },
+  "rpc": {
+    "qs": "select=a&x=eq.1",
+    "parsed": {
+      "select": [
+        {
+          "kind": "field",
+          "field": {
+            "name": "a",
+            "json": []
+          }
+        }
+      ],
+      "root": {
+        "filters": [
+          {
+            "kind": "filter",
+            "field": {
+              "name": "x",
+              "json": []
+            },
+            "negate": false,
+            "op": "eq",
+            "value": "1"
+          }
+        ],
+        "order": [],
+        "presence": []
+      },
+      "embeds": {}
+    }
+  }
+}

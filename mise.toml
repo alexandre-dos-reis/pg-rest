@@ -13,7 +13,7 @@
 # and the extension come as one prebuilt conda-forge environment, created by micromamba under
 # .cache/ on the first db:start: about 300 MB plus its package cache, and no compiler. It carries
 # PostGIS 3.5 where CI's postgis/postgis:16-3.6 image carries 3.6, so a difference between those two
-# shows up here before it shows up there (tests/geojson.test.ts already allows for one).
+# shows up here before it shows up there (packages/rest/tests/geojson.test.ts already allows for one).
 [tools]
 micromamba = "latest"
 "github:PostgREST/postgrest" = "16.5"

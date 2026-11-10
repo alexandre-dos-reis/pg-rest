@@ -11,7 +11,7 @@
 import { SQL } from "bun";
 import { cpus, totalmem } from "node:os";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { signJwt, startPostgrest } from "../tests/compare/postgrest";
+import { signJwt, startPostgrest } from "../packages/rest/tests/compare/postgrest";
 import { scenarios, type Scenario } from "./scenarios";
 
 const env = (k: string, d: string) => process.env[k] ?? d;

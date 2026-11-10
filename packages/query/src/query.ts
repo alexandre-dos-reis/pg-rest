@@ -529,7 +529,7 @@ export const bad = (message: string, hint?: string): EngineError =>
  * Render a value the way the query string carries it. A lone value is taken verbatim --
  * `name=eq.a,b` is the text `a,b` and `name=eq.null` is the text `null`, which is why
  * only a *delimited* context (a list or a logic tree, where `,` `)` and `.` separate)
- * needs quoting. `tests/compare` pins both.
+ * needs quoting. `packages/rest/tests/compare` pins both.
  */
 export const lit = (v: FilterValue | undefined, delimited: boolean): string => {
   if (v === undefined || v === null) return "null";
@@ -672,8 +672,8 @@ export const isEmbed = (v: Select | Embed): v is Embed => !Array.isArray(v);
 // `@tspg/rest` hands the engine what it parsed from a query string. `query` has no string to parse: it
 // builds the same `ParsedQuery` from its object, so none of PostgREST's grammar is in this package and
 // the only text it reads is a column string (`"name->>first"`, `"total::text"`, `"count()"`).
-// `tests/support/render.ts` renders an input the old way, as a query string, and
-// `tests/query-direct.test.ts` pins that the string, parsed by `@tspg/rest`, gives the same thing.
+// `packages/query/tests/support/render.ts` renders an input the old way, as a query string, and
+// `packages/query/tests/query-direct.test.ts` pins that the string, parsed by `@tspg/rest`, gives the same thing.
 
 const QUANTIFIABLE_OPS: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
 const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);

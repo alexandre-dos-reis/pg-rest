@@ -46,7 +46,7 @@ What each side hands the core, and what it takes back:
 | | `@tspg/rest` | `@tspg/query` |
 | --- | --- | --- |
 | **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
-| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
+| **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `packages/query/tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
 | **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
 | **SqlCall** | `{ settings, before }`, built in `rest/src/http.ts`: the `request.*` settings (`requestSettings`) and `preRequest`, which is told the `Request` | `{ before }` only, built in `query.ts` from `preRequest`, which is told the role, claims, method and path: there is no request, so no `request.*` setting |
 | **Planning and execution** | `planTable` / `planRpc`, then `execute` | the same calls, on the same code |
@@ -55,7 +55,7 @@ What each side hands the core, and what it takes back:
 | **Beyond one call** | content negotiation, `Range`, plans, `OPTIONS`, the OpenAPI document, custom media types | `transaction()` and `setContextQuery()`; the typed layer; at build time `introspect` and the generators (`types.ts`) |
 
 Three consequences worth remembering. A change to parsing, planning, SQL or `execute` is a change to both packages,
-and the comparison against PostgREST (`tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
+and the comparison against PostgREST (`packages/rest/tests/compare`) pins it for `rest` while the `query` suites pin it for `query`.
 A new way for the engine to refuse something is a new `Reason`, which has to be mapped by both packages (the compiler
 checks it). And a feature that exists for one transport only is not in the core: the core's `SqlCall` and
 `SqlOutputFormat` have no field for it: `SqlCall` is only settings to issue and something to run in the transaction, and each package
@@ -188,14 +188,14 @@ result. Neither is a rejection, and neither package knows the other's mapping.
 
 They are the kind that break quietly, so each has a test that fails loudly:
 
-- **One pipeline.** A feature must come from the shared code, not from one entry point. `tests/query.test.ts` asserts
+- **One pipeline.** A feature must come from the shared code, not from one entry point. the shared `ParsedQuery` fixtures assert
   the operations and `handle()` answer identically, error bodies included.
-- **PostgREST's behaviour is the specification.** `tests/compare` replays hundreds of requests against the real
+- **PostgREST's behaviour is the specification.** `packages/rest/tests/compare` replays hundreds of requests against the real
   PostgREST 16.5 binary on the same database and compares statuses, headers and bodies.
 - **Values are data.** Parameters are text with an explicit `$n::text` cast; identifiers go through `packages/core/src/quote.ts`.
-  `tests/security.test.ts` is the guard. → [`security.md`](security.md)
+  the two `security.test.ts` suites are the guard. → [`security.md`](security.md)
 - **One union member per table** in `packages/query/src/typed.ts`, and every member declares `table`. Otherwise the editor silently
-  starts offering every table's columns while the compiler stays right; `tests/completions.test.ts` asks the
+  starts offering every table's columns while the compiler stays right; `packages/query/tests/completions.test.ts` asks the
   compiler and pins it. → [`types.md`](types.md#in-your-editor)
 - **The generated types compile, and are what the generator produces.** `tests/support/fixture.types.ts` is committed;
   one test pins it byte for byte and `bun run typecheck` compiles it.

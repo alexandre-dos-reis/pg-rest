@@ -1,5 +1,5 @@
 {
-  "include": ["packages/*/src", "tests"],
+  "include": ["packages/*/src", "packages/*/tests", "tests"],
   "compilerOptions": {
     "target": "esnext",
     "lib": ["es2023"],

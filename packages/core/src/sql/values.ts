@@ -2,7 +2,7 @@ import { cString, literal } from "../quote";
 
 /**
  * How a value from a filter gets into the SQL. `rest` writes it as a literal (`'paid'`), which is
- * what PostgREST's own statements look like in its logs and what `tests/compare` has always pinned.
+ * what PostgREST's own statements look like in its logs and what `packages/rest/tests/compare` has always pinned.
  * `query` binds it (`$2`): the statement text then depends on the shape of the query and not on its
  * values, so the driver and the server reuse the prepared statement and its plan instead of parsing
  * a new text for every value -- and a value is never part of the SQL at all.

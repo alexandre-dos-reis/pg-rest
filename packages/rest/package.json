@@ -25,6 +25,7 @@
   },
   "scripts": {
     "build": "tsdown",
+    "test": "bun test",
     "dev": "tsdown --watch",
     "prepublishOnly": "bun run build"
   },

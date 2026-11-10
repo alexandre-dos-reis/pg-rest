@@ -41,7 +41,7 @@ Three consequences worth stating plainly:
 
 Values arrive as parameters — always text; the JSON body of a write and the arguments of a function with an explicit `$n::text` cast, and the operations' filter values as bound parameters of the type they are compared with — or, over HTTP, as escaped literals. Identifiers are
 quoted through one module, cast targets must match a strict type allowlist, and a GUC name must be dotted.
-`tests/security.test.ts` throws SQL injection payloads at filters, identifiers, casts, write payloads, `on_conflict`,
+The `security.test.ts` suite of each package throws SQL injection payloads at filters, identifiers, casts, write payloads, `on_conflict`,
 `columns`, RPC arguments, headers and cookies, and asserts the data is still there afterwards — through `handle()` and
 through the operations, where the object builder quotes values itself.
 

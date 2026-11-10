@@ -20,8 +20,10 @@ const root = new URL("..", import.meta.url).pathname;
  * written against the test fixture.
  */
 const preamble = (dbTypes: string) => `
-import { createQuery, createRest, QueryError } from "./support/pgrest";
-import type { RequestContext, RestInstance, SchemaDescriptor } from "./support/pgrest";
+import { createQuery, QueryError } from "../packages/query/src/index";
+import { createRest } from "../packages/rest/src/index";
+import type { RequestContext, SchemaDescriptor } from "../packages/query/src/index";
+import type { RestInstance } from "../packages/rest/src/index";
 import type { DbAdapter } from "../packages/adapters/src";
 import type { AsyncLocalStorage } from "node:async_hooks";
 import type { DatabasePgRest } from "${dbTypes}";

@@ -14,11 +14,78 @@ env:
   POSTGREST_VERSION: v16.5
 
 jobs:
+  # Which suites a pull request has to run. Each package owns its tests (`packages/*/tests`), so a
+  # change to one package need not run the other's. The rule is deliberately pessimistic: a path
+  # that is not *only* `packages/query` or *only* `packages/rest` -- `packages/core`, the shared
+  # harness in `tests/support`, a config, a script, the lockfile -- runs everything, because
+  # `core` is what both packages are built on and the harness is what both are tested through.
+  # A push to main always runs everything.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      filter: ${{ steps.scope.outputs.filter }}
+      compare: ${{ steps.scope.outputs.compare }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the base commit has to be here to diff against
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_SHA" ]; then
+            scope=all
+            echo "Not a pull request: the whole suite runs."
+          else
+            base="$(git merge-base "$BASE_SHA" HEAD)"
+            changed="$(git diff --name-only "$base" HEAD)"
+            echo "::group::Changed files"
+            printf '%s\n' "$changed" | sed 's/^/  /'
+            echo "::endgroup::"
+            rest=$(printf '%s\n' "$changed" | grep -c '^packages/rest/' || true)
+            query=$(printf '%s\n' "$changed" | grep -c '^packages/query/' || true)
+            shared=$(printf '%s\n' "$changed" | grep -Ev '^packages/(rest|query)/' | grep -c . || true)
+            if [ "$shared" -gt 0 ]; then
+              scope=all
+            elif [ "$rest" -gt 0 ] && [ "$query" -gt 0 ]; then
+              scope=all
+            elif [ "$rest" -gt 0 ]; then
+              scope=rest
+            elif [ "$query" -gt 0 ]; then
+              scope=query
+            else
+              scope=none
+            fi
+          fi
+
+          # The filter `bun test` is given. `./tests/` is anchored, so it is the two root
+          # suites at the root and not every path containing "tests": a narrowed run still pins the
+          # suites that are no package's -- the compiled docs and the adapters -- and not every path
+          # containing "tests". An empty filter is the whole suite.
+          case "$scope" in
+            all)   filter=""; compare=true ;;
+            # the differential cases live in packages/rest/tests/compare, so a rest-scoped run has them
+            rest)  filter="./packages/rest/tests/ ./tests/"; compare=true ;;
+            # they drive handle(), which a change under packages/query cannot reach: not collected here
+            query) filter="./packages/query/tests/ ./tests/"; compare=false ;;
+            none)  filter=""; compare=false ;;
+          esac
+
+          {
+            echo "scope=$scope"
+            echo "filter=$filter"
+            echo "compare=$compare"
+          } >> "$GITHUB_OUTPUT"
+          echo "scope: $scope -> bun test ${filter:-(everything)} (differential: $compare)"
+
   # Everything that needs neither a database nor a build: the fastest feedback, on its own runner.
+  # Not narrowed -- lint, format and typecheck read the whole repo in seconds.
   checks:
     name: Lint, format, typecheck
-    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -36,8 +103,8 @@ jobs:
   # own runner, its own container pull and its own build, for a few seconds of work.
   test:
     name: Tests, differential, Node
-    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
-    if: false
+    needs: changes
+    if: needs.changes.outputs.scope != 'none'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -61,25 +128,35 @@ jobs:
           node-version: 22
       - run: bun install --frozen-lockfile
       - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
+        if: needs.changes.outputs.compare == 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/postgrest"
           curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" \
             | tar -xJ -C "$RUNNER_TEMP/postgrest"
           "$RUNNER_TEMP/postgrest/postgrest" --version
       - run: bun run build
-      # the whole suite, tests/compare included: it skips itself without POSTGREST_BIN
+      # The suite the `changes` job chose. The differential cases skip themselves without POSTGREST_BIN.
+      #
+      # `--timeout` because a runner is far slower than a developer's machine at what these suites do
+      # -- `createTestDb` makes a database from a template and drops it again per test, with PostGIS
+      # in that template -- and ten tests, the ones that build two instances, missed bun's 5s
+      # default. They were not hanging: the whole suite is ~16s locally and ~8min here, a per-test
+      # cost that is simply 30x. Why it is 30x is not established; it is not the cluster's durability
+      # settings, which were tried (tmpfs data directory, fsync, full_page_writes and
+      # synchronous_commit all off) and changed the total by less than noise.
+      #
+      # It is passed here and not in `package.json`, so a plain `bun test` keeps the strict 5s
+      # default and a real slowdown still shows up where it is cheap to notice.
       - name: Unit, integration and differential tests
-        run: bun test
+        run: bun test --timeout 30000 ${{ needs.changes.outputs.filter }}
         env:
-          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+          POSTGREST_BIN: ${{ needs.changes.outputs.compare == 'true' && format('{0}/postgrest/postgrest', runner.temp) || '' }}
       - name: Run the built library on Node
         run: node scripts/node-smoke.ts
 
   # One job for the seven examples: one checkout, one install, one build, one database server.
   examples:
     name: Examples
-    # Paused on purpose: every GitHub job is off while the packages are split. Remove this line to turn it back on.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
