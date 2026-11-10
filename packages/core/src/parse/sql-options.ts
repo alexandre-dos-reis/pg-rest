@@ -1,6 +1,6 @@
 // What the engine takes from a call, whatever carried it: what it does, the preferences, the output
-// format. Reading them out of HTTP (`Prefer`, `Accept`, `Range`) is `@tsql/rest`'s job;
-// `@tsql/query` builds them from an object.
+// format. Reading them out of HTTP (`Prefer`, `Accept`, `Range`) is `@tspg/rest`'s job;
+// `@tspg/query` builds them from an object.
 
 /** What a call does to a table: read it, insert into it, update, delete from it, or upsert one row by key (`put`). */
 export type SqlOperation = "read" | "insert" | "update" | "delete" | "put";

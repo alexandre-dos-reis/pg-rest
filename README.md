@@ -1,16 +1,16 @@
-# tsql
+# tspg
 
 Two packages for talking to PostgreSQL from your own process, built on one core:
 
 | package | what it is |
 | --- | --- |
-| **`@tsql/rest`** | **PostgREST v16, as a library.** `handle(Request) => Promise<Response>`, identical to PostgREST: nothing added, nothing taken away |
-| **`@tsql/query`** | **The same engine without HTTP.** `select()`, `insert()`, `update()`... from an object, typed from your schema, with `$` filters and computed updates PostgREST does not have |
+| **`@tspg/rest`** | **PostgREST v16, as a library.** `handle(Request) => Promise<Response>`, identical to PostgREST: nothing added, nothing taken away |
+| **`@tspg/query`** | **The same engine without HTTP.** `select()`, `insert()`, `update()`... from an object, typed from your schema, with `$` filters and computed updates PostgREST does not have |
 
 They share the parser, the SQL, the schema cache, the errors and the adapters (each package bundles that core, so there is
 nothing else to install). Use either, or both.
 
-## `@tsql/rest`
+## `@tspg/rest`
 
 **PostgREST v16, as a library.** The same URLs, the same negotiation, the same JSON, the same status codes and the same
 `PGRSTxxx` error bodies — as a web-standard `handle(Request) => Promise<Response>` you mount in your own server.
@@ -28,15 +28,15 @@ PostgREST. And no runtime dependencies, nothing but web standards in the core, y
 > → [the line none of these may cross](docs/proposals.md#the-line-none-of-these-may-cross)
 
 ```sh
-npm i @tsql/rest pg      # or: bun add @tsql/rest (Bun.sql is built in), postgres, @electric-sql/pglite
+npm i @tspg/rest pg      # or: bun add @tspg/rest (Bun.sql is built in), postgres, @electric-sql/pglite
 ```
 
 ### Over HTTP
 
 ```ts
 import pg from "pg";
-import { createRest } from "@tsql/rest";
-import { nodePostgresAdapter } from "@tsql/rest/adapters/node-postgres";
+import { createRest } from "@tspg/rest";
+import { nodePostgresAdapter } from "@tspg/rest/adapters/node-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -69,15 +69,15 @@ Any PostgREST client works — the wire format is the whole contract. Including
 [`@supabase/postgrest-js`](https://github.com/supabase/supabase-js/tree/master/packages/core/postgrest-js) and
 [`@neondatabase/postgrest-js`](https://github.com/neondatabase/neon-js/tree/main/packages/postgrest-js).
 
-## `@tsql/query`
+## `@tspg/query`
 
 ```sh
-npm i @tsql/query pg
+npm i @tspg/query pg
 ```
 
 ```ts
-import { createQuery } from "@tsql/query";
-import { nodePostgresAdapter } from "@tsql/query/adapters/node-postgres";
+import { createQuery } from "@tspg/query";
+import { nodePostgresAdapter } from "@tspg/query/adapters/node-postgres";
 import { schema } from "./db.generated"; // written at build time: see below
 
 const pgRest = createQuery({ db: nodePostgresAdapter(pool), schema });
@@ -169,7 +169,7 @@ fields of your composite types, and which embeds a foreign key actually permits.
 
 Self-contained projects in [`examples/`](examples), one folder per package. Each has its own README, schema and scripts.
 
-**[`examples/rest`](examples/rest)** — `@tsql/rest`: a todo API with Row Level Security, one per driver, each with a `server.ts`:
+**[`examples/rest`](examples/rest)** — `@tspg/rest`: a todo API with Row Level Security, one per driver, each with a `server.ts`:
 
 | example                                                      | runtime         | driver                                        | needs a database server       |
 | ------------------------------------------------------------ | --------------- | --------------------------------------------- | ----------------------------- |
@@ -179,7 +179,7 @@ Self-contained projects in [`examples/`](examples), one folder per package. Each
 | [`with-pglite`](examples/rest/with-pglite)                   | Node.js ≥ 22.18 | `@electric-sql/pglite`                        | no (Postgres in WebAssembly)  |
 | [`with-better-auth`](examples/rest/with-better-auth)         | Node.js ≥ 22.18 | `pg` + [Better Auth](https://better-auth.com) | yes (docker-compose included) |
 
-**[`examples/query`](examples/query)** — `@tsql/query`: no server, no HTTP:
+**[`examples/query`](examples/query)** — `@tspg/query`: no server, no HTTP:
 
 | example                                                      | runtime | driver                 | needs a database server   |
 | ------------------------------------------------------------ | ------- | ---------------------- | ------------------------- |

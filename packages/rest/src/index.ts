@@ -1,15 +1,15 @@
-import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
-import { type EngineOptions, createEngine } from "@tsql/core/engine";
+import type { SqlRequestContext as RequestContext } from "@tspg/core/core";
+import { type EngineOptions, createEngine } from "@tspg/core/engine";
 import { ApiError, toApiError } from "./errors";
-import type { SchemaCache } from "@tsql/core/schema";
+import type { SchemaCache } from "@tspg/core/schema";
 import type { HttpConfig, PreRequest } from "./http";
 import { errorResponse, handleSafely } from "./serve";
 
-export type { DbAdapter, DbSession, Row } from "@tsql/adapters";
-export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
+export type { DbAdapter, DbSession, Row } from "@tspg/adapters";
+export type { SqlRequestContext as RequestContext } from "@tspg/core/core";
 export type { PreRequest, PreRequestInfo } from "./http";
-export type { EngineOptions } from "@tsql/core/engine";
-export { DbQueryError } from "@tsql/core/errors";
+export type { EngineOptions } from "@tspg/core/engine";
+export { DbQueryError } from "@tspg/core/errors";
 export { ApiError, PgRestError } from "./errors";
 export type { ErrorBody } from "./errors";
 export type {
@@ -21,8 +21,8 @@ export type {
   FunctionDef,
   Relation,
   SchemaCache,
-} from "@tsql/core/schema";
-export { SchemaLoadError } from "@tsql/core/service";
+} from "@tspg/core/schema";
+export { SchemaLoadError } from "@tspg/core/service";
 
 /**
  * What `createRest` takes: the database and the settings both entry points share ({@link EngineOptions}),
@@ -75,7 +75,7 @@ export interface RestInstance {
  * Create a PostgREST-compatible handler over a Postgres database: `handle(Request) => Response`.
  *
  * What it does is PostgREST's, status codes, headers and error bodies included. The in-process
- * `query()` API is `@tsql/query`.
+ * `query()` API is `@tspg/query`.
  */
 export const createRest = async (options: RestOptions): Promise<RestInstance> => {
   const { adapter, config: shared, store } = await createEngine(options);

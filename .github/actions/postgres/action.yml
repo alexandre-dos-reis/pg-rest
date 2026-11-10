@@ -35,7 +35,7 @@ runs:
         PORT: ${{ inputs.port }}
       run: |
         set -euo pipefail
-        docker run -d --name tsql-postgres \
+        docker run -d --name tspg-postgres \
           -e POSTGRES_PASSWORD=postgres \
           -p "$PORT:5432" \
           --health-cmd "pg_isready -U postgres" \
@@ -57,14 +57,14 @@ runs:
       run: |
         set -euo pipefail
         for _ in $(seq 60); do
-          case "$(docker inspect -f '{{.State.Health.Status}}' tsql-postgres)" in
+          case "$(docker inspect -f '{{.State.Health.Status}}' tspg-postgres)" in
             healthy) echo "ready"; exit 0 ;;
             unhealthy) break ;;
           esac
           sleep 2
         done
         echo "::error::Postgres did not come up"
-        docker logs tsql-postgres
+        docker logs tspg-postgres
         exit 1
 
     - name: Download PostgREST ${{ inputs.postgrest-version }}

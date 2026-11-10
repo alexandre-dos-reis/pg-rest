@@ -1,7 +1,7 @@
 /**
  * Why the engine refused something, as one id per distinct reason. It is what the engine throws and
- * nothing else: no code, no status. `@tsql/rest` turns a reason into the PostgREST code and HTTP
- * status it answers with, and `@tsql/query` turns it into a `kind`.
+ * nothing else: no code, no status. `@tspg/rest` turns a reason into the PostgREST code and HTTP
+ * status it answers with, and `@tspg/query` turns it into a `kind`.
  */
 export type Reason =
   /** The input does not parse or does not make sense: a bad filter, `select`, `order`, identifier or value. */

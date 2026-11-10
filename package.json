@@ -1,20 +1,20 @@
 {
-  "name": "tsql",
+  "name": "tspg",
   "private": true,
-  "description": "Monorepo of @tsql/rest (a PostgREST-compatible handler) and @tsql/query (typed in-process queries).",
+  "description": "Monorepo of @tspg/rest (a PostgREST-compatible handler) and @tspg/query (typed in-process queries).",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git"
+    "url": "git+https://github.com/alexandre-dos-reis/tspg.git"
   },
   "workspaces": [
     "packages/*"
   ],
   "type": "module",
   "scripts": {
-    "build": "bun --filter '@tsql/rest' --filter '@tsql/query' build",
-    "dev": "bun --filter '@tsql/rest' --filter '@tsql/query' dev",
+    "build": "bun --filter '@tspg/rest' --filter '@tspg/query' build",
+    "dev": "bun --filter '@tspg/rest' --filter '@tspg/query' dev",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "test:compare": "bun test ./packages/rest/tests/compare/",

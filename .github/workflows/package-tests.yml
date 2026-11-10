@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       package:
-        description: Workspace to lint, format-check and typecheck, e.g. `@tsql/rest`. Empty means the whole repo.
+        description: Workspace to lint, format-check and typecheck, e.g. `@tspg/rest`. Empty means the whole repo.
         type: string
         default: ""
       tests:

@@ -4,8 +4,8 @@ import { normalizeParsed, type ParsedCase } from "../../core/tests/support/parse
 import fixtures from "../../core/tests/parsed.fixtures.json";
 
 /**
- * The query string reaches `@tsql/core`'s `ParsedQuery`, and this is what it has to reach: the cases
- * committed in `parsed.fixtures.json`, which `@tsql/query` is held to from the object side. Both
+ * The query string reaches `@tspg/core`'s `ParsedQuery`, and this is what it has to reach: the cases
+ * committed in `parsed.fixtures.json`, which `@tspg/query` is held to from the object side. Both
  * meeting the same expectation is what makes them answer the same thing, so neither suite has to
  * run the other package.
  *

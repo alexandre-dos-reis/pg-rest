@@ -1,9 +1,9 @@
-// `@tsql/query`'s harness: a throwaway database and `createQuery` on it. It names `@tsql/query` and
-// `@tsql/core` and nothing else -- there is no `handle()` here, and no `@tsql/rest`.
+// `@tspg/query`'s harness: a throwaway database and `createQuery` on it. It names `@tspg/query` and
+// `@tspg/core` and nothing else -- there is no `handle()` here, and no `@tspg/rest`.
 //
 // `createQuery` takes a descriptor and reads no catalog, which is the point of the package: in an
-// app that descriptor is generated at build time by `@tsql/query/types`. A suite needs one for a
-// database it has just created, so the harness reads it here with `@tsql/core`'s introspection --
+// app that descriptor is generated at build time by `@tspg/query/types`. A suite needs one for a
+// database it has just created, so the harness reads it here with `@tspg/core`'s introspection --
 // the same step the generator runs -- and `reloadSchema()` is that read done again.
 import {
   createQuery,

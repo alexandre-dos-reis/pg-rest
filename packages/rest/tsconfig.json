@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "paths": { "@tsql/core/*": ["../core/src/*"] }
+    "paths": { "@tspg/core/*": ["../core/src/*"] }
   },
   "include": ["src", "tests", "../core/src", "../adapters"]
 }

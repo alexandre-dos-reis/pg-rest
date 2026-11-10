@@ -1,7 +1,7 @@
 // What went wrong, as a closed set of strings: `QueryError.kind`. This is where an engine error and a
 // database error become one. `no_context` and `rolled_back` name situations that only exist for
 // `setContextQuery()` and `transaction()`, which create them directly.
-import { DbQueryError, EngineError, type Reason, isConnectionError } from "@tsql/core/errors";
+import { DbQueryError, EngineError, type Reason, isConnectionError } from "@tspg/core/errors";
 
 /**
  * What went wrong, as one of a closed set of strings -- the thing a program switches on.
@@ -151,7 +151,7 @@ const KIND_SUMMARIES: Readonly<Record<ErrorKind, string>> = {
 /** A few words naming an {@link ErrorKind}, for a log line or a message a person reads. */
 export const describeErrorKind = (kind: ErrorKind): string => KIND_SUMMARIES[kind];
 
-/** A failure as `@tsql/query` reports it: what the engine says, with nothing of the transport in it. */
+/** A failure as `@tspg/query` reports it: what the engine says, with nothing of the transport in it. */
 export interface Failure {
   readonly kind: ErrorKind;
   readonly message: string;

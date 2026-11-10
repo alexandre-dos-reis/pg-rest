@@ -3,8 +3,8 @@ import type { ParsedQuery } from "../../src/parse/filter";
 /**
  * `ParsedQuery` as plain data, so it can be committed and compared.
  *
- * This is the boundary both published packages meet at: `@tsql/rest` reaches it from a query string
- * and `@tsql/query` from an object, and everything after it -- planning, SQL, `set_config`, error
+ * This is the boundary both published packages meet at: `@tspg/rest` reaches it from a query string
+ * and `@tspg/query` from an object, and everything after it -- planning, SQL, `set_config`, error
  * mapping -- is this package. So the two front-ends agreeing *here* is what makes them answer the
  * same thing, and neither has to be run against the other to show it: each is checked against the
  * expectations in `parsed.fixtures.json`.
@@ -24,7 +24,7 @@ export const normalizeParsed = (q: ParsedQuery): unknown =>
     }),
   );
 
-/** One case of the boundary: the query string `@tsql/rest` reads, and what both must produce. */
+/** One case of the boundary: the query string `@tspg/rest` reads, and what both must produce. */
 export interface ParsedCase {
   readonly qs: string;
   readonly parsed: unknown;

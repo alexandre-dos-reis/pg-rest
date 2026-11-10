@@ -1,4 +1,4 @@
-// Generated from the database catalog by @tsql/query. Do not edit.
+// Generated from the database catalog by @tspg/query. Do not edit.
 
 /** The `api.place` composite type. */
 type DatabasePgRestCompositeApiPlace = {
@@ -83,7 +83,7 @@ export type DatabasePgRest = {
   };
 };
 
-import type { SchemaDescriptor } from "@tsql/query";
+import type { SchemaDescriptor } from "@tspg/query";
 
 export const schema: SchemaDescriptor = {
   "schemas": [

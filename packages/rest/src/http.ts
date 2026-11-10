@@ -11,13 +11,13 @@ import {
   planRpc,
   planTable,
   useSchema,
-} from "@tsql/core/core";
-import type { DbSession } from "@tsql/adapters";
-import { quoteIdent } from "@tsql/core/quote";
-import type { SqlOperation } from "@tsql/core/parse/sql-options";
-import { EngineError } from "@tsql/core/errors";
+} from "@tspg/core/core";
+import type { DbSession } from "@tspg/adapters";
+import { quoteIdent } from "@tspg/core/quote";
+import type { SqlOperation } from "@tspg/core/parse/sql-options";
+import { EngineError } from "@tspg/core/errors";
 import { PgRestError } from "./errors";
-import { getRelation } from "@tsql/core/schema";
+import { getRelation } from "@tspg/core/schema";
 import { mediaChoices } from "./media";
 import { keysChecked, parseQuery } from "./parse/query-string";
 import { buildOpenApi } from "./openapi";

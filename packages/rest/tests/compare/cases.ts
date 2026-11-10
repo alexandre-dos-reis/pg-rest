@@ -708,7 +708,7 @@ const KNOWN: Record<string, string> = {
   "GET /clients?select=id::int4%20from%20x":
     "pg-rest rejects cast targets that are not plain type names (PGRST100); PostgREST forwards them to PostgreSQL (42601)",
   // CSV takes its header from the row's column names, so the alias the engine gives a scalar result
-  // leaks into the body: PostgREST calls it `pgrst_scalar`, we call it `tsql_scalar` (ALIAS).
+  // leaks into the body: PostgREST calls it `pgrst_scalar`, we call it `tspg_scalar` (ALIAS).
   "csv of a scalar function": CSV_SCALAR_HEADER,
   "csv of a set of scalars": CSV_SCALAR_HEADER,
   "csv of a json function": CSV_SCALAR_HEADER,

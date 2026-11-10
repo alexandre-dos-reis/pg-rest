@@ -55,8 +55,8 @@ jobs:
     if: needs.changes.outputs.core == 'true' || needs.changes.outputs.shared == 'true'
     uses: ./.github/workflows/package-tests.yml
     with:
-      name: "@tsql/core"
-      package: "@tsql/core"
+      name: "@tspg/core"
+      package: "@tspg/core"
       tests: ./packages/core/tests/
 
   query:
@@ -64,8 +64,8 @@ jobs:
     if: needs.changes.outputs.query == 'true'
     uses: ./.github/workflows/package-tests.yml
     with:
-      name: "@tsql/query"
-      package: "@tsql/query"
+      name: "@tspg/query"
+      package: "@tspg/query"
       tests: ./packages/query/tests/
 
   rest:
@@ -73,8 +73,8 @@ jobs:
     if: needs.changes.outputs.rest == 'true'
     uses: ./.github/workflows/package-tests.yml
     with:
-      name: "@tsql/rest"
-      package: "@tsql/rest"
+      name: "@tspg/rest"
+      package: "@tspg/rest"
       tests: ./packages/rest/tests/
       # the differential cases against the real PostgREST live in packages/rest/tests/compare
       postgrest: true

@@ -1,5 +1,5 @@
-import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
-import { type EngineOptions, createStaticEngine } from "@tsql/core/engine";
+import type { SqlRequestContext as RequestContext } from "@tspg/core/core";
+import { type EngineOptions, createStaticEngine } from "@tspg/core/engine";
 import {
   type ContextQuery,
   type ContextSource,
@@ -23,11 +23,11 @@ import {
   runTransaction,
   toFailedResult,
 } from "./query";
-import { type SchemaDescriptor, fromDescriptor } from "@tsql/core/schema";
+import { type SchemaDescriptor, fromDescriptor } from "@tspg/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
-export type { DbAdapter, DbSession, Row } from "@tsql/adapters";
-export type { SqlRequestContext as RequestContext } from "@tsql/core/core";
+export type { DbAdapter, DbSession, Row } from "@tspg/adapters";
+export type { SqlRequestContext as RequestContext } from "@tspg/core/core";
 export type { PreRequest, PreRequestInfo } from "./query";
 export { describeErrorKind } from "./kinds";
 export type { ErrorKind as QueryErrorKind } from "./kinds";
@@ -96,17 +96,17 @@ export type {
   UpsertInput,
   Where,
 } from "./query";
-export type { SchemaDescriptor } from "@tsql/core/schema";
+export type { SchemaDescriptor } from "@tspg/core/schema";
 
 /**
  * What `createQuery` takes: the database and the settings a query reads. There is nothing about HTTP
- * here -- that is `@tsql/rest`.
+ * here -- that is `@tspg/rest`.
  */
 export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
   /** A SQL function (`"auth.check_request"`) or callback to run in each call's transaction, before its statement. */
   readonly preRequest?: PreRequest;
   /**
-   * The schema of the database, as generated at build time by `@tsql/query/types`. Nothing is read
+   * The schema of the database, as generated at build time by `@tspg/query/types`. Nothing is read
    * from the catalog when the instance is created or while it runs, and the descriptor is not
    * checked: the types are what keep a query and the schema in step. The first schema it lists is
    * the default one.
@@ -207,7 +207,7 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
 export interface CreateQuery {
   (options: QueryOptions): QueryInstance;
   /**
-   * With a database type from `generateTypes` (`@tsql/query/types`), the operations are typed by it: `table` and `name` are the ones that exist, `select`, `where` and `order` only
+   * With a database type from `generateTypes` (`@tspg/query/types`), the operations are typed by it: `table` and `name` are the ones that exist, `select`, `where` and `order` only
    * name real columns and relationships, and `data` is inferred from the `select`.
    */
   <Db extends AnyDatabase>(options: QueryOptions): TypedQueryInstance<Db>;

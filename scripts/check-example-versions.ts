@@ -12,8 +12,8 @@ const read = (url: URL) => JSON.parse(readFileSync(url, "utf8")) as {
   version?: string;
 };
 
-// Each example depends on the @tsql/* packages it uses (the handlers on @tsql/rest, the query examples on
-// @tsql/query), at the version in that package's package.json.
+// Each example depends on the @tspg/* packages it uses (the handlers on @tspg/rest, the query examples on
+// @tspg/query), at the version in that package's package.json.
 const packagesDir = new URL("packages/", root);
 const versions = new Map<string, string>();
 for (const dir of readdirSync(packagesDir, { withFileTypes: true }).filter((e) => e.isDirectory())) {

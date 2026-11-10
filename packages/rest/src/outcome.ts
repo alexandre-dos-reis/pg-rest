@@ -1,5 +1,5 @@
-import { EngineError } from "@tsql/core/errors";
-import { type SqlEnv, type SqlPlan, type SqlResult, shownBody } from "@tsql/core/core";
+import { EngineError } from "@tspg/core/errors";
+import { type SqlEnv, type SqlPlan, type SqlResult, shownBody } from "@tspg/core/core";
 import { PgRestError } from "./errors";
 import type { Prefer } from "./request";
 

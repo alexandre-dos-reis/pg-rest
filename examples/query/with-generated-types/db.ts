@@ -2,9 +2,9 @@
 // gen-types.ts has to run before they exist.
 import { readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
-import { pgliteAdapter } from "@tsql/query/adapters/pglite";
+import { pgliteAdapter } from "@tspg/query/adapters/pglite";
 // a type, so `import type`: Node strips it, and importing it as a value would fail at runtime
-import type { QueryOptions } from "@tsql/query";
+import type { QueryOptions } from "@tspg/query";
 
 // Postgres in WebAssembly: no server, no Docker, the schema lives in memory.
 export const pglite = new PGlite();

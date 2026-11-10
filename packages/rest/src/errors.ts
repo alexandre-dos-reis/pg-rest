@@ -1,4 +1,4 @@
-import { DbQueryError, type DbErrorInfo, EngineError, type Reason, isConnectionError } from "@tsql/core/errors";
+import { DbQueryError, type DbErrorInfo, EngineError, type Reason, isConnectionError } from "@tspg/core/errors";
 
 /**
  * Error body, in the exact shape PostgREST returns:

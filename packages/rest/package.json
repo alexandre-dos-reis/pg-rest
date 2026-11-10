@@ -1,12 +1,12 @@
 {
-  "name": "@tsql/rest",
-  "version": "0.0.0",
+  "name": "@tspg/rest",
+  "version": "0.1.0",
   "description": "A PostgREST-compatible REST layer for PostgreSQL, consumed as a library (Bun, Node.js and other runtimes with web-standard Request/Response). You decide who the user is (RLS) -- no JWT required.",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git",
+    "url": "git+https://github.com/alexandre-dos-reis/tspg.git",
     "directory": "packages/rest"
   },
   "files": [
@@ -33,8 +33,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@tsql/adapters": "workspace:*",
-    "@tsql/core": "workspace:*"
+    "@tspg/adapters": "workspace:*",
+    "@tspg/core": "workspace:*"
   },
   "peerDependencies": {
     "@electric-sql/pglite": ">=0.2.0",

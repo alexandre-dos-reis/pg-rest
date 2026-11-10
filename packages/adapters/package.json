@@ -1,8 +1,8 @@
 {
-  "name": "@tsql/adapters",
+  "name": "@tspg/adapters",
   "version": "0.0.0",
   "private": true,
-  "description": "What @tsql/rest and @tsql/query share: parsing, SQL, schema cache, errors, adapters. Not published: both packages bundle it.",
+  "description": "What @tspg/rest and @tspg/query share: parsing, SQL, schema cache, errors, adapters. Not published: both packages bundle it.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

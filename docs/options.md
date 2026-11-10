@@ -1,6 +1,6 @@
 # Options: `createRest` and `createQuery`
 
-`createRest` (`@tsql/rest`) gives the HTTP handler and `createQuery` (`@tsql/query`) the in-process API. They take the
+`createRest` (`@tspg/rest`) gives the HTTP handler and `createQuery` (`@tspg/query`) the in-process API. They take the
 same options for the database and the role (the first group below); the second group is HTTP only, so only `createRest`
 takes it. An app that uses both creates both, and each keeps its own schema cache.
 
@@ -29,7 +29,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `anonymousRole` | the role for a call with no context. Default `"anon"`; `false` refuses anonymous calls with `401 PGRST302` |
 | `maxRows` | a cap on the rows a read returns (PostgREST's `db-max-rows`) |
 | `extraSearchPath` | schemas appended to `search_path` after the selected one. Default `["public"]` |
-| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every operation of `tx`, each with its own method and path. `info` is `{ role, claims, method, path }`; `createRest` adds the `request` (`@tsql/query` has none) |
+| `preRequest` | a SQL function name (`"auth.check"`) or a callback `(session, info) => Promise<void>`, run inside the request's transaction (`db-pre-request`). In a [transaction scope](query.md#transactions) it runs before every operation of `tx`, each with its own method and path. `info` is `{ role, claims, method, path }`; `createRest` adds the `request` (`@tspg/query` has none) |
 
 **`createRest` only**: HTTP.
 
@@ -45,7 +45,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 
 ## What you get back
 
-**`createRest`** (`@tsql/rest`):
+**`createRest`** (`@tspg/rest`):
 
 | | |
 | --- | --- |
@@ -54,7 +54,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `reloadSchema()` | re-read it after a migration. A failed reload keeps the previous cache |
 | `close()` | stop the handler. Your driver is left open |
 
-**`createQuery`** (`@tsql/query`):
+**`createQuery`** (`@tspg/query`):
 
 | | |
 | --- | --- |
@@ -63,7 +63,7 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
 | `close()` | stop the instance. Your driver is left open |
 
-`createQuery` takes the schema as an option, `schema`, generated at build time by `@tsql/query/types` → [`types.md`](types.md).
+`createQuery` takes the schema as an option, `schema`, generated at build time by `@tspg/query/types` → [`types.md`](types.md).
 It never reads the catalog, so there is nothing to reload: after a migration, generate the module again. It is the one
 place `createQuery` differs from `createRest`, which reads the catalog itself and has `schemaCache()` and
 `reloadSchema()`.
@@ -74,8 +74,8 @@ unchanged.
 `handle` is for requests that come from outside: mount it in any server that speaks web-standard `Request`/`Response`.
 In the same process, reach for the operations instead — a PostgREST client library over `handle` would build a URL and a
 body for pg-rest to parse straight back, two passes over a query you are already holding as an object. Both packages
-are built on one core, so the database sees the same thing either way; only the envelope differs. `@tsql/rest` stays
-PostgREST's, to the byte; what goes beyond PostgREST (the `$` filters, computed updates) is in `@tsql/query` only.
+are built on one core, so the database sees the same thing either way; only the envelope differs. `@tspg/rest` stays
+PostgREST's, to the byte; what goes beyond PostgREST (the `$` filters, computed updates) is in `@tspg/query` only.
 
 An app that uses both creates both; after a migration it calls `reloadSchema()` on the handler and regenerates the
 module for the query API:
@@ -87,7 +87,7 @@ const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 ## Errors
 
-**`@tsql/rest`** throws errors that carry a PostgREST body (`code`, `message`, `details`, `hint`):
+**`@tspg/rest`** throws errors that carry a PostgREST body (`code`, `message`, `details`, `hint`):
 
 | | |
 | --- | --- |
@@ -97,6 +97,6 @@ const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 
 `handle()` never rejects: a failure becomes a PostgREST-shaped JSON response.
 
-**`@tsql/query`** has errors of its own, and none of the above: the operations never reject either, it returns a
+**`@tspg/query`** has errors of its own, and none of the above: the operations never reject either, it returns a
 `QueryError` — a `kind` to switch on, the `message`, `details` and `hint`, the `sqlState` of a database error, and the
 input that produced it. See [`query.md`](query.md#errors).
