@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Guide for coding agents working on **tspg**: a monorepo of `@tspg/rest` (a PostgREST v16-compatible REST layer shipped as a library) and `@tspg/query` (the same engine in-process, typed, with extensions PostgREST does not have).
-Before changing behaviour, read `PARITY.md` for what is and isn't implemented, `docs/design.md` for what is out of
+Before changing behaviour, read `packages/rest/PARITY.md` for what is and isn't implemented, `docs/design.md` for what is out of
 scope on purpose, and `docs/architecture.md` for how a request becomes SQL. `README.md` is deliberately short: the
 reference lives in `docs/`.
 
@@ -101,7 +101,7 @@ bun run link:examples  # point the examples at the local build, without touching
   suite creates and drops its own database, so never point it at data you care about. A green `bun test` with no database proves little: run it
   with one.
 - That server **must have PostGIS**: the `application/geo+json` cases used to skip without it and now fail, which is how they were found to match
-  PostgREST all along while `PARITY.md` still listed eight differences as open. `mise run db:start` provides it (PostGIS 3.5); CI uses `postgis/postgis:16-3.6`.
+  PostgREST all along while `packages/rest/PARITY.md` still listed eight differences as open. `mise run db:start` provides it (PostGIS 3.5); CI uses `postgis/postgis:16-3.6`.
 - The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.5** static binary; `mise install` fetches it, CI downloads the same
   release). Run them whenever you touch parsing, SQL generation, error codes or response headers.
 - Examples depend on `@tspg/rest` or `@tspg/query` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
@@ -151,7 +151,7 @@ Releases carry provenance, so they are attested to the workflow that built them.
   stays right.
   `packages/query/tests/completions.test.ts` asks the compiler and pins it.
 - **Parity first.** The goal is identical observable behaviour to PostgREST v16 (status codes, headers, error JSON, `PGRST` codes). When unsure,
-  check PostgREST's behaviour with the comparison tests rather than guessing. Update `PARITY.md` when a row changes.
+  check PostgREST's behaviour with the comparison tests rather than guessing. Update `packages/rest/PARITY.md` when a row changes.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type
   inference. Identifiers go through `packages/core/src/quote.ts`. Never interpolate request data into SQL. `packages/rest/tests/security.test.ts` covers the query string and `packages/query/tests/security.test.ts` the object; extend the one whose input you touched.
 - **Errors.** The core has no codes and no statuses: it throws `EngineError(reason, message, details, hint)`, and each

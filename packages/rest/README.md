@@ -2,7 +2,7 @@
 
 **PostgREST as a library.** The same behaviour, as a web-standard `handle(Request) => Promise<Response>` you mount in your own server.
 
-One difference is accepted today → see [`PARITY.md`](https://github.com/alexandre-dos-reis/tspg/blob/main/PARITY.md).
+One difference is accepted today → see [`PARITY.md`](https://github.com/alexandre-dos-reis/tspg/blob/main/packages/rest/PARITY.md).
 
 **No JWT:** you decide who the caller is — cookie, API key, session, mTLS — and hand over a role and
 claims, applied with `set_config` so Row Level Security sees what it would behind PostgREST. No runtime dependencies, and your driver stays yours.
@@ -51,5 +51,5 @@ Any PostgREST client works — the wire format is the whole contract, including 
 - [every `createRest` option](https://github.com/alexandre-dos-reis/tspg/blob/main/docs/options.md)
 - [the adapters, and writing your own](https://github.com/alexandre-dos-reis/tspg/blob/main/docs/adapters.md)
 - [the role and RLS model](https://github.com/alexandre-dos-reis/tspg/blob/main/docs/security.md)
-- [PostgREST v16, feature by feature](https://github.com/alexandre-dos-reis/tspg/blob/main/PARITY.md)
+- [PostgREST v16, feature by feature](https://github.com/alexandre-dos-reis/tspg/blob/main/packages/rest/PARITY.md)
 - [runnable examples, one per driver](https://github.com/alexandre-dos-reis/tspg/tree/main/examples/rest)

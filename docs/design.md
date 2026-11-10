@@ -20,7 +20,7 @@ singular and `nulls=stripped` representations, plan output, custom media type ha
 after a media type), `application/geo+json` with PostGIS, `WWW-Authenticate` on 401, OpenAPI, and PostgREST's error
 codes with the `PTxyz` and `RAISE … SQLSTATE 'PGRST'` conventions.
 
-Feature by feature, with what differs: [`PARITY.md`](../PARITY.md).
+Feature by feature, with what differs: [`PARITY.md`](../packages/rest/PARITY.md).
 
 ## What it will never do
 
@@ -49,7 +49,7 @@ The same trade reversed: because it runs inside your process, it can do things a
 - **Composite values as objects.** `where: { owner: { city: "Paris" } }` compares a
   [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
   PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.
-  The one deliberate departure from parity, marked ➕ in [`PARITY.md`](../PARITY.md). → [`query.md`](query.md#composite-types)
+  The one deliberate departure from parity, marked ➕ in [`PARITY.md`](../packages/rest/PARITY.md). → [`query.md`](query.md#composite-types)
 - **Several queries, one transaction.** `transaction(fn, ctx)` lends a transaction to a callback, with the context
   applied once for all of it: two writes that must land together stay inside the library instead of beside it. A server
   cannot offer that, because the scope is a scope of *your* code. → [`query.md`](query.md#transactions)
@@ -67,5 +67,5 @@ hooks, guardrails for an exposed surface, a debug mode — are written out, with
 [`query.md`](query.md#transactions).
 
 A handful of things are missing rather than refused — `PATCH`/`PUT` on a function's result, a few representation and
-header details. [`PARITY.md`](../PARITY.md) marks them ❌, as opposed to ➖ for the list above, and the differential test
+header details. [`PARITY.md`](../packages/rest/PARITY.md) marks them ❌, as opposed to ➖ for the list above, and the differential test
 against the real PostgREST 16 binary is what keeps that table honest.

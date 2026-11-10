@@ -23,6 +23,6 @@ Each package's README is the short version. Beyond them:
 | [`docs/proposals.md`](docs/proposals.md) | the additions under consideration, and what each would cost |
 | [`docs/performance.md`](docs/performance.md) | measured against PostgREST 16, and which runtime to pick |
 | [`docs/development.md`](docs/development.md) | running the tests, the examples and the differential suite |
-| [`PARITY.md`](PARITY.md) | PostgREST v16 feature by feature |
+| [`packages/rest/PARITY.md`](packages/rest/PARITY.md) | PostgREST v16 feature by feature |
 
 Runnable projects, one folder per package, in [`examples/`](examples).

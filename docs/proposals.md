@@ -5,7 +5,7 @@ before they are written: the API sketches are illustrative, and the code blocks 
 documentation test does not compile them against a library that does not have them yet.
 
 They share a premise. Parity with PostgREST v16 is nearly complete and the differential suite keeps it honest
-([`PARITY.md`](../PARITY.md)), so what is left to add is not more parity — it is what only a **library** can do, and
+([`PARITY.md`](../packages/rest/PARITY.md)), so what is left to add is not more parity — it is what only a **library** can do, and
 what a library owes an application it runs inside of. [`design.md`](design.md) draws that line: ➖ is refused on
 purpose, ❌ is not done yet. Everything below is a third thing: considered, and not decided.
 
@@ -120,7 +120,7 @@ and does not yet deliver, and the one thing a PostgREST process can never offer,
 ## 2. Observability hooks
 
 **Today.** Nothing. `grep -rn "onQuery\|hook\|logger" packages/*/src/` finds one comment. PostgREST's `log-level` and
-`server-timing` are marked ➖ in [`PARITY.md`](../PARITY.md) as a host concern, and that is the right call — but the
+`server-timing` are marked ➖ in [`PARITY.md`](../packages/rest/PARITY.md) as a host concern, and that is the right call — but the
 host cannot instrument what it cannot see. Right now a slow query inside `handle()` is invisible from the outside: the
 application holds the pool, and sees a `Response`.
 

@@ -178,7 +178,7 @@ describe("the documentation", () => {
       ...readdirSync(`${root}examples`).flatMap((g) =>
         readdirSync(`${root}examples/${g}`).map((d) => `examples/${g}/${d}/README.md`),
       ),
-      "PARITY.md",
+      "packages/rest/PARITY.md",
       "AGENTS.md",
     ]) {
       if (!existsSync(`${root}${page}`)) continue;
