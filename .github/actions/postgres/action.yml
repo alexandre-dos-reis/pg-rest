@@ -1,0 +1,81 @@
+name: Postgres
+description: A throwaway Postgres 16 + PostGIS server, and optionally the PostgREST the differential cases compare against.
+
+# A composite action and not a `services:` block, because a `services:` block cannot be shared: it is
+# part of a job, so every job that needs a database repeats the image, the password, the port and the
+# health check. Here the server is described once, started with `docker run` -- the same daemon the
+# runner would have used for `services:` -- and the jobs that need one say so in a single step.
+#
+# What it leaves behind, for the steps that follow:
+#   TEST_DATABASE_URL  superuser URL of the server; the suites skip their integration tests without it
+#   POSTGREST_BIN      the downloaded binary, only with `postgrest: true`; the differential cases
+#                      skip themselves without it
+
+inputs:
+  image:
+    description: Postgres image. Carries PostGIS, which the fixture schema creates an extension from.
+    default: postgis/postgis:16-3.6
+  port:
+    description: Host port the server is published on.
+    default: "5432"
+  postgrest:
+    description: Also download PostgREST and export POSTGREST_BIN.
+    default: "false"
+  postgrest-version:
+    description: Which PostgREST. Pinned, because the differential cases compare against one version's behaviour.
+    default: v16.5
+
+runs:
+  using: composite
+  steps:
+    - name: Start Postgres (${{ inputs.image }})
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        PORT: ${{ inputs.port }}
+      run: |
+        set -euo pipefail
+        docker run -d --name tspg-postgres \
+          -e POSTGRES_PASSWORD=postgres \
+          -p "$PORT:5432" \
+          --health-cmd "pg_isready -U postgres" \
+          --health-interval 5s \
+          --health-timeout 5s \
+          --health-retries 10 \
+          "$IMAGE" > /dev/null
+        echo "TEST_DATABASE_URL=postgres://postgres:postgres@localhost:$PORT/postgres" >> "$GITHUB_ENV"
+        # PGHOST/PGPORT/PGPASSWORD so a plain `psql` reaches it, as the examples do
+        {
+          echo "PGHOST=localhost"
+          echo "PGPORT=$PORT"
+          echo "PGUSER=postgres"
+          echo "PGPASSWORD=postgres"
+        } >> "$GITHUB_ENV"
+
+    - name: Wait for Postgres
+      shell: bash
+      run: |
+        set -euo pipefail
+        for _ in $(seq 60); do
+          case "$(docker inspect -f '{{.State.Health.Status}}' tspg-postgres)" in
+            healthy) echo "ready"; exit 0 ;;
+            unhealthy) break ;;
+          esac
+          sleep 2
+        done
+        echo "::error::Postgres did not come up"
+        docker logs tspg-postgres
+        exit 1
+
+    - name: Download PostgREST ${{ inputs.postgrest-version }}
+      if: inputs.postgrest == 'true'
+      shell: bash
+      env:
+        VERSION: ${{ inputs.postgrest-version }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/postgrest"
+        curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${VERSION}/postgrest-${VERSION}-linux-static-x86-64.tar.xz" \
+          | tar -xJ -C "$RUNNER_TEMP/postgrest"
+        "$RUNNER_TEMP/postgrest/postgrest" --version
+        echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"
