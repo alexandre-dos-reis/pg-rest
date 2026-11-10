@@ -27,7 +27,10 @@
     "build": "tsdown",
     "test": "bun test",
     "dev": "tsdown --watch",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "lint": "oxlint src tests",
+    "fmt:check": "oxfmt --check src tests",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@tsql/adapters": "workspace:*",

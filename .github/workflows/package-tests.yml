@@ -1,0 +1,93 @@
+name: Package tests
+
+# The single place the test environment is described: the Postgres server, the toolchain, and the
+# four commands a package is checked with. `ci.yml` calls it once per package, so adding a package
+# -- or changing the database image, the timeout or the order of the checks -- is one edit here
+# instead of one per job.
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: The name shown for the job.
+        required: true
+        type: string
+      package:
+        description: Workspace to lint, format-check and typecheck, e.g. `@tsql/rest`. Empty means the whole repo.
+        type: string
+        default: ""
+      tests:
+        description: Paths `bun test` is given. Empty means every suite.
+        type: string
+        default: ""
+      postgrest:
+        description: Download a real PostgREST and expose it as POSTGREST_BIN, for the differential cases.
+        type: boolean
+        default: false
+      smoke:
+        description: Build the packages and run the built library on Node.
+        type: boolean
+        default: false
+
+env:
+  TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+  POSTGREST_VERSION: v16.5
+  # `bun run  lint` with an empty filter is the root script, which reads the whole repo.
+  FILTER: ${{ inputs.package && format('--filter={0}', inputs.package) || '' }}
+
+jobs:
+  test:
+    name: ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgis/postgis:16-3.6
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        if: inputs.smoke
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run $FILTER lint
+      - run: bun run $FILTER fmt:check
+      - run: bun run $FILTER typecheck
+      - name: Download PostgREST ${{ env.POSTGREST_VERSION }}
+        if: inputs.postgrest
+        run: |
+          mkdir -p "$RUNNER_TEMP/postgrest"
+          curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/${POSTGREST_VERSION}/postgrest-${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP/postgrest"
+          "$RUNNER_TEMP/postgrest/postgrest" --version
+      - run: bun run build
+        if: inputs.smoke
+      # `--timeout` because a runner is far slower than a developer's machine at what these suites do
+      # -- `createTestDb` makes a database from a template and drops it again per test, with PostGIS
+      # in that template -- and ten tests, the ones that build two instances, missed bun's 5s
+      # default. They were not hanging: the whole suite is ~16s locally and ~8min here, a per-test
+      # cost that is simply 30x. Why it is 30x is not established; it is not the cluster's durability
+      # settings, which were tried (tmpfs data directory, fsync, full_page_writes and
+      # synchronous_commit all off) and changed the total by less than noise.
+      #
+      # It is passed here and not in `package.json`, so a plain `bun test` keeps the strict 5s
+      # default and a real slowdown still shows up where it is cheap to notice.
+      #
+      # The differential cases skip themselves without POSTGREST_BIN.
+      - name: Tests
+        run: bun test --timeout 30000 ${{ inputs.tests }}
+        env:
+          POSTGREST_BIN: ${{ inputs.postgrest && format('{0}/postgrest/postgrest', runner.temp) || '' }}
+      - name: Run the built library on Node
+        if: inputs.smoke
+        run: node scripts/node-smoke.ts

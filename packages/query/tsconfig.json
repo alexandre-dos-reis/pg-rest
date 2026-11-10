@@ -3,5 +3,5 @@
   "compilerOptions": {
     "paths": { "@tsql/core/*": ["../core/src/*"] }
   },
-  "include": ["src", "../core/src", "../adapters"]
+  "include": ["src", "tests", "../core/src", "../adapters"]
 }

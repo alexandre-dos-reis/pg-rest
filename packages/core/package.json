@@ -8,7 +8,10 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "lint": "oxlint src tests",
+    "fmt:check": "oxfmt --check src tests",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@tsql/adapters": "workspace:*"
