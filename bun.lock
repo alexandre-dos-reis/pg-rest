@@ -34,7 +34,7 @@
     },
     "packages/query": {
       "name": "@tsql/query",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "devDependencies": {
         "@tsql/adapters": "workspace:*",
         "@tsql/core": "workspace:*",
@@ -52,7 +52,7 @@
     },
     "packages/rest": {
       "name": "@tsql/rest",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "devDependencies": {
         "@tsql/adapters": "workspace:*",
         "@tsql/core": "workspace:*",
