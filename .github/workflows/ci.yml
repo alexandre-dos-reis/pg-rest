@@ -58,9 +58,15 @@ jobs:
   # Pull requests only: a release commit consumes its changesets, so on main there are none left,
   # and a pull request is the only place a range of commits exists to lint. One job rather than two
   # -- both checks want the same checkout with full history, and a runner costs the same either way.
+  #
+  # Except the release pull request, which is the one place where "a package changed and no
+  # changeset says why" is correct: `changeset version` deletes the changesets it consumed and bumps
+  # the `package.json` that `changedFilePatterns` watches, so the gate would fail every release.
+  # `changeset-release/main` is changesets/action's branch (it is `changeset-release/<base>`, and
+  # release.yml names no other), so this skips that PR and nothing else.
   pull-request:
     name: Changeset, commit messages
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
