@@ -14,7 +14,7 @@ const PAYLOADS = [
 /**
  * Hostile input through `handle()`: a query string is text, so every value in it has to stay a
  * value and every identifier has to be quoted or refused. The object API's own half of this is
- * `@tsql/query`'s suite -- both go through `@tsql/core`'s quoting, and each is checked where its
+ * `@tspg/query`'s suite -- both go through `@tspg/core`'s quoting, and each is checked where its
  * input is read.
  */
 describe.skipIf(!hasDb)("hostile input over HTTP", () => {

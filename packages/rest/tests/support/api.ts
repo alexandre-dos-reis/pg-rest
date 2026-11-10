@@ -1,5 +1,5 @@
-// `@tsql/rest`'s harness: a throwaway database, `createRest` on it, and the HTTP helpers a suite
-// drives `handle()` with. It names `@tsql/rest` and `@tsql/core` and nothing else -- what the other
+// `@tspg/rest`'s harness: a throwaway database, `createRest` on it, and the HTTP helpers a suite
+// drives `handle()` with. It names `@tspg/rest` and `@tspg/core` and nothing else -- what the other
 // package does with the same database is not this package's business.
 import { createRest, type RequestContext, type RestInstance, type RestOptions } from "../../src/index";
 import { createTestDb, type TestDb } from "../../../../tests/support/db";

@@ -1,4 +1,4 @@
-import type { DbSession } from "@tsql/adapters";
+import type { DbSession } from "@tspg/adapters";
 import {
   type SqlCall,
   type CoreConfig,
@@ -15,11 +15,11 @@ import {
   shownBody,
   transactionSetup,
   useSchema,
-} from "@tsql/core/core";
-import { DbQueryError, EngineError } from "@tsql/core/errors";
+} from "@tspg/core/core";
+import { DbQueryError, EngineError } from "@tspg/core/errors";
 import { type ErrorKind, describeErrorKind, describeFailure } from "./kinds";
-import type { FieldRef } from "@tsql/core/parse/field";
-import { parseField } from "@tsql/core/parse/field";
+import type { FieldRef } from "@tspg/core/parse/field";
+import { parseField } from "@tspg/core/parse/field";
 import {
   type Filter as ParsedFilter,
   type FilterNode,
@@ -32,15 +32,15 @@ import {
   parseCount,
   parseOrderTerms,
   walkEmbeds,
-} from "@tsql/core/parse/filter";
-import { type SelectItem, parseSelect } from "@tsql/core/parse/select";
-import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tsql/core/parse/syntax";
-import { getRelation } from "@tsql/core/schema";
-import { literal, quoteIdent } from "@tsql/core/quote";
-import { compileSet } from "@tsql/core/sql/expression";
-import { ROOT_ALIAS } from "@tsql/core/constants";
-import type { SqlOperation, SqlOutputFormat, SqlPreferences } from "@tsql/core/parse/sql-options";
-import type { JsonObject } from "@tsql/core/sql/write";
+} from "@tspg/core/parse/filter";
+import { type SelectItem, parseSelect } from "@tspg/core/parse/select";
+import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER } from "@tspg/core/parse/syntax";
+import { getRelation } from "@tspg/core/schema";
+import { literal, quoteIdent } from "@tspg/core/quote";
+import { compileSet } from "@tspg/core/sql/expression";
+import { ROOT_ALIAS } from "@tspg/core/constants";
+import type { SqlOperation, SqlOutputFormat, SqlPreferences } from "@tspg/core/parse/sql-options";
+import type { JsonObject } from "@tspg/core/sql/write";
 
 /** What `preRequest` is told about the call it runs for. There is no request: no `Request`, no headers. */
 export interface PreRequestInfo {
@@ -669,11 +669,11 @@ export const isEmbed = (v: Select | Embed): v is Embed => !Array.isArray(v);
 // input -> the engine's parsed form
 // ---------------------------------------------------------------------------
 
-// `@tsql/rest` hands the engine what it parsed from a query string. `query` has no string to parse: it
+// `@tspg/rest` hands the engine what it parsed from a query string. `query` has no string to parse: it
 // builds the same `ParsedQuery` from its object, so none of PostgREST's grammar is in this package and
 // the only text it reads is a column string (`"name->>first"`, `"total::text"`, `"count()"`).
 // `packages/query/tests/support/render.ts` renders an input the old way, as a query string, and
-// `packages/query/tests/query-direct.test.ts` pins that the string, parsed by `@tsql/rest`, gives the same thing.
+// `packages/query/tests/query-direct.test.ts` pins that the string, parsed by `@tspg/rest`, gives the same thing.
 
 const QUANTIFIABLE_OPS: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);
 const IS_VALUES: ReadonlySet<string> = new Set(IS_VALUES_ORDER);
@@ -1063,7 +1063,7 @@ export const runQuery = async (
 /** What a prepared query takes: values, by name. */
 export type PreparedArgs = { readonly [name: string]: Scalar };
 
-const PREPARED = Symbol("tsql.prepared");
+const PREPARED = Symbol("tspg.prepared");
 
 /**
  * One call of a prepared query, as `prepare()` returns it: hand it to `query`, `tx.query` or a
@@ -1164,7 +1164,7 @@ const isPlain = (v: unknown): v is string | number | boolean => {
  * the ordinary way.
  */
 export const prepareQuery = <A extends PreparedArgs>(env: Env, build: (args: A) => QueryInput) => {
-  const marker = `tsql${Math.random()
+  const marker = `tspg${Math.random()
     .toString(36)
     .slice(2, 10)
     .replace(/[^a-z0-9]/g, "z")}`;
@@ -1489,7 +1489,7 @@ const runScope = async <A>(
 
     transaction: async <B>(nested: (tx: Transaction) => Promise<B>): Promise<QueryResult<B, undefined>> => {
       if (state.failed) return toFailedResult(TRANSACTION, refused()) as QueryResult<B, undefined>;
-      const name = `tsql_sp_${++names.n}`;
+      const name = `tspg_sp_${++names.n}`;
       const broke = (e: unknown): QueryResult<B, undefined> => {
         // The savepoint machinery itself failed: the enclosing scope cannot be trusted either.
         const failed = failureOf(env, ctx, TRANSACTION, e);

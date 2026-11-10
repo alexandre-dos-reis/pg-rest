@@ -6,11 +6,11 @@ import { inputs } from "./support/cases";
 import fixtures from "../../core/tests/parsed.fixtures.json";
 
 /**
- * `toParsed` builds `@tsql/core`'s `ParsedQuery` from the object. For everything a query string can
+ * `toParsed` builds `@tspg/core`'s `ParsedQuery` from the object. For everything a query string can
  * also say, it must build what the string means -- that is what keeps the two packages one engine.
  *
- * The expectation is `@tsql/core`'s, committed in `parsed.fixtures.json`, so this suite never runs
- * `@tsql/rest`: that package is pinned against the same file from its own side.
+ * The expectation is `@tspg/core`'s, committed in `parsed.fixtures.json`, so this suite never runs
+ * `@tspg/rest`: that package is pinned against the same file from its own side.
  */
 
 // What the string route refuses, `toParsed` refuses too -- in `query`'s own words.

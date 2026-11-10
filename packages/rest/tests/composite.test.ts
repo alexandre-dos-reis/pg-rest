@@ -4,8 +4,8 @@ import { makeApi, type TestApi } from "./support/api";
 
 /**
  * Composite and JSON types through `handle()`: what PostgREST's query string can say about them.
- * The object API's own handling of the same types is `@tsql/query`'s suite -- both read the one
- * engine in `@tsql/core`, so neither has to be checked against the other.
+ * The object API's own handling of the same types is `@tspg/query`'s suite -- both read the one
+ * engine in `@tspg/core`, so neither has to be checked against the other.
  */
 describe.skipIf(!hasDb)("composite values over HTTP", () => {
   let t: TestApi;
