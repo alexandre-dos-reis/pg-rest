@@ -55,16 +55,18 @@ jobs:
   # the changes that need nothing -- a test, a doc, a workflow. `changeset add --empty` is the
   # escape hatch, and it is recorded rather than silent.
   #
-  # Pull requests only: a release commit consumes its changesets, so on main there are none left.
-  changeset:
-    name: Changeset
+  # Pull requests only: a release commit consumes its changesets, so on main there are none left,
+  # and a pull request is the only place a range of commits exists to lint. One job rather than two
+  # -- both checks want the same checkout with full history, and a runner costs the same either way.
+  pull-request:
+    name: Changeset, commit messages
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # `--since` needs the base branch, not just this commit
+          fetch-depth: 0 # both checks compare against the base, not just this commit
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -73,6 +75,13 @@ jobs:
       - run: bun run check:changesets
       - name: A changeset is required for a change to a package
         run: bunx changeset status --since=origin/${{ github.base_ref }}
+      # The whole range, which is what the commit-msg hook cannot see: a commit written in the
+      # GitHub UI, or one pushed with --no-verify.
+      - name: Commit messages
+        run: >-
+          bunx --bun commitlint --verbose
+          --from ${{ github.event.pull_request.base.sha }}
+          --to ${{ github.event.pull_request.head.sha }}
 
   core:
     needs: changes
