@@ -1,5 +1,4 @@
 ---
-"@tspg/core": minor
 "@tspg/query": minor
 ---
 
