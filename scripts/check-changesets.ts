@@ -37,9 +37,19 @@ const TYPES = [
 const SUMMARY = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9,/-]+\\))?!?:\\s+\\S`);
 
 const workspaces = new Set<string>();
+/**
+ * A private package has no release of its own -- it is bundled into the published ones -- so
+ * changesets ignores it, and refuses a changeset that names an ignored package beside a published
+ * one ("Found mixed changeset"). `@tspg/core` in a changeset is the mistake that looks most
+ * reasonable, which is why it is checked here and not only by `changeset status` in CI.
+ */
+const ignored = new Set<string>();
 for (const dir of ["core", "adapters", "query", "rest"]) {
   const pkg = Bun.file(`packages/${dir}/package.json`);
-  if (await pkg.exists()) workspaces.add((await pkg.json()).name);
+  if (!(await pkg.exists())) continue;
+  const { name, private: isPrivate } = await pkg.json();
+  if (isPrivate) ignored.add(name);
+  else workspaces.add(name);
 }
 
 const glob = new Bun.Glob(".changeset/*.md");
@@ -65,9 +75,14 @@ for await (const path of glob.scan(".")) {
       problems.push(`${path}: cannot read "${line.trim()}" as \`"<package>": <major|minor|patch>\``);
       continue;
     }
-    if (!workspaces.has(named[1]!)) {
+    if (ignored.has(named[1]!)) {
       problems.push(
-        `${path}: "${named[1]}" is not a workspace (have: ${[...workspaces].sort().join(", ")})`,
+        `${path}: "${named[1]}" is private, so changesets ignores it and refuses the changeset.\n` +
+          `    Name the published package the change ships in instead: ${[...workspaces].sort().join(", ")}`,
+      );
+    } else if (!workspaces.has(named[1]!)) {
+      problems.push(
+        `${path}: "${named[1]}" is not a published workspace (have: ${[...workspaces].sort().join(", ")})`,
       );
     }
   }

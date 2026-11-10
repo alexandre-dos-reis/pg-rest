@@ -22,7 +22,7 @@ const root = new URL("..", import.meta.url).pathname;
 const preamble = (dbTypes: string) => `
 import { createQuery, QueryError } from "../packages/query/src/index";
 import { createRest } from "../packages/rest/src/index";
-import type { RequestContext, SchemaDescriptor } from "../packages/query/src/index";
+import type { QueryOptions, RequestContext, SchemaDescriptor } from "../packages/query/src/index";
 import type { RestInstance } from "../packages/rest/src/index";
 import type { DbAdapter } from "../packages/adapters/src";
 import type { AsyncLocalStorage } from "node:async_hooks";
@@ -49,11 +49,13 @@ declare const app: {
 };
 // the AsyncLocalStorage the setContextQuery examples read from
 declare const store: AsyncLocalStorage<RequestContext>;
-declare const generateTypes: (cache: unknown, options?: { name?: string }) => string;
-declare const generateModule: (cache: unknown, options?: { name?: string }) => string;
-declare const introspect: (db: DbAdapter, schemas: string[]) => Promise<unknown>;
+// the generators, imported rather than declared: a page calling them the old way fails here
+import { generateModule, generateSchema, generateTypes, introspect } from "../packages/query/src/types";
+// the options object the generator examples hand over, which is createQuery's own
+declare const options: QueryOptions;
 void [createQuery, createRest, QueryError, pool, nodePostgresAdapter, pgRest, db, rest, ctx, user];
-void [mySessionLookup, pg, writeFileSync, generateTypes, generateModule, introspect, schema, serve, app, store];
+void [mySessionLookup, pg, writeFileSync, generateTypes, generateModule, generateSchema, introspect, options];
+void [schema, serve, app, store];
 `;
 
 /**

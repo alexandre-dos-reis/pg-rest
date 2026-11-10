@@ -44,8 +44,10 @@ The same trade reversed: because it runs inside your process, it can do things a
 - **Queries without HTTP.** `select({ table: "todos", columns: ["id"] })` goes through the same parser and the same SQL as a
   request — no loopback call, and no second copy of the logic for your server components, jobs and
   webhooks. → [`query.md`](query.md)
-- **Types from your own catalog.** `generateModule()` reads `pg_catalog` once, at build time, and writes the types and
-  the schema `createQuery` runs on: the types describe exactly what it accepts, and a running server never reads the catalog. → [`types.md`](types.md)
+- **Types from your own catalog.** `generateTypes()` reads `pg_catalog` once, at build time, and writes types that
+  describe exactly what the instance accepts — there is no model to declare and nothing to keep in step by hand. The
+  instance reads the catalog itself, once, on its first query; `generateModule()` writes a descriptor of that catalog
+  beside the types, and an instance given it reads nothing at runtime at all. → [`types.md`](types.md)
 - **Composite values as objects.** `where: { owner: { city: "Paris" } }` compares a
   [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
   PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.

@@ -47,8 +47,8 @@ const cacheOf = (relations: Relation[], composites: CompositeType[] = []): Schem
 });
 
 describe("generateTypes", () => {
-  test("columns: types, enums, arrays and nullability", () => {
-    const out = generateTypes(
+  test("columns: types, enums, arrays and nullability", async () => {
+    const out = await generateTypes(
       cacheOf([
         relation("t", [
           column("n", "integer"),
@@ -79,8 +79,8 @@ describe("generateTypes", () => {
     expect(out).toContain('moods: ("sad" | "ok")[] | null;');
   });
 
-  test("insert and update follow what the relation accepts", () => {
-    const out = generateTypes(
+  test("insert and update follow what the relation accepts", async () => {
+    const out = await generateTypes(
       cacheOf([
         relation("t", [
           column("id", "integer", { hasDefault: true }),
@@ -113,7 +113,7 @@ describe("generateTypes", () => {
     expect(out).toContain("insertable: false;");
   });
 
-  test("view columns: nullable by default, like the source on request", () => {
+  test("view columns: nullable by default, like the source on request", async () => {
     const view = relation(
       "v",
       [column("total", "numeric", { nullable: true, source: { schema: "api", table: "t", column: "total" } })],
@@ -122,22 +122,24 @@ describe("generateTypes", () => {
       },
     );
     const cache = cacheOf([relation("t", [column("total", "numeric")]), view]);
-    expect(generateTypes(cache)).toContain("total: number | null;");
-    expect(generateTypes(cache, { views: "like-source" })).toContain("total: number;");
+    expect(await generateTypes(cache)).toContain("total: number | null;");
+    expect(await generateTypes(cache, { views: "like-source" })).toContain("total: number;");
   });
 
-  test("names that are not identifiers are quoted", () => {
-    const out = generateTypes(cacheOf([relation("odd table", [column("odd col", "text"), column("ok", "text")])]));
+  test("names that are not identifiers are quoted", async () => {
+    const out = await generateTypes(
+      cacheOf([relation("odd table", [column("odd col", "text"), column("ok", "text")])]),
+    );
     expect(out).toContain('"odd table": {');
     expect(out).toContain('"odd col": string;');
     expect(out).toContain("ok: string;");
   });
 
-  test("the header and the type name are options", () => {
+  test("the header and the type name are options", async () => {
     const cache = cacheOf([relation("t", [column("x", "integer")])]);
-    expect(generateTypes(cache)).toStartWith("// Generated from the database catalog");
-    expect(generateTypes(cache, { header: false })).toStartWith("type DatabaseApiRelations");
-    expect(generateTypes(cache, { name: "MyDb" })).toContain("export type MyDb = {");
+    expect(await generateTypes(cache)).toStartWith("// Generated from the database catalog");
+    expect(await generateTypes(cache, { header: false })).toStartWith("type DatabaseApiRelations");
+    expect(await generateTypes(cache, { name: "MyDb" })).toContain("export type MyDb = {");
   });
 });
 
@@ -151,8 +153,8 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
   });
   afterAll(() => db.drop());
 
-  test("the module carries the descriptor createQuery runs on", () => {
-    const mod = generateModule(cache, { name: "DatabasePgRest" });
+  test("the module carries the descriptor createQuery runs on", async () => {
+    const mod = await generateModule(cache, { name: "DatabasePgRest" });
     expect(mod).toContain("export type DatabasePgRest = {");
     expect(mod).toContain("export const schema: SchemaDescriptor = ");
     // the descriptor is the cache as plain data, and reads back to the same cache
@@ -160,18 +162,18 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
     expect([...back.relations.keys()]).toEqual([...cache.relations.keys()]);
     expect([...back.functions.keys()]).toEqual([...cache.functions.keys()]);
     expect(back.foreignKeys).toEqual(cache.foreignKeys);
-    expect(generateTypes(cache, { header: false })).not.toStartWith("//");
+    expect(await generateTypes(cache, { header: false })).not.toStartWith("//");
   });
 
   test("the committed types are exactly what the generator produces", async () => {
     // tests/support/fixture.types.ts is typechecked by `bun run typecheck`, so this pins both the
     // generator's output and the fact that the output compiles
     const committed = await Bun.file(new URL("../../../tests/support/fixture.types.ts", import.meta.url)).text();
-    expect(generateTypes(cache, { name: "DatabasePgRest" })).toBe(committed);
+    expect(await generateTypes(cache, { name: "DatabasePgRest" })).toBe(committed);
   });
 
-  test("relationships come from the same resolver the request path uses", () => {
-    const out = generateTypes(cache, { name: "DatabasePgRest" });
+  test("relationships come from the same resolver the request path uses", async () => {
+    const out = await generateTypes(cache, { name: "DatabasePgRest" });
     // many-to-one, one-to-many, the foreign key column as a name, and many-to-many through a junction
     expect(out).toContain('clients: { rel: "clients"; to: "one" };');
     expect(out).toContain('orders: { rel: "orders"; to: "many" };');
@@ -182,8 +184,8 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
     expect(out).not.toContain("recent_orders: [{ args:");
   });
 
-  test("functions: arguments, defaults, overloads, enums and set-returning results", () => {
-    const out = generateTypes(cache, { name: "DatabasePgRest" });
+  test("functions: arguments, defaults, overloads, enums and set-returning results", async () => {
+    const out = await generateTypes(cache, { name: "DatabasePgRest" });
     expect(out).toContain("add: [{ args: { a: number; b: number }; returns: number; set: false }];");
     expect(out).toContain("greet: [{ args: { name?: string }; returns: string; set: false }];");
     expect(out).toContain(
@@ -202,8 +204,8 @@ describe.skipIf(!hasDb)("generateTypes against the fixture", () => {
     expect(out).toContain("client_summary: [{ args: { cid: number }; returns: Record<string, unknown>; set: true }];");
   });
 
-  test("every exposed schema is in the generated type", () => {
-    const out = generateTypes(cache, { name: "DatabasePgRest" });
+  test("every exposed schema is in the generated type", async () => {
+    const out = await generateTypes(cache, { name: "DatabasePgRest" });
     expect(out).toContain('default: "api";');
     expect(out).toContain("api: { relations: DatabasePgRestApiRelations; functions: DatabasePgRestApiFunctions };");
     expect(out).toContain("v2: { relations: DatabasePgRestV2Relations; functions: DatabasePgRestV2Functions };");

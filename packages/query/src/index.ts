@@ -1,5 +1,5 @@
 import type { SqlRequestContext as RequestContext } from "@tspg/core/core";
-import { type EngineOptions, createStaticEngine } from "@tspg/core/engine";
+import { type EngineOptions, type LazyEngine, createLazyEngine, createStaticEngine } from "@tspg/core/engine";
 import {
   type ContextQuery,
   type ContextSource,
@@ -23,7 +23,7 @@ import {
   runTransaction,
   toFailedResult,
 } from "./query";
-import { type SchemaDescriptor, fromDescriptor } from "@tspg/core/schema";
+import { type SchemaCache, type SchemaDescriptor, fromDescriptor } from "@tspg/core/schema";
 import type { AnyDatabase, TypedQueryInstance } from "./typed";
 
 export type { DbAdapter, DbSession, Row } from "@tspg/adapters";
@@ -102,16 +102,22 @@ export type { SchemaDescriptor } from "@tspg/core/schema";
  * What `createQuery` takes: the database and the settings a query reads. There is nothing about HTTP
  * here -- that is `@tspg/rest`.
  */
-export interface QueryOptions extends Omit<EngineOptions, "schemas"> {
+export interface QueryOptions extends EngineOptions {
   /** A SQL function (`"auth.check_request"`) or callback to run in each call's transaction, before its statement. */
   readonly preRequest?: PreRequest;
   /**
-   * The schema of the database, as generated at build time by `@tspg/query/types`. Nothing is read
-   * from the catalog when the instance is created or while it runs, and the descriptor is not
-   * checked: the types are what keep a query and the schema in step. The first schema it lists is
-   * the default one.
+   * The schema of the database, as generated at build time by `@tspg/query/types`. Giving it is
+   * what makes the instance read nothing from the catalog, ever: not when it is created and not
+   * while it runs. The descriptor is not checked -- the types are what keep a query and the schema
+   * in step -- and the schemas it lists win over `schemas`, the first of them being the default one.
+   *
+   * Leaving it out is the other way round: the catalog is read once, on the first operation, for the
+   * `schemas` given here. The queries are typed the same (`createQuery<Db>` is a type argument and
+   * types never reach runtime), and the cost is a round trip at that first call, the catalog
+   * permissions it needs, and a mismatch between `Db` and the live database becoming a runtime
+   * error instead of an impossibility.
    */
-  readonly schema: SchemaDescriptor;
+  readonly schema?: SchemaDescriptor;
 }
 
 /**
@@ -200,6 +206,13 @@ export interface QueryInstance extends Operations<"result", [ctx?: RequestContex
    * to fail without taking the rest of the transaction with it.
    */
   transaction<A>(fn: (tx: Transaction) => Promise<A>, options?: TransactionOptions): Promise<QueryResult<A, undefined>>;
+  /**
+   * Read the catalog now, instead of on the first operation. Nothing to await on an instance given
+   * a `schema` descriptor -- it has its schema already -- and the way to make a connection or
+   * catalog problem surface at start-up on one that was not, rather than inside the first query.
+   * It is also what {@link QueryInstance.prepare} needs, since planning is synchronous.
+   */
+  ready(): Promise<void>;
   /** Stop the instance. The database adapter is left open: close it yourself. */
   close(): Promise<void>;
 }
@@ -214,18 +227,24 @@ export interface CreateQuery {
 }
 
 const create = (options: QueryOptions): QueryInstance => {
-  const cache = fromDescriptor(options.schema);
-  const { adapter, config: shared } = createStaticEngine({ ...options, schemas: cache.schemas }, cache);
+  // A descriptor decides both things: the cache is had without the catalog, and the schemas it was
+  // generated for are the ones exposed. Without one, `schemas` says what to read and the read waits
+  // for the first operation, so creating an instance stays synchronous either way.
+  const given = options.schema ? fromDescriptor(options.schema) : undefined;
+  const engine = given ? createStaticEngine({ ...options, schemas: given.schemas }, given) : createLazyEngine(options);
+  const { adapter, config: shared } = engine;
   const config: QueryConfig = { ...shared, preRequest: options.preRequest };
+  const cacheOf = async (): Promise<SchemaCache> => given ?? (await (engine as LazyEngine).ready());
 
   const execute = async <T = unknown>(
     input: QueryInput | Prepared<T>,
     ctx?: RequestContext,
   ): Promise<QueryResult<T>> => {
     try {
-      return (await runQuery({ db: adapter, config, cache }, input, ctx ?? {})) as QueryResult<T>;
+      return (await runQuery({ db: adapter, config, cache: await cacheOf() }, input, ctx ?? {})) as QueryResult<T>;
     } catch (e) {
-      // runQuery does not throw; this covers everything around it, so the promise cannot reject
+      // runQuery does not throw; this covers everything around it (reading the catalog included, on
+      // an instance with no descriptor), so the promise cannot reject
       return toFailedResult(input, e) as QueryResult<T>;
     }
   };
@@ -235,7 +254,7 @@ const create = (options: QueryOptions): QueryInstance => {
     scope?: TransactionOptions,
   ): Promise<QueryResult<A, undefined>> => {
     try {
-      return await runTransaction<A>({ db: adapter, config, cache }, fn, scope);
+      return await runTransaction<A>({ db: adapter, config, cache: await cacheOf() }, fn, scope);
     } catch (e) {
       // runTransaction does not throw; this covers everything around it, so the promise cannot reject
       return failedTransaction(e) as QueryResult<A, undefined>;
@@ -288,8 +307,14 @@ const create = (options: QueryOptions): QueryInstance => {
     };
   };
 
-  const prepare = <A extends PreparedArgs, T = unknown>(build: (args: A) => SelectInput): ((args: A) => Prepared<T>) =>
-    prepareQuery({ db: adapter, config, cache }, build) as (args: A) => Prepared<T>;
+  const prepare = <A extends PreparedArgs, T = unknown>(
+    build: (args: A) => SelectInput,
+  ): ((args: A) => Prepared<T>) => {
+    // Planning is synchronous and needs the schema, which an instance with no descriptor only has
+    // once it has read the catalog: `await instance.ready()` is how that happens before this point.
+    const cache = given ?? engine.store.current();
+    return prepareQuery({ db: adapter, config, cache }, build) as (args: A) => Prepared<T>;
+  };
 
   return {
     ...(operationsOf(execute) as unknown as Operations<"result", [ctx?: RequestContext]>),
@@ -297,6 +322,7 @@ const create = (options: QueryOptions): QueryInstance => {
     prepare,
     setContextQuery,
     transaction,
+    ready: async () => void (await cacheOf()),
     close: async () => {},
   };
 };
