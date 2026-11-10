@@ -1,10 +1,10 @@
-import type { DbAdapter, DbSession } from "@tsql/adapters";
+import type { DbAdapter, DbSession } from "@tspg/adapters";
 import type { CoreConfig } from "./core";
 import { normalizeDbError } from "./errors";
 import type { SchemaCache } from "./schema";
 import { type SchemaStore, createSchemaStore } from "./service";
 
-/** What the two entry points (`@tsql/rest`'s `handle`, `@tsql/query`'s `query`) have in common. */
+/** What the two entry points (`@tspg/rest`'s `handle`, `@tspg/query`'s `query`) have in common. */
 export interface EngineOptions {
   /**
    * The database, as a {@link DbAdapter} you create from your driver
@@ -16,7 +16,7 @@ export interface EngineOptions {
   readonly schemas?: ReadonlyArray<string>;
   /**
    * Role used when the context has none. Default `"anon"`. `false` refuses anonymous calls:
-   * a call with no role is an error (`unauthenticated` in `@tsql/query`, a `401` in `@tsql/rest`).
+   * a call with no role is an error (`unauthenticated` in `@tspg/query`, a `401` in `@tspg/rest`).
    */
   readonly anonymousRole?: string | false;
   /** Maximum rows returned by a read. */

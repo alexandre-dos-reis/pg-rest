@@ -5,7 +5,7 @@
 // running application never reads the catalog. It imports db.ts and not client.ts, which needs the
 // file this one is about to write.
 import { writeFileSync } from "node:fs";
-import { generateModule, introspect } from "@tsql/query/types";
+import { generateModule, introspect } from "@tspg/query/types";
 import { pgRestOptions, pglite, schemas } from "./db.ts";
 
 const generated = generateModule(await introspect(pgRestOptions.db, schemas), { name: "DatabasePgRest" });

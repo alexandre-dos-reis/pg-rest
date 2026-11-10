@@ -1,8 +1,8 @@
-import type { DbAdapter } from "@tsql/adapters";
-import type { SqlRequestContext as RequestContext } from "@tsql/core/core";
-import { DbQueryError, EngineError } from "@tsql/core/errors";
+import type { DbAdapter } from "@tspg/adapters";
+import type { SqlRequestContext as RequestContext } from "@tspg/core/core";
+import { DbQueryError, EngineError } from "@tspg/core/errors";
 import { type ApiError, PgRestError, toApiError } from "./errors";
-import type { SchemaCache } from "@tsql/core/schema";
+import type { SchemaCache } from "@tspg/core/schema";
 import { type HttpConfig, handleRequest } from "./http";
 
 export const errorResponse = (err: ApiError): Response =>

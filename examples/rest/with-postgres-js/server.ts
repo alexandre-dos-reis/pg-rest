@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server"; // only used to turn Node's http into Request/Response
 import postgres from "postgres";
-import { createRest } from "@tsql/rest";
-import { postgresJsAdapter } from "@tsql/rest/adapters/postgres-js";
+import { createRest } from "@tspg/rest";
+import { postgresJsAdapter } from "@tspg/rest/adapters/postgres-js";
 
 const sql = postgres(process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres");
 

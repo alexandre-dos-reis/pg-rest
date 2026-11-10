@@ -1,4 +1,4 @@
-import type { DbSession } from "@tsql/adapters";
+import type { DbSession } from "@tspg/adapters";
 import { EngineError } from "./errors";
 import { literal } from "./quote";
 

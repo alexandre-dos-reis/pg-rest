@@ -1,9 +1,9 @@
-import { ALIAS } from "@tsql/core/constants";
-import type { SqlOutputFormat } from "@tsql/core/parse/sql-options";
+import { ALIAS } from "@tspg/core/constants";
+import type { SqlOutputFormat } from "@tspg/core/parse/sql-options";
 import type { MediaChoice, Negotiated } from "./request";
 
 // The formats `Accept` can ask for beyond JSON, as SQL. The engine knows none of them: it is given
-// the aggregate that turns the rows `_t` into the body text, and `@tsql/rest` decides which one.
+// the aggregate that turns the rows `_t` into the body text, and `@tspg/rest` decides which one.
 
 /** CSV, the way PostgREST does: the header from the first row, then PostgreSQL's record text. */
 const CSV_BODY =

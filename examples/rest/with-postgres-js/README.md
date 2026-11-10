@@ -17,7 +17,7 @@ resolve, so link the local build instead -- from the repository root:
 bun run link:examples with-postgres-js   # builds pg-rest, then symlinks it into node_modules
 ```
 
-`server.ts` is the whole integration: create the driver, wrap it in the adapter from `@tsql/rest/adapters/...`, give `createRest` a way to resolve the caller
+`server.ts` is the whole integration: create the driver, wrap it in the adapter from `@tspg/rest/adapters/...`, give `createRest` a way to resolve the caller
 (`resolveContext`), and hand `pgRest.handle` to any server that speaks `Request`/`Response`.
 
 Try it — the caller is whoever `X-User` says (see `resolveContext` in `server.ts`):

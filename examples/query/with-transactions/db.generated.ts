@@ -1,4 +1,4 @@
-// Generated from the database catalog by @tsql/query. Do not edit.
+// Generated from the database catalog by @tspg/query. Do not edit.
 
 type DatabasePgRestApiRelations = {
   accounts: {
@@ -71,7 +71,7 @@ export type DatabasePgRest = {
   };
 };
 
-import type { SchemaDescriptor } from "@tsql/query";
+import type { SchemaDescriptor } from "@tspg/query";
 
 export const schema: SchemaDescriptor = {
   "schemas": [

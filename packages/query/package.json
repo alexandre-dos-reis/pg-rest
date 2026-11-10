@@ -1,12 +1,12 @@
 {
-  "name": "@tsql/query",
-  "version": "0.0.0",
-  "description": "Typed, in-process queries over PostgreSQL, from an object: the same parser, SQL and errors as @tsql/rest, a superset of PostgREST's filters, and computed updates. No HTTP.",
+  "name": "@tspg/query",
+  "version": "0.1.0",
+  "description": "Typed, in-process queries over PostgreSQL, from an object: the same parser, SQL and errors as @tspg/rest, a superset of PostgREST's filters, and computed updates. No HTTP.",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alexandre-dos-reis/pg-rest.git",
+    "url": "git+https://github.com/alexandre-dos-reis/tspg.git",
     "directory": "packages/query"
   },
   "files": [
@@ -31,8 +31,8 @@
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
-    "@tsql/adapters": "workspace:*",
-    "@tsql/core": "workspace:*"
+    "@tspg/adapters": "workspace:*",
+    "@tspg/core": "workspace:*"
   },
   "peerDependencies": {
     "@electric-sql/pglite": ">=0.2.0",

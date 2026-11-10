@@ -13,22 +13,22 @@ interface DbAdapter {
 
 ## The four that ship
 
-They are exported by both packages, under the same names: `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`. The table
-uses `@tsql/rest`.
+They are exported by both packages, under the same names: `@tspg/rest/adapters/*` and `@tspg/query/adapters/*`. The table
+uses `@tspg/rest`.
 
 | import | wraps | peer dependency |
 | --- | --- | --- |
-| `@tsql/rest/adapters/bun` → `bunSqlAdapter(sql)` | `new SQL(url)` from `"bun"` | none (built into Bun) |
-| `@tsql/rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(…)` | `pg` ≥ 8 |
-| `@tsql/rest/adapters/postgres-js` → `postgresJsAdapter(sql)` | `postgres(url)` | `postgres` ≥ 3 |
-| `@tsql/rest/adapters/pglite` → `pgliteAdapter(db)` | `new PGlite()` | `@electric-sql/pglite` |
+| `@tspg/rest/adapters/bun` → `bunSqlAdapter(sql)` | `new SQL(url)` from `"bun"` | none (built into Bun) |
+| `@tspg/rest/adapters/node-postgres` → `nodePostgresAdapter(pool)` | `new pg.Pool(…)` | `pg` ≥ 8 |
+| `@tspg/rest/adapters/postgres-js` → `postgresJsAdapter(sql)` | `postgres(url)` | `postgres` ≥ 3 |
+| `@tspg/rest/adapters/pglite` → `pgliteAdapter(db)` | `new PGlite()` | `@electric-sql/pglite` |
 
 They are **structural**: an adapter never imports its driver, you pass the client in. So a project loads only the code
 it imports, and the drivers stay optional peer dependencies.
 
 ```ts
 import pg from "pg";
-import { nodePostgresAdapter } from "@tsql/rest/adapters/node-postgres";
+import { nodePostgresAdapter } from "@tspg/rest/adapters/node-postgres";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
