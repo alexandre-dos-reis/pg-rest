@@ -33,6 +33,8 @@ declare const pool: unknown;
 declare const schema: SchemaDescriptor;
 declare const nodePostgresAdapter: (p: unknown) => DbAdapter;
 declare const pgRest: ReturnType<typeof createQuery<Database>>;
+// the package README names the same instance db; the pages under docs/ name it pgRest
+declare const db: ReturnType<typeof createQuery<Database>>;
 declare const rest: RestInstance;
 declare const ctx: { role: string; claims: { sub: string; email: string } };
 declare const user: { id: string; email: string };
@@ -50,12 +52,16 @@ declare const store: AsyncLocalStorage<RequestContext>;
 declare const generateTypes: (cache: unknown, options?: { name?: string }) => string;
 declare const generateModule: (cache: unknown, options?: { name?: string }) => string;
 declare const introspect: (db: DbAdapter, schemas: string[]) => Promise<unknown>;
-void [createQuery, createRest, QueryError, pool, nodePostgresAdapter, pgRest, rest, ctx, user];
+void [createQuery, createRest, QueryError, pool, nodePostgresAdapter, pgRest, db, rest, ctx, user];
 void [mySessionLookup, pg, writeFileSync, generateTypes, generateModule, introspect, schema, serve, app, store];
 `;
 
+/**
+ * A README is written against the todo schema of `examples/query/with-generated-types`, which ships
+ * its generated types; everything in `docs/` is written against the test fixture.
+ */
 const DB_TYPES_OF = (page: string) =>
-  page === "README.md" ? "../examples/query/with-generated-types/db.generated" : "./support/fixture.types";
+  page.endsWith("README.md") ? "../examples/query/with-generated-types/db.generated" : "./support/fixture.types";
 
 /** ```ts fenced blocks, minus their import lines (the preamble has those). */
 const blocksOf = (markdown: string): string[] => {
@@ -114,9 +120,15 @@ const diagnoseAll = async (sources: Map<string, string>): Promise<Map<string, st
   return out;
 };
 
-/** The markdown that documents the library: the README, and everything in docs/. */
+/**
+ * The markdown that documents the library: the README, the one each published package carries, and
+ * everything in docs/. The package READMEs are what npm renders, so they are the first thing anyone
+ * copies -- compiled here for exactly that reason.
+ */
 const pages = [
   "README.md",
+  "packages/rest/README.md",
+  "packages/query/README.md",
   ...readdirSync(`${root}docs`)
     .filter((f) => f.endsWith(".md"))
     .map((f) => `docs/${f}`),

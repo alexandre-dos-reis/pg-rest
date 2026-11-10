@@ -1,7 +1,7 @@
 {
   "name": "@tspg/query",
   "version": "0.1.0",
-  "description": "Typed, in-process queries over PostgreSQL, from an object: the same parser, SQL and errors as @tspg/rest, a superset of PostgREST's filters, and computed updates. No HTTP.",
+  "description": "Postgres type-safe query client",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
   "repository": {
