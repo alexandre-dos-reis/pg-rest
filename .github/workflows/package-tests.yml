@@ -50,18 +50,6 @@ jobs:
       - uses: ./.github/actions/postgres
         with:
           postgrest: ${{ inputs.postgrest }}
-      # `setup-bun` caches the bun executable and nothing else -- its `no-cache` input is about that
-      # binary -- so the packages are cached here. Asked for rather than hardcoded: the directory is
-      # $HOME/.bun/install/cache on a runner but follows XDG elsewhere, and `bun pm cache` knows.
-      - name: Locate bun's package cache
-        run: echo "BUN_INSTALL_CACHE=$(bun pm cache)" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ env.BUN_INSTALL_CACHE }}
-          # the lockfile is what decides the contents; `restore-keys` so a changed lockfile still
-          # starts from the last cache and fetches only what moved
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
-          restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run $FILTER lint
       - run: bun run $FILTER fmt:check
