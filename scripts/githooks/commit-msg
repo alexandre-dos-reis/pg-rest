@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Conventional commits, enforced where the message is still cheap to fix.
+# Enable once per clone:  git config core.hooksPath scripts/githooks   (the `prepare` script does it)
+#
+#   type(scope)!: subject
+#
+# The types are the ones this history already uses (`git log | grep -oE '^[a-z]+'`), not a template's
+# list: feat, fix, docs, refactor, chore, ci, test, perf, build, example, release, rename, revert,
+# style. The scope is optional and free-form, because the useful ones here are directories --
+# query, rest, core, tests, example.
+#
+# `release` is what `bun run version` commits, and `revert` is what `git revert` writes; both are
+# allowed so neither needs --no-verify.
+set -euo pipefail
+
+msg_file="$1"
+# The first line that is neither blank nor a comment: `git commit` templates start with comments,
+# and a `-m` message starts at line 1.
+subject="$(grep -vE '^\s*(#|$)' "$msg_file" | head -1)"
+
+# Merges and fixups are written by git, not by hand.
+case "$subject" in
+  "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+esac
+
+types='feat|fix|docs|refactor|chore|ci|test|perf|build|example|release|rename|revert|style'
+
+fail() {
+  echo "commit-msg: $1" >&2
+  echo >&2
+  echo "  got:      $subject" >&2
+  echo "  expected: <type>(<scope>)!: <subject>" >&2
+  echo "  types:    ${types//|/, }" >&2
+  echo >&2
+  echo "  e.g.  feat(query): accept a JSON path in a typed where" >&2
+  echo "        fix: validate order nulls" >&2
+  echo "        refactor(tests)!: move each suite into its package" >&2
+  echo >&2
+  echo "  (git commit --no-verify skips this)" >&2
+  exit 1
+}
+
+[ -n "$subject" ] && [[ ! "$subject" =~ ^[[:space:]]*$ ]] || fail "the message is empty"
+
+if [[ ! "$subject" =~ ^($types)(\([a-z0-9,/-]+\))?!?:[[:space:]] ]]; then
+  # A plausible type spelled wrong is worth saying out loud, since that is the common mistake.
+  head="${subject%%:*}"
+  if [[ "$subject" == *:* ]] && [[ ! "$head" =~ ^($types) ]]; then
+    fail "\"${head}\" is not one of the types"
+  fi
+  fail "the subject does not start with a type"
+fi
+
+body="${subject#*: }"
+[ -n "$body" ] || fail "the subject is only a type"
+[[ ! "$body" =~ ^[A-Z][a-z] ]] || fail "the subject starts with a capital; these read as lowercase sentences"
+[[ ! "$body" =~ \.$ ]] || fail "the subject ends with a full stop"
+
+# 72, which is p90 of this history (median 57). A longer thought belongs in the body, where it wraps
+# and where `git log --oneline` does not cut it off.
+if [ "${#subject}" -gt 72 ]; then
+  fail "the subject is ${#subject} characters; keep it to 72 and put the rest in the body"
+fi

@@ -50,6 +50,30 @@ jobs:
               - *core
               - 'packages/rest/**'
 
+  # A change to a package's `src` or manifest has to say what it means for the next release. The
+  # gate is `changeset status`, with `changedFilePatterns` in .changeset/config.json keeping it off
+  # the changes that need nothing -- a test, a doc, a workflow. `changeset add --empty` is the
+  # escape hatch, and it is recorded rather than silent.
+  #
+  # Pull requests only: a release commit consumes its changesets, so on main there are none left.
+  changeset:
+    name: Changeset
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # `--since` needs the base branch, not just this commit
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      # the summaries carry the conventional type the released notes are grouped by
+      - run: bun run check:changesets
+      - name: A changeset is required for a change to a package
+        run: bunx changeset status --since=origin/${{ github.base_ref }}
+
   core:
     needs: changes
     if: needs.changes.outputs.core == 'true' || needs.changes.outputs.shared == 'true'

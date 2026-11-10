@@ -11,3 +11,10 @@ staged="$(git diff --cached --name-only)"
 if grep -qE '^(package\.json|packages/[^/]+/package\.json|examples/[^/]+/package\.json)$' <<<"$staged"; then
   bun run scripts/check-example-versions.ts
 fi
+
+# A changeset is read by `changeset version` months later, and a bad one is only found then -- a
+# summary with no type leaves the released notes ungrouped, and a package that is not in the
+# workspace stops the release outright. Both are free to catch here.
+if grep -qE '^\.changeset/.+\.md$' <<<"$staged"; then
+  bun run scripts/check-changesets.ts
+fi
