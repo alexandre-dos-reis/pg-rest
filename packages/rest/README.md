@@ -14,7 +14,7 @@ pnpm i @tspg/rest pg
 bun add @tspg/rest # Bun.sql is built in
 ```
 
-We also support other adapters, like PGlite and node-postgres.
+We also support other postgres adapters, like PGlite and postgres-js.
 
 ```ts
 import pg from "pg";

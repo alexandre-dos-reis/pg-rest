@@ -1,12 +1,14 @@
 # Types generated from the database
 
-`generateModule()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands its types to
-the operations so the queries check themselves. The module also carries the **schema descriptor** `createQuery` runs on, so
-the types and what the library does come from one read of `pg_catalog`, with no second source of truth to drift — and
-a running server never reads the catalog at all.
+`generateTypes()` writes a TypeScript module describing your schema, and `createQuery<Database>` hands its types to
+the operations so the queries check themselves. The types come from one read of `pg_catalog`, with no second source of
+truth to drift.
 
-The checking is the compiler's and nothing else: the descriptor is trusted as generated, and no query is validated
-against it at runtime, which keeps the operations fast.
+This is `@tspg/query` only: **`@tspg/rest` needs nothing generated.** A request arrives as text and is answered as text,
+so there is no type to give it; `createRest` reads the catalog at start-up and `reloadSchema()` reads it again.
+
+The checking is the compiler's and nothing else: no query is validated against the types at runtime, which keeps the
+operations fast.
 
 - [Generating](#generating)
 - [What the file contains](#what-the-file-contains)
@@ -17,28 +19,31 @@ against it at runtime, which keeps the operations fast.
 
 ## Generating
 
+One call, on the options `createQuery` itself takes:
+
 ```ts
 // scripts/gen-types.ts — run it again after a migration
 import { writeFileSync } from "node:fs";
-import { generateModule } from "@tspg/query/types";
+import { generateTypes } from "@tspg/query/types";
 
-writeFileSync("src/db.generated.ts", await generateModule(options, { name: "Database" }));
+// options is what createQuery takes: { db: nodePostgresAdapter(pool), schemas: ["api"] }
+writeFileSync("src/db.generated.ts", await generateTypes(options, { name: "Database" }));
 ```
 
-The file exports the type `Database` and the descriptor `schema`, and `createQuery<Database>({ db, schema })` takes both.
-No CLI and no second database connection: you already have a driver. This is build-time code, which a server that only
-serves queries never loads.
+The generator reads the catalog itself, through those options, so there is one call to make and no chance of generating
+for schemas the instance does not expose. No CLI and no second database connection: you already have a driver. This is
+build-time code, which a server that only serves queries never loads.
 
-Each generator takes the options `createQuery` takes and reads the catalog itself, so a script has one call to make and
-no chance of generating for schemas the instance does not expose. `generateTypes(options)` gives the types alone and
-`generateSchema(options)` the descriptor alone, for when they go in different files; `introspect(options)` gives the
-cache, which the three also accept in place of the options when one script writes several modules from one read.
+The file exports the type `Database`, and `createQuery<Database>(options)` takes it as its type argument — the same
+options object, which then reads the catalog once, on its first query.
 
-The descriptor is optional — `createQuery<Database>({ db, schemas: ["api"] })` reads the catalog itself, once, on its
-first query. The queries are typed exactly the same, since `Database` is a type argument and types never reach runtime;
-what you give up is the guarantee that nothing is read at runtime and that the types and the library cannot disagree.
-With `generateTypes` alone, that is the whole setup: one generated type, no descriptor to pass. See
-[`options.md`](options.md).
+**To read the catalog never**, use `generateModule(options)`: the same types plus a **schema descriptor**, the cache as
+plain data. `createQuery<Database>({ db, schema })` runs on that descriptor and reads nothing — not at start-up, not
+after — which is what a cold start on a serverless runtime, or a role without catalog permissions, wants. The descriptor
+is trusted as generated: regenerate it after a migration, since nothing checks it against the live database.
+`generateSchema(options)` writes it alone, for when the two go in different files, and `introspect(options)` gives the
+cache the three generators also accept in place of the options, for a script writing several modules from one read. The
+options are in [`options.md`](options.md).
 
 | option | |
 | --- | --- |
