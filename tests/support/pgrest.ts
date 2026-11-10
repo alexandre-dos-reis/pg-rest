@@ -1,5 +1,5 @@
 // The two entry points side by side, for tests that exercise both on one database.
-// `@tsql/rest` and `@tsql/query` are separate packages; this is what an app that uses both writes.
+// `@tspg/rest` and `@tspg/query` are separate packages; this is what an app that uses both writes.
 import {
   createQuery,
   type AnyDatabase,

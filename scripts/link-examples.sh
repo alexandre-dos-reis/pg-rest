@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Point the examples at the local build instead of the published @tsql/rest and @tsql/query, without committing anything local
+# Point the examples at the local build instead of the published @tspg/rest and @tspg/query, without committing anything local
 # (so check-example-versions.ts stays happy).
 #   scripts/link-examples.sh                      all examples
 #   scripts/link-examples.sh with-better-auth     just one (or rest/with-better-auth)
 #   scripts/link-examples.sh --unlink             back to the version in package.json
 #
 # The examples depend on the packages by version, and that version is usually not on the registry yet, so a plain
-# `bun install` would 404 before it ever got to `bun link`. The other dependencies are installed with the @tsql
+# `bun install` would 404 before it ever got to `bun link`. The other dependencies are installed with the @tspg
 # packages held out of package.json, which is then put straight back.
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 
-# The packages an example uses are the @tsql/* entries of its dependencies: the handlers use @tsql/rest, the
-# query examples @tsql/query. Each one is a directory under packages/ (the name after the scope).
-scoped() { node -p 'Object.keys(require(require("path").resolve(process.argv[1])).dependencies ?? {}).filter((d) => d.startsWith("@tsql/")).join(" ")' "$1/package.json"; }
+# The packages an example uses are the @tspg/* entries of its dependencies: the handlers use @tspg/rest, the
+# query examples @tspg/query. Each one is a directory under packages/ (the name after the scope).
+scoped() { node -p 'Object.keys(require(require("path").resolve(process.argv[1])).dependencies ?? {}).filter((d) => d.startsWith("@tspg/")).join(" ")' "$1/package.json"; }
 
 unlink=0
 if [ "${1:-}" = "--unlink" ]; then unlink=1; shift; fi
@@ -29,7 +29,7 @@ done
 if [ "$unlink" = 0 ]; then
   bun run build >/dev/null   # the examples import ./dist, so it has to exist
   for pkgdir in packages/rest packages/query; do
-    (cd "$pkgdir" && bun link >/dev/null)   # register "@tsql/rest" and "@tsql/query" once, globally
+    (cd "$pkgdir" && bun link >/dev/null)   # register "@tspg/rest" and "@tspg/query" once, globally
   done
 fi
 

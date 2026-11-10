@@ -4,7 +4,7 @@ import { toParsed } from "../packages/query/src/query";
 import { parseQuery } from "../packages/rest/src/parse/query-string";
 import { toParams } from "./support/render";
 
-/** What `@tsql/rest` reads from the query string the input stands for. */
+/** What `@tspg/rest` reads from the query string the input stands for. */
 const viaString = (input: QueryInput) => parseQuery(toParams(input));
 
 // `toParsed` builds the parsed form from the object. For everything a query string can say, it must be

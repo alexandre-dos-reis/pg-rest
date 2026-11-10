@@ -1,6 +1,6 @@
 # Queries — asking in-process
 
-`@tsql/query` asks Postgres from inside your process: `select`, `insert`, `upsert`, `update`, `delete` and `rpc` each take a plain object and answer a result, with no
+`@tspg/query` asks Postgres from inside your process: `select`, `insert`, `upsert`, `update`, `delete` and `rpc` each take a plain object and answer a result, with no
 `Request`, no URL and no HTTP status in between. The method says what to do (`pgRest.insert({ table, rows })`); there is no `action` to write. One example per field below; the
 options of the instance itself are in [`options.md`](options.md), and the types the examples rely on in
 [`types.md`](types.md).
@@ -1054,7 +1054,7 @@ const { data, error } = await pgQuery.select({ table: "notes", columns: ["body"]
 
 ```ts ignore
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { RequestContext } from "@tsql/query";
+import type { RequestContext } from "@tspg/query";
 
 const store = new AsyncLocalStorage<RequestContext>();
 ```

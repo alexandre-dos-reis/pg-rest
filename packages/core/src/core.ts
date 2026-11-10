@@ -1,4 +1,4 @@
-import type { DbAdapter, DbSession } from "@tsql/adapters";
+import type { DbAdapter, DbSession } from "@tspg/adapters";
 import { DbQueryError, EngineError } from "./errors";
 import type { ParsedQuery } from "./parse/filter";
 import { OPERATORS_ORDER } from "./parse/syntax";
@@ -48,7 +48,7 @@ export interface SqlEnv {
 /**
  * What a transport adds to one call, and that the engine does not interpret: settings to `set_config`
  * after the identity, and something to run in the transaction before the statement. The `request.*`
- * settings and `preRequest` are built by the packages (`@tsql/rest` from the HTTP request, `@tsql/query`
+ * settings and `preRequest` are built by the packages (`@tspg/rest` from the HTTP request, `@tspg/query`
  * from its own options); the engine only issues them, in the transaction, in this order.
  */
 export interface SqlCall {
@@ -74,7 +74,7 @@ export interface SqlParseOptions {
 
 /**
  * The parameters of a call, plus the way to read them. The engine knows no syntax: `parse` gives
- * it the {@link ParsedQuery} -- `@tsql/rest` parses the query string, `@tsql/query` builds it from its
+ * it the {@link ParsedQuery} -- `@tspg/rest` parses the query string, `@tspg/query` builds it from its
  * object. `params` and `bare` are only what a GET on a function reads its arguments from.
  */
 export interface SqlQueryParams {
@@ -84,13 +84,13 @@ export interface SqlQueryParams {
   /**
    * Pass the values of the filters to the driver as parameters instead of writing them into the SQL.
    * The text of the statement then depends on the shape of the query only, which is what lets the
-   * driver and the server reuse it. `@tsql/query` does; HTTP keeps the literals it always had.
+   * driver and the server reuse it. `@tspg/query` does; HTTP keeps the literals it always had.
    */
   readonly bind?: boolean | undefined;
   /**
    * Settings (`current_setting(name, true)`) to read once the statement is done, so that a function that
    * `set_config`ed one can be heard: they come back, in this order, as {@link Result.settings}. The
-   * engine does not say what they mean. `@tsql/rest` reads the two PostgREST's functions answer with.
+   * engine does not say what they mean. `@tspg/rest` reads the two PostgREST's functions answer with.
    */
   readonly read?: ReadonlyArray<string> | undefined;
   /**

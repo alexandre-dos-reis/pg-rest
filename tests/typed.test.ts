@@ -279,7 +279,10 @@ describe.skipIf(!hasDb)("a typed instance", () => {
     expect(asked.data).toHaveLength(1);
 
     const upserted = ok(
-      await pgRest.upsert({ table: "clients", rows: { id: one.data.id, name: "Upserted" }, returning: ["name"] }, authed),
+      await pgRest.upsert(
+        { table: "clients", rows: { id: one.data.id, name: "Upserted" }, returning: ["name"] },
+        authed,
+      ),
     );
     assertType<Equal<typeof upserted.data, { name: string }>>();
     expect(upserted.data.name).toBe("Upserted");

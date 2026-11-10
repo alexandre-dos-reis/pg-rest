@@ -1,5 +1,5 @@
-import { EngineError } from "@tsql/core/errors";
-import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "@tsql/core/parse/field";
+import { EngineError } from "@tspg/core/errors";
+import { type FieldRef, parseError, parseField, splitTopLevel, unquote } from "@tspg/core/parse/field";
 import {
   type Filter,
   type FilterNode,
@@ -12,13 +12,13 @@ import {
   parseCount,
   parseOrderTerms,
   walkEmbeds,
-} from "@tsql/core/parse/filter";
-import { type SelectItem, parseSelect } from "@tsql/core/parse/select";
-import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER, scanList } from "@tsql/core/parse/syntax";
+} from "@tspg/core/parse/filter";
+import { type SelectItem, parseSelect } from "@tspg/core/parse/select";
+import { FTS_ORDER, IS_VALUES_ORDER, OPERATORS_ORDER, QUANTIFIABLE_ORDER, scanList } from "@tspg/core/parse/syntax";
 import { checkFieldList, checkFilter, checkLogicTree, checkOrder, checkSelect, checkTreePath } from "./grammar";
 
 // What PostgREST reads from a query string, parsed with the grammars of `grammar.ts`. The result is
-// the engine's own `ParsedQuery`; `@tsql/query` builds the same thing from an object and never comes here.
+// the engine's own `ParsedQuery`; `@tspg/query` builds the same thing from an object and never comes here.
 
 const OPERATORS: ReadonlySet<string> = new Set(OPERATORS_ORDER);
 const QUANTIFIABLE: ReadonlySet<string> = new Set(QUANTIFIABLE_ORDER);

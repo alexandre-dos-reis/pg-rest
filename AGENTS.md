@@ -1,27 +1,27 @@
 # AGENTS.md
 
-Guide for coding agents working on **tsql**: a monorepo of `@tsql/rest` (a PostgREST v16-compatible REST layer shipped as a library) and `@tsql/query` (the same engine in-process, typed, with extensions PostgREST does not have).
+Guide for coding agents working on **tspg**: a monorepo of `@tspg/rest` (a PostgREST v16-compatible REST layer shipped as a library) and `@tspg/query` (the same engine in-process, typed, with extensions PostgREST does not have).
 Before changing behaviour, read `PARITY.md` for what is and isn't implemented, `docs/design.md` for what is out of
 scope on purpose, and `docs/architecture.md` for how a request becomes SQL. `README.md` is deliberately short: the
 reference lives in `docs/`.
 
 ## What this is
 
-- **Three packages under `packages/`.** `@tsql/rest` (`createRest` -> `handle(Request) => Response`) and `@tsql/query`
-  (`createQuery` -> `select()`/`insert()`/`upsert()`/`update()`/`delete()`/`rpc()`, `transaction()`, `setContextQuery()`, `generateTypes()`) are published. `@tsql/core` is
+- **Three packages under `packages/`.** `@tspg/rest` (`createRest` -> `handle(Request) => Response`) and `@tspg/query`
+  (`createQuery` -> `select()`/`insert()`/`upsert()`/`update()`/`delete()`/`rpc()`, `transaction()`, `setContextQuery()`, `generateTypes()`) are published. `@tspg/core` is
   **private**: parsing, planning, SQL, the schema cache, errors and the adapters, bundled by tsdown into each published
   package (it is a `devDependency` on purpose -- tsdown only externalises `dependencies`). The import direction is
-  one way: `rest` and `query` import `@tsql/core/*`, never each other, and `core` imports neither. Never add a
-  dependency on `@tsql/core` under `dependencies`, and never import `rest` from `query` or the reverse.
-- **Parity belongs to `@tsql/rest`.** Anything that is not PostgREST -- the `$` filters, the computed `set`, the typed layer --
-  is `@tsql/query` only, and must not change what `handle()` does (`tests/compare` pins that against a real PostgREST).
+  one way: `rest` and `query` import `@tspg/core/*`, never each other, and `core` imports neither. Never add a
+  dependency on `@tspg/core` under `dependencies`, and never import `rest` from `query` or the reverse.
+- **Parity belongs to `@tspg/rest`.** Anything that is not PostgREST -- the `$` filters, the computed `set`, the typed layer --
+  is `@tspg/query` only, and must not change what `handle()` does (`tests/compare` pins that against a real PostgREST).
   HTTP-only settings (`basePath`, `allowTxOverride`, `planEnabled`, `openApi`, `serverUrl`) are `HttpConfig`, in `rest`.
 - Each package keeps its own schema cache: an app that uses both creates both. `tests/support/pgrest.ts` is the test-only
   `createPgRest` that composes the two on one database.
 
-- Two entry points over **one** pipeline (in `@tsql/core`): `handle(Request) => Response` and
+- Two entry points over **one** pipeline (in `@tspg/core`): `handle(Request) => Response` and
   `select(object)`, `insert(object)`... `=> { data, count, status, error }`. Neither rejects: a failure is a response, or the `error` of a result.
-  The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tsql/query`), so planning, SQL, `set_config` and error
+  The object is built into the `ParsedQuery` that `rest`'s `parseQuery` produces from a query string (no text in between, no grammar in `@tspg/query`), so planning, SQL, `set_config` and error
   mapping are shared; only the HTTP envelope (content negotiation, `Range`, plans, OpenAPI) is `handle`-only. Never fork
   that pipeline: a feature added to one entry point must come from the shared code, and `tests/query.test.ts` pins that the
   two answer identically, error bodies included.
@@ -38,18 +38,18 @@ reference lives in `docs/`.
 
 | Path | What |
 | --- | --- |
-| `packages/rest/src/index.ts` | `@tsql/rest`: `createRest`, `RestOptions`, the HTTP-only settings |
+| `packages/rest/src/index.ts` | `@tspg/rest`: `createRest`, `RestOptions`, the HTTP-only settings |
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, OpenAPI root, plans, cookies and headers for SQL, the `Response` (`HttpConfig`) |
 | `packages/rest/src/outcome.ts` | the `SqlResult` of the engine turned into status, `Content-Range`, `Location`, `Preference-Applied`; the `response.*` settings |
 | `packages/rest/src/request.ts` | reading HTTP: method, path, `Prefer`, `Range`, `Accept`, the body |
 | `packages/rest/src/render.ts` | the SQL of CSV, GeoJSON and media type handlers; the engine only knows `SqlOutputFormat` (`json`, `object`, or `rendered` by SQL it is given) |
 | `packages/rest/src/serve.ts`, `media.ts`, `openapi.ts` | `handleSafely`/`errorResponse`, custom media types, the OpenAPI document |
-| `packages/query/src/index.ts` | `@tsql/query`: `createQuery`, `QueryInstance`, the public types |
+| `packages/query/src/index.ts` | `@tspg/query`: `createQuery`, `QueryInstance`, the public types |
 | `packages/query/src/query.ts` | the six operations over one `runQuery(input)`: the object API, in-process, no `Request` (see below) |
 | `packages/query/src/kinds.ts` | `ErrorKind` and `describeFailure`: how an `EngineError` (by `reason`) or a `DbQueryError` (by SQLSTATE) becomes the `kind` of a `QueryError` |
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → PostgREST status and `PGRSTxxx` code table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions, `toApiError` |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
-| `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tsql/query/types` |
+| `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tspg/query/types` |
 | `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns a `SqlResult`: body, rows, total), the transaction setup: shared by `handle` and the operations. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `SqlCall` (`settings`, `before`) |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
 | `packages/core/src/parse/*` | the engine's input (`ParsedQuery`) and the hand-written readers of columns, select items, order terms; no grammar |
@@ -62,11 +62,11 @@ reference lives in `docs/`.
 | `packages/core/src/service.ts` | schema store (serialized reload), error mapping |
 | `packages/core/src/errors.ts` | `EngineError` (a `reason`, no code and no status), `DbQueryError`, `normalizeDbError` (maps SQLSTATE), `isConnectionError` |
 | `packages/core/src/quote.ts` | identifier/literal quoting: all SQL identifiers go through it |
-| `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tsql/rest/adapters/*` and `@tsql/query/adapters/*`) |
+| `packages/core/src/adapters/*` | bun, node-postgres, postgres-js, pglite (published as `@tspg/rest/adapters/*` and `@tspg/query/adapters/*`) |
 | `tests/` | `bun test` suites, importing the packages' sources; `tests/support` has the fixture schema (`fixture.sql`) and helpers, and `pgrest.ts`, which composes `createRest` and `createQuery` |
 | `tests/support/fixture.types.ts` | `generateTypes` output for the fixture, committed: `tests/types.test.ts` pins it byte-for-byte and `typecheck` proves it compiles. Regenerate it when the fixture or the generator changes; it is in `.oxfmtrc.json`'s ignore list so the formatter cannot rewrite generated output |
 | `tests/compare/` | differential tests against a real PostgREST 16 binary |
-| `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tsql/rest`, `@tsql/query`), each with its own `package.json` |
+| `examples/rest/with-*`, `examples/query/with-*` | independent runnable examples, one folder per package (`@tspg/rest`, `@tspg/query`), each with its own `package.json` |
 | `bench/` | load tests vs PostgREST (see `bench/README.md`) |
 | `scripts/` | `check-example.sh` (end-to-end check of an example), `node-smoke.ts`, `check-example-versions.ts`, `link-examples.sh`, `githooks/pre-commit` |
 | `mise.toml` | the pinned PostgREST binary, and the tasks that run a Postgres 16 + PostGIS cluster |
@@ -96,7 +96,7 @@ bun run link:examples  # point the examples at the local build, without touching
   PostgREST all along while `PARITY.md` still listed eight differences as open. `mise run db:start` provides it (PostGIS 3.5); CI uses `postgis/postgis:16-3.6`.
 - The comparison tests are skipped without `POSTGREST_BIN` (a PostgREST **v16.5** static binary; `mise install` fetches it, CI downloads the same
   release). Run them whenever you touch parsing, SQL generation, error codes or response headers.
-- Examples depend on `@tsql/rest` or `@tsql/query` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
+- Examples depend on `@tspg/rest` or `@tspg/query` by version, like a real project, so `bun install` inside one cannot resolve it until that version is published.
   Use `bun run link:examples [name]`. `bun run version` moves them onto each new release, and `scripts/githooks/pre-commit` (wired up by the
   `prepare` script on `bun install`) refuses a commit that leaves them out of step with the root `package.json`.
 - CI (`.github/workflows/ci.yml`): typecheck + build + tests on PostgreSQL 16, a Node job (`scripts/node-smoke.ts` against the built `packages/*/dist`),
@@ -121,7 +121,7 @@ A change with nothing to release (tests, docs, CI) needs no changeset.
 
 There is **no npm token**: publishing authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers),
 where the npm CLI exchanges the workflow's OIDC token for a short-lived credential — hence `id-token: write`, and hence no
-`NODE_AUTH_TOKEN` (it would take precedence and defeat it). Configure it once at *npmjs.com → Packages → @tsql/rest and @tsql/query → Settings
+`NODE_AUTH_TOKEN` (it would take precedence and defeat it). Configure it once at *npmjs.com → Packages → @tspg/rest and @tspg/query → Settings
 → Trusted publishing*, naming `release.yml`; a new configuration expires if its first publish does not happen within 2 days.
 Releases carry provenance, so they are attested to the workflow that built them.
 
@@ -139,9 +139,9 @@ Releases carry provenance, so they are attested to the workflow that built them.
 - **SQL safety.** Values are passed as parameters (only `text` params, each cast explicitly in SQL, e.g. `$1::text`) so adapters need no type
   inference. Identifiers go through `packages/core/src/quote.ts`. Never interpolate request data into SQL. `tests/security.test.ts` covers this; extend it.
 - **Errors.** The core has no codes and no statuses: it throws `EngineError(reason, message, details, hint)`, and each
-  package consumes it on its own. `@tsql/rest` maps a `reason` to PostgREST's status and `PGRSTxxx` code (`REASONS` in
+  package consumes it on its own. `@tspg/rest` maps a `reason` to PostgREST's status and `PGRSTxxx` code (`REASONS` in
   `packages/rest/src/errors.ts`) and answers an `ApiError` whose `body` is the wire format and must stay exactly PostgREST's.
-  `@tsql/query` maps it to a `kind` (`REASON_KINDS` in `packages/query/src/kinds.ts`) and returns a `QueryError` of its own
+  `@tspg/query` maps it to a `kind` (`REASON_KINDS` in `packages/query/src/kinds.ts`) and returns a `QueryError` of its own
   -- `kind`, `message`, `details`, `hint`, the `sqlState` of a database error, the input and a `summary` -- as the `error`
   of its result; it never throws. `packages/query/src` must not mention PostgREST, `PGRSTxxx` codes, `ApiError` or HTTP
   statuses. A new failure in the core is a new `Reason`, with an entry in both tables (TypeScript enforces it); adding a

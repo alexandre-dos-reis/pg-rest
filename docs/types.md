@@ -20,7 +20,7 @@ against it at runtime, which keeps the operations fast.
 ```ts
 // scripts/gen-types.ts — run it again after a migration
 import { writeFileSync } from "node:fs";
-import { generateModule, introspect } from "@tsql/query/types";
+import { generateModule, introspect } from "@tspg/query/types";
 
 const cache = await introspect(nodePostgresAdapter(pool), ["api"]);
 writeFileSync("src/db.generated.ts", generateModule(cache, { name: "Database" }));
@@ -148,7 +148,7 @@ soon as one is given explicitly, so `query<Database>({ … })` would check the i
 measured both ways before settling on this shape.
 
 An instance created **without** a type argument keeps the loose input and `query<Todo[]>(…)` to name the result
-yourself, which is the escape hatch for everything below. `handle()` of `@tsql/rest` has no such type: an HTTP request is a
+yourself, which is the escape hatch for everything below. `handle()` of `@tspg/rest` has no such type: an HTTP request is a
 string from outside and cannot be typed.
 
 ## In your editor

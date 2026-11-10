@@ -1,6 +1,6 @@
 import { PgRestError } from "./errors";
-import { parseError } from "@tsql/core/parse/field";
-import type { SqlPreferences } from "@tsql/core/parse/sql-options";
+import { parseError } from "@tspg/core/parse/field";
+import type { SqlPreferences } from "@tspg/core/parse/sql-options";
 
 export type Method = "GET" | "HEAD" | "POST" | "PATCH" | "PUT" | "DELETE" | "OPTIONS";
 

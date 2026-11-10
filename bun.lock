@@ -22,22 +22,22 @@
       },
     },
     "packages/adapters": {
-      "name": "@tsql/adapters",
+      "name": "@tspg/adapters",
       "version": "0.0.0",
     },
     "packages/core": {
-      "name": "@tsql/core",
+      "name": "@tspg/core",
       "version": "0.0.0",
       "devDependencies": {
-        "@tsql/adapters": "workspace:*",
+        "@tspg/adapters": "workspace:*",
       },
     },
     "packages/query": {
-      "name": "@tsql/query",
+      "name": "@tspg/query",
       "version": "0.1.0",
       "devDependencies": {
-        "@tsql/adapters": "workspace:*",
-        "@tsql/core": "workspace:*",
+        "@tspg/adapters": "workspace:*",
+        "@tspg/core": "workspace:*",
       },
       "peerDependencies": {
         "@electric-sql/pglite": ">=0.2.0",
@@ -51,11 +51,11 @@
       ],
     },
     "packages/rest": {
-      "name": "@tsql/rest",
+      "name": "@tspg/rest",
       "version": "0.1.0",
       "devDependencies": {
-        "@tsql/adapters": "workspace:*",
-        "@tsql/core": "workspace:*",
+        "@tspg/adapters": "workspace:*",
+        "@tspg/core": "workspace:*",
       },
       "peerDependencies": {
         "@electric-sql/pglite": ">=0.2.0",
@@ -248,13 +248,13 @@
 
     "@supabase/postgrest-js": ["@supabase/postgrest-js@2.119.0", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-qBmcjEFO7Ptyf5qvOXYJa1s4bfA4zsMIFf2i+h2zd6RRTDLwquX8z1mnS9djNOJjbiO1OGFh5Y2Lc2k2pA8TMw=="],
 
-    "@tsql/adapters": ["@tsql/adapters@workspace:packages/adapters"],
+    "@tspg/adapters": ["@tspg/adapters@workspace:packages/adapters"],
 
-    "@tsql/core": ["@tsql/core@workspace:packages/core"],
+    "@tspg/core": ["@tspg/core@workspace:packages/core"],
 
-    "@tsql/query": ["@tsql/query@workspace:packages/query"],
+    "@tspg/query": ["@tspg/query@workspace:packages/query"],
 
-    "@tsql/rest": ["@tsql/rest@workspace:packages/rest"],
+    "@tspg/rest": ["@tspg/rest@workspace:packages/rest"],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.4", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A=="],
 

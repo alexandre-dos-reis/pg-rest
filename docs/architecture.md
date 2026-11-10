@@ -1,10 +1,10 @@
 # Architecture
 
-Two packages, one core. `@tsql/rest`'s `handle()` is the HTTP front door; `@tsql/query`'s operations (`select`, `insert`...) take an object.
+Two packages, one core. `@tspg/rest`'s `handle()` is the HTTP front door; `@tspg/query`'s operations (`select`, `insert`...) take an object.
 They meet as soon as the query parameters exist and share everything after that — parsing, planning, SQL, the
 transaction, the error mapping — which lives in `packages/core`, a private package that each of the two bundles. A
 feature or a fix in the core lands in both; what is only HTTP (content negotiation, `Range`, OpenAPI, plans) never
-reaches `@tsql/query`, and what is only an extension of PostgREST never reaches `@tsql/rest`.
+reaches `@tspg/query`, and what is only an extension of PostgREST never reaches `@tspg/rest`.
 
 ```
    rest:  [key, value][] ──▶ parseQuery (grammars) ─┐
@@ -22,12 +22,12 @@ reaches `@tsql/query`, and what is only an extension of PostgREST never reaches 
 ## How each package consumes the core
 
 The core is a library of steps with no front door of its own: it knows nothing of `Request`, `Response`, cookies or a
-status code, and it holds no PostgREST error code. Each package imports the steps it needs (`@tsql/core/*`, resolved to
+status code, and it holds no PostgREST error code. Each package imports the steps it needs (`@tspg/core/*`, resolved to
 `packages/core/src` and bundled by `tsdown`), feeds them in its own terms, and turns what comes out back into its own.
 `rest` and `query` never import each other.
 
 ```
-        @tsql/rest                         packages/core                         @tsql/query
+        @tspg/rest                         packages/core                         @tspg/query
  ┌─────────────────────┐        ┌──────────────────────────────┐        ┌─────────────────────┐
  │ Request             │        │                              │        │ a query object      │
  │  └ http.ts, request │        │  ParsedQuery (the IR)        │        │  └ query.ts         │
@@ -43,7 +43,7 @@ status code, and it holds no PostgREST error code. Each package imports the step
 
 What each side hands the core, and what it takes back:
 
-| | `@tsql/rest` | `@tsql/query` |
+| | `@tspg/rest` | `@tspg/query` |
 | --- | --- | --- |
 | **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
 | **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
@@ -63,16 +63,16 @@ builds its own.
 
 A naming rule keeps the core readable as SQL, not HTTP: a type of the core that a transport could mistake for its own
 carries a `Sql` prefix (`SqlRequestContext`, `SqlQueryParams`, `SqlCall`, `SqlResult`, `SqlPlan`, `SqlEnv`, `SqlOperation`,
-`SqlPreferences`, `SqlOutputFormat`). The packages keep their public names: `@tsql/rest` and `@tsql/query` export
+`SqlPreferences`, `SqlOutputFormat`). The packages keep their public names: `@tspg/rest` and `@tspg/query` export
 `SqlRequestContext` as `RequestContext`.
 
 ## A request, step by step
 
-1. **Route and negotiate** (`handleRequest`, in `@tsql/rest`). The method, the path (minus `basePath`) and the headers decide the
+1. **Route and negotiate** (`handleRequest`, in `@tspg/rest`). The method, the path (minus `basePath`) and the headers decide the
    target (`/table`, `/rpc/fn`, or the OpenAPI root), the schema (`Accept-Profile` / `Content-Profile`), the
    preferences (`Prefer`), the output format (`Accept`, including CSV, GeoJSON, custom media types and plans) and the
    range. The body is parsed for a write.
-2. **Parse the query** (`rest/src/parse/*`). `parseQuery` turns the query parameters into a `ParsedQuery` (the engine's own input, defined in `core/src/parse/filter.ts`; `@tsql/query` builds one from its object instead): a `select` tree
+2. **Parse the query** (`rest/src/parse/*`). `parseQuery` turns the query parameters into a `ParsedQuery` (the engine's own input, defined in `core/src/parse/filter.ts`; `@tspg/query` builds one from its object instead): a `select` tree
    (columns, aliases, casts, JSON paths, aggregates, embedded resources with their hints and join type), the filters as
    a tree, order, paging, `on_conflict` and `columns`. The grammars follow PostgREST's Parsec ones, including where they
    stop and ignore the rest of a malformed value.
@@ -96,16 +96,16 @@ carries a `Sql` prefix (`SqlRequestContext`, `SqlQueryParams`, `SqlCall`, `SqlRe
    (`total`, per `Preferences.count`), the settings the plan asked to read afterwards (`settings`) and whether an upsert
    inserted nothing (`noneInserted`). Nothing is parsed and nothing is HTTP. `range_not_satisfiable` is raised here,
    since it is about the offset and the count.
-6. **Outcome** (`rest/src/outcome.ts`, `buildOutcome`). `@tsql/rest` alone turns the `SqlResult` into PostgREST's answer: the
+6. **Outcome** (`rest/src/outcome.ts`, `buildOutcome`). `@tspg/rest` alone turns the `SqlResult` into PostgREST's answer: the
    status (`201`, `204`, `206`…), `Content-Range`, `Location`, `Preference-Applied`, the headers and status a function set
    through `response.headers` / `response.status` (it asks for those two settings with `SqlQueryParams.read`, and a malformed
    one is a `PgRestError`).
-7. **Dress it for the transport.** `@tsql/rest` adds what is only HTTP (`Content-Type` from the negotiated format,
+7. **Dress it for the transport.** `@tspg/rest` adds what is only HTTP (`Content-Type` from the negotiated format,
    `Vary`), drops the body where HTTP says there is none (`HEAD`, `204`) and makes the `Response`.
 
 The operations enter at step 2 with the `ParsedQuery` it builds from the object, builds the same plan, runs the same `execute`,
 and reads the `SqlResult` into `{ data, count, error }`: `count` is its `total`. The HTTP-only
-parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tsql/rest`'s.
+parts — content negotiation, `Range`, plans, `OPTIONS`, OpenAPI, cookies and request headers — are `@tspg/rest`'s.
 
 **What a transport adds to a call.** The engine does not know `preRequest` and does not know the `request.*` settings
 (`request.method`, `request.path`, `request.headers`, `request.cookies`: PostgREST's HTTP contract). `execute` takes a
@@ -126,7 +126,7 @@ unparsed tokens are `rest`'s `Prefer`), and no response: `Outcome`, `appliedHead
 
 | path | |
 | --- | --- |
-| `packages/rest/src/index.ts` | `@tsql/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
+| `packages/rest/src/index.ts` | `@tspg/rest`: `createRest` and its options; the instance gives `handle`, `schemaCache`, `reloadSchema`, `close` |
 | `packages/rest/src/http.ts` | `handleRequest`: routing, content negotiation, the `SqlCall` (`request.*` settings and `preRequest`), and the `Response` made out of an outcome; the HTTP-only settings |
 | `packages/rest/src/request.ts` | reading HTTP: the method, the path, `Prefer`, `Range`, `Accept` (the negotiated format), the body (JSON, form, CSV) |
 | `packages/rest/src/outcome.ts` | `Outcome`, `buildOutcome` (status, `Content-Range`, `Location`, `Preference-Applied`), the `response.*` settings, `appliedHeader` |
@@ -134,11 +134,11 @@ unparsed tokens are `rest`'s `Prefer`), and no response: `Outcome`, `appliedHead
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → status and `PGRSTxxx` table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions |
 | `packages/rest/src/serve.ts` | `handleSafely` and the error response |
 | `packages/rest/src/media.ts`, `openapi.ts` | custom media type handlers, and the Swagger 2.0 document |
-| `packages/query/src/index.ts` | `@tsql/query`: `createQuery` (on a generated `schema`) and the instance: `select`, `insert`, `upsert`, `update`, `delete`, `rpc`, `setContextQuery`, `transaction`, `close` |
+| `packages/query/src/index.ts` | `@tspg/query`: `createQuery` (on a generated `schema`) and the instance: `select`, `insert`, `upsert`, `update`, `delete`, `rpc`, `setContextQuery`, `transaction`, `close` |
 | `packages/query/src/query.ts` | the object API: `QueryInput` → `ParsedQuery`, the `SqlCall` (`preRequest`), prepared queries, `QueryError`, and the transaction scope |
 | `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries, and how an engine or database error becomes one |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
-| `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tsql/query/types` |
+| `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tspg/query/types` |
 | `packages/core/src/core.ts` | planning, the transaction (`execute`, which takes a `SqlCall` and returns a `SqlResult`), the identity (`identityOf`), the count: what both entry points run |
 | `packages/core/src/parse/sql-options.ts` | the types of a call, whatever carried it: `SqlOperation`, `SqlPreferences`, `SqlOutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
@@ -177,10 +177,10 @@ The core has no wire format. Its pure layers (parsers, planners, SQL builders) t
 `reason` — `table_not_found`, `not_single_row`, `invalid_input`… — with a message, details and a hint, and nothing
 else. Adapters' failures become `DbQueryError`, normalised by SQLSTATE from whatever the driver throws.
 
-Each package then consumes them on its own. `@tsql/rest`'s `toApiError` maps a reason to the PostgREST status and
+Each package then consumes them on its own. `@tspg/rest`'s `toApiError` maps a reason to the PostgREST status and
 `PGRSTxxx` code it answers with, a SQLSTATE to a status, and connection failures and unexpected errors to an
 `ApiError`: a status and a body shaped exactly like PostgREST's `{ code, message, details, hint }`, which `handle()`
-serialises into a response. `@tsql/query`'s `describeFailure` maps the same failures to a `kind` and hands over the
+serialises into a response. `@tspg/query`'s `describeFailure` maps the same failures to a `kind` and hands over the
 `message`, `details`, `hint` and SQLSTATE; `QueryError` puts them, with the input attached, in the `error` of its
 result. Neither is a rejection, and neither package knows the other's mapping.
 

@@ -1,4 +1,4 @@
-// Generated from the database catalog by @tsql/query. Do not edit.
+// Generated from the database catalog by @tspg/query. Do not edit.
 
 /** The `api.address` composite type. */
 type DatabasePgRestCompositeApiAddress = {

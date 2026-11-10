@@ -1,5 +1,5 @@
-// The query string an input stands for: what `query()` used to render and `@tsql/rest`'s parser read.
-// It is not part of `@tsql/query` any more -- the library builds the parsed form directly -- but it is
+// The query string an input stands for: what `query()` used to render and `@tspg/rest`'s parser read.
+// It is not part of `@tspg/query` any more -- the library builds the parsed form directly -- but it is
 // the oracle of `tests/query-direct.test.ts`, and the spelling `docs/query.md` explains each field with.
 import type {
   DeleteQuery,

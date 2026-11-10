@@ -16,7 +16,7 @@ Inside the request's transaction, pg-rest issues one statement that sets them wi
 | `role` | `ctx.role`, or `anonymousRole` when there is none |
 | `request.jwt.claims` | `ctx.claims`, with `role` merged in — what RLS policies read |
 | `search_path` | the selected schema, then `extraSearchPath` |
-| `request.method`, `request.path`, `request.headers`, `request.cookies` | the request (`requestSettings`, on by default). Set by `@tsql/rest` only: an in-process operation has no request and sets none of them |
+| `request.method`, `request.path`, `request.headers`, `request.cookies` | the request (`requestSettings`, on by default). Set by `@tspg/rest` only: an in-process operation has no request and sets none of them |
 | anything in `ctx.settings` | your own, names must contain a dot (`app.tenant_id`) |
 
 So a policy is written exactly as it would be behind PostgREST:
