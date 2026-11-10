@@ -56,7 +56,7 @@ reference lives in `docs/`.
 | `packages/query/src/kinds.ts` | `ErrorKind` and `describeFailure`: how an `EngineError` (by `reason`) or a `DbQueryError` (by SQLSTATE) becomes the `kind` of a `QueryError` |
 | `packages/rest/src/errors.ts` | `PgRestError`, `ApiError`, the `reason` → PostgREST status and `PGRSTxxx` code table, the SQLSTATE → status table, the `PT`/`PGRST` `RAISE` conventions, `toApiError` |
 | `packages/query/src/typed.ts` | types only: `createQuery<Db>` input and result inference over a generated database type |
-| `packages/query/src/types.ts` | `generateTypes(cache)`: TypeScript types from the catalog, published as `@tspg/query/types` |
+| `packages/query/src/types.ts` | `introspect(options)` and the generators (`generateTypes`, `generateSchema`, `generateModule`), each taking `createQuery`'s own options and reading the catalog itself, published as `@tspg/query/types` |
 | `packages/core/src/core.ts` | `planTable`/`planRpc`/`execute` (returns a `SqlResult`: body, rows, total), the transaction setup: shared by `handle` and the operations. Nothing in it reads or writes HTTP: `Response`, `Accept`, `Range`, cookies, the `request.*` settings and `preRequest` are the packages', handed to `execute` as a `SqlCall` (`settings`, `before`) |
 | `packages/core/src/engine.ts` | `createEngine(options)`: the adapter wrapper, the settings both share, the first schema read |
 | `packages/core/src/parse/*` | the engine's input (`ParsedQuery`) and the hand-written readers of columns, select items, order terms; no grammar |

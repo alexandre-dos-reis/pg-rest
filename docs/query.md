@@ -119,6 +119,11 @@ CREATE FUNCTION api.recent_orders(api.clients) RETURNS SETOF api.orders …;
 
 ## Getting an instance
 
+`schema` below is the descriptor generated at build time ([`types.md`](types.md)), which is what makes an instance read
+the catalog *never*. Leave it out and name the schemas instead — `createQuery({ db, schemas: ["api"] })` — and it reads
+the catalog itself, once, on its first operation, or on `ready()` if you want that round trip at start-up. Everything
+else on this page is the same either way; the options are in [`options.md`](options.md).
+
 Without a type argument, the input is loosely typed and you name the result yourself:
 
 ```ts

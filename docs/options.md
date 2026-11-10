@@ -61,12 +61,21 @@ Introspection runs here, so a connection or catalog problem surfaces at startup 
 | `select(input, ctx?)`, `insert`, `upsert`, `update`, `delete`, `rpc` | a request from an object, in-process: `{ data, count, error }`. Never reject → [`query.md`](query.md) |
 | `setContextQuery(source)` | the operations with the context decided once, read per call — an `AsyncLocalStorage`, for instance → [`query.md`](query.md#binding-it-once) |
 | `transaction(fn, ctx?)` | several queries in one transaction, the context applied once for all of it → [`query.md`](query.md#transactions) |
+| `ready()` | read the catalog now rather than on the first operation. Nothing to await when a `schema` was given |
 | `close()` | stop the instance. Your driver is left open |
 
-`createQuery` takes the schema as an option, `schema`, generated at build time by `@tspg/query/types` → [`types.md`](types.md).
-It never reads the catalog, so there is nothing to reload: after a migration, generate the module again. It is the one
-place `createQuery` differs from `createRest`, which reads the catalog itself and has `schemaCache()` and
-`reloadSchema()`.
+`createQuery` gets its schema in one of two ways, and `schemas` is the Postgres schemas either way:
+
+- **`schema`**, the descriptor generated at build time by `@tspg/query/types` → [`types.md`](types.md). The catalog is
+  never read, not at start-up and not while it runs, so there is nothing to reload: after a migration, generate the
+  module again. The schemas the descriptor lists are the exposed ones, and `schemas` is not needed.
+- **no `schema`**, and the catalog is read once, on the first operation (or on `ready()`), for the `schemas` given.
+  No codegen step, at the cost of that round trip and the catalog permissions it needs — and `createQuery<Database>`
+  types the queries the same either way, since a type argument never reaches runtime, so a `Database` that no longer
+  matches the live database becomes a runtime error instead of an impossibility.
+
+`prepare()` plans synchronously and so needs the schema in hand: on an instance with no descriptor, `await
+instance.ready()` before preparing.
 
 With a generated database type — `createQuery<Database>(options)` — the operations are typed by it and everything else is
 unchanged.
@@ -83,6 +92,8 @@ module for the query API:
 ```ts
 const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
+// or, with no generated descriptor, reading the catalog once on the first query:
+const live = createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 ```
 
 ## Errors

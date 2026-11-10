@@ -30,10 +30,10 @@ try {
   };
   // the two packages, each built on its own: an app that uses both creates both
   const rest = await createRest(options);
-  // query runs on a generated descriptor: the catalog is read here, at "build time", by the built generator
-  const { introspect, generateModule, generateSchema } = await import("../packages/query/dist/types.js");
-  const cache = await introspect(options.db, ["api"]);
-  const schemaModule = generateSchema(cache);
+  // query runs on a generated descriptor: the catalog is read here, at "build time", by the built
+  // generator -- one call on the same options, which is all a generator script does
+  const { generateModule, generateSchema } = await import("../packages/query/dist/types.js");
+  const schemaModule = await generateSchema(options);
   const schema = JSON.parse(schemaModule.slice(schemaModule.indexOf("= ") + 2, schemaModule.lastIndexOf(";")));
   const { schemas: _schemas, ...queryOptions } = options;
   const api = { ...createQuery({ ...queryOptions, schema }), handle: rest.handle };
@@ -80,7 +80,7 @@ try {
   assert.equal(rows.error, null);
 
   // the generator is plain text, with the types and the descriptor in one module
-  const generated = generateModule(cache, { name: "Db" });
+  const generated = await generateModule(options, { name: "Db" });
   assert.match(generated, /export type Db = \{/);
   assert.match(generated, /name: string;/);
   assert.match(generated, /export const schema: SchemaDescriptor = /);

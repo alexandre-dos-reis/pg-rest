@@ -1,8 +1,41 @@
 import type { Column, CompositeRef, CompositeType, FunctionDef, Relation, SchemaCache } from "@tspg/core/schema";
+import type { QueryOptions } from "./index";
 import { findRelationships, relKey, toDescriptor } from "@tspg/core/schema";
 
 // Build time, with the generators: reading the catalog is not something a running server does.
-export { introspect } from "@tspg/core/schema";
+import { introspect as readCatalog } from "@tspg/core/schema";
+
+/**
+ * What {@link introspect} needs out of `createQuery`'s options: the database and the schemas to
+ * expose. A whole {@link QueryOptions} is one of these, which is the point -- the generator reads
+ * the catalog through the options the instance is created from, so the two cannot name different
+ * schemas.
+ */
+export type IntrospectOptions = Pick<QueryOptions, "db" | "schemas">;
+
+/**
+ * Read the catalog and build the {@link SchemaCache} the generators below turn into a module.
+ *
+ * It takes the same options as `createQuery`, so a generator script hands over the object it
+ * already has:
+ *
+ * ```ts
+ * // db.ts exports the options; gen-types.ts imports them
+ * writeFileSync("src/db.generated.ts", generateModule(await introspect(options), { name: "Database" }));
+ * ```
+ *
+ * `schemas` defaults to `["public"]`, as it does for `createQuery`.
+ */
+export const introspect = (options: IntrospectOptions): Promise<SchemaCache> =>
+  readCatalog(options.db, options.schemas?.length ? options.schemas : ["public"]);
+
+/**
+ * What a generator reads: `createQuery`'s options, and it reads the catalog itself -- or a
+ * {@link SchemaCache} already in hand, for a script generating several modules from one read.
+ */
+export type GenerateSource = IntrospectOptions | SchemaCache;
+
+const cacheOf = async (source: GenerateSource): Promise<SchemaCache> => ("db" in source ? introspect(source) : source);
 
 /**
  * Generate TypeScript types from an introspected schema, as the text of a module.
@@ -12,7 +45,7 @@ export { introspect } from "@tspg/core/schema";
  * in version control:
  *
  * ```ts
- * writeFileSync("src/db.generated.ts", generateModule(await introspect(db, ["api"])));
+ * writeFileSync("src/db.generated.ts", await generateModule({ db, schemas: ["api"] }));
  * ```
  */
 export interface GenerateTypesOptions {
@@ -268,7 +301,7 @@ const compositeShape = (
 };
 
 /** Generate the module text. Deterministic: same catalog, same bytes. */
-export const generateTypes = (cache: SchemaCache, options: GenerateTypesOptions = {}): string => {
+const typesOf = (cache: SchemaCache, options: GenerateTypesOptions): string => {
   const name = options.name ?? "Database";
   const views = options.views ?? "nullable";
   const { lines, push } = writer();
@@ -385,12 +418,7 @@ export const generateTypes = (cache: SchemaCache, options: GenerateTypesOptions 
   return `${[...head, ...lines].join("\n")}\n`;
 };
 
-/**
- * The schema descriptor `createQuery` runs on, as the text of a module exporting `schema`. The
- * runtime reads this instead of the catalog, so a server starts without a round trip to find out
- * what its tables are. Run it again after a migration, like the types.
- */
-export const generateSchema = (cache: SchemaCache, options: { readonly header?: string | false } = {}): string => {
+const schemaOf = (cache: SchemaCache, options: { readonly header?: string | false }): string => {
   const header =
     options.header === false
       ? ""
@@ -398,8 +426,28 @@ export const generateSchema = (cache: SchemaCache, options: { readonly header?: 
   return `${header}import type { SchemaDescriptor } from "@tspg/query";\n\nexport const schema: SchemaDescriptor = ${JSON.stringify(toDescriptor(cache), null, 2)};\n`;
 };
 
+/**
+ * The types, as the text of a module: one call on the options `createQuery` takes.
+ *
+ * ```ts
+ * writeFileSync("src/db.generated.ts", await generateTypes(options, { name: "Database" }));
+ * ```
+ */
+export const generateTypes = async (source: GenerateSource, options: GenerateTypesOptions = {}): Promise<string> =>
+  typesOf(await cacheOf(source), options);
+
+/**
+ * The schema descriptor `createQuery` runs on, as the text of a module exporting `schema`. An
+ * instance given it reads the catalog neither at start-up nor while it runs, so a server starts
+ * without a round trip to find out what its tables are. Run it again after a migration, like the types.
+ */
+export const generateSchema = async (
+  source: GenerateSource,
+  options: { readonly header?: string | false } = {},
+): Promise<string> => schemaOf(await cacheOf(source), options);
+
 /** Types and descriptor in one module: `Database` for the compiler, `schema` for `createQuery`. */
-export const generateModule = (cache: SchemaCache, options: GenerateTypesOptions = {}): string => {
-  const schema = generateSchema(cache, { header: false });
-  return `${generateTypes(cache, options)}\n${schema}`;
+export const generateModule = async (source: GenerateSource, options: GenerateTypesOptions = {}): Promise<string> => {
+  const cache = await cacheOf(source);
+  return `${typesOf(cache, options)}\n${schemaOf(cache, { header: false })}`;
 };

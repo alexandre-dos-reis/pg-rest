@@ -12,17 +12,18 @@ pnpm i @tspg/query pg
 bun add @tspg/query # Bun.sql is built in
 ```
 
-We also support other adapters, like PGlite and node-postgres.
+We also support other postgres adapters, like PGlite and postgres-js.
 
 ```ts
 import pg from "pg";
 import { createQuery } from "@tspg/query";
 import { nodePostgresAdapter } from "@tspg/query/adapters/node-postgres";
-import { schema } from "./db.generated"; // written at build time: see below
+import type { Database } from "./db.generated"; // written at build time: see below
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
-const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
+// the driver, the schemas to expose, and the generated type: nothing else is needed
+const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 
 const { data, error } = await db.select(
   {
@@ -59,14 +60,28 @@ a savepoint, is how one query is _allowed_ to fail.
 
 ## Types from your schema
 
-One build-time call reads the catalog and writes the types and the schema `createQuery` runs on. A running server never
-reads the catalog, and checks nothing at runtime: the compiler is what keeps a query and the schema in step.
+One build-time call, on the same options the instance is created from, reads the catalog and writes the types. Run it
+again after a migration and commit the file, like any other generated artefact:
 
 ```ts
-writeFileSync(
-  "src/db.generated.ts",
-  generateModule(await introspect(nodePostgresAdapter(pool), ["api"]), { name: "Database" }),
-);
+import { generateTypes } from "@tspg/query/types";
+
+// options is what createQuery takes: { db: nodePostgresAdapter(pool), schemas: ["api"] }
+writeFileSync("src/db.generated.ts", await generateTypes(options, { name: "Database" }));
+```
+
+Nothing is checked at runtime: the compiler is what keeps a query and the schema in step. The instance reads the catalog
+itself, once, on its first query — `await db.ready()` does it at start-up instead, so a connection or catalog problem
+surfaces there.
+
+To read the catalog **never**, use `generateModule` instead: it writes the same types plus a `schema` descriptor of the
+catalog, and an instance given that descriptor needs no round trip and no catalog permissions, which is what a cold
+start on a serverless runtime wants:
+
+```ts
+import { schema, type Database } from "./db.generated";
+
+const db = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
 ```
 
 ## Documentation

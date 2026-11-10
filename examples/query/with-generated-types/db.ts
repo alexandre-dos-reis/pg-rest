@@ -10,10 +10,11 @@ import type { QueryOptions } from "@tspg/query";
 export const pglite = new PGlite();
 await pglite.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
 
-// Everything createQuery takes except the schema, which gen-types.ts writes.
-export const pgRestOptions: Omit<QueryOptions, "schema"> = {
+// Everything createQuery takes: the driver, the role an anonymous call gets, and the Postgres
+// schema to expose. gen-types.ts reads the catalog through this same object, so the types and the
+// instance cannot end up describing different schemas.
+export const restOptions: QueryOptions = {
   db: pgliteAdapter(pglite),
   anonymousRole: "anon",
+  schemas: ["api"],
 };
-
-export const schemas = ["api"];

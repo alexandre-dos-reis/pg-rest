@@ -88,3 +88,51 @@ export const createStaticEngine = (options: EngineOptions, schema: SchemaCache):
   ...build(options),
   store: staticStore(schema),
 });
+
+/** An engine whose catalog has not been read yet: {@link LazyEngine.ready} reads it, once. */
+export interface LazyEngine extends Engine {
+  /**
+   * The cache, reading the catalog on the first call and answering the same one afterwards.
+   * Concurrent callers share the single read; a read that failed is not remembered, so the next
+   * call tries again.
+   */
+  ready(): Promise<SchemaCache>;
+}
+
+/**
+ * Nothing is read here: the catalog is read on the first {@link LazyEngine.ready}, which is what
+ * lets an entry point be created synchronously and still work from the live catalog. `store.current()`
+ * throws until that first read has happened -- `ready()` is the way in.
+ */
+export const createLazyEngine = (options: EngineOptions): LazyEngine => {
+  const { adapter, config } = build(options);
+  let loaded: SchemaStore | undefined;
+  let loading: Promise<SchemaStore> | undefined;
+  const load = (): Promise<SchemaStore> => {
+    loading ??= createSchemaStore(adapter, config.schemas).then(
+      (s) => {
+        loaded = s;
+        return s;
+      },
+      (e: unknown) => {
+        // A failed read is forgotten rather than cached: the database being unreachable for one
+        // call must not make every later call fail on that same rejection.
+        loading = undefined;
+        throw e;
+      },
+    );
+    return loading;
+  };
+  return {
+    adapter,
+    config,
+    store: {
+      current: () => {
+        if (!loaded) throw new Error("pg-rest: the schema has not been read yet (await ready() first)");
+        return loaded.current();
+      },
+      reload: async () => (await load()).reload(),
+    },
+    ready: async () => (await load()).current(),
+  };
+};

@@ -29,32 +29,37 @@ bun run link:examples with-generated-types   # builds pg-rest, then symlinks it 
 
 ## The four files
 
-**`db.ts`** -- Postgres in WebAssembly (PGlite), `schema.sql` loaded in memory, and the options. Nothing to install,
-nothing to start. It deliberately knows nothing about the generated types: the generator has to run before they exist.
+**`db.ts`** -- Postgres in WebAssembly (PGlite), `schema.sql` loaded in memory, and `restOptions`: the driver, the
+anonymous role and `schemas: ["api"]`. Nothing to install, nothing to start. It deliberately knows nothing about the
+generated types: the generator has to run before they exist.
 
-**`gen-types.ts`** -- the generator, which is one call on the instance:
+**`gen-types.ts`** -- the generator, which is **one call on those same options**:
 
 ```ts
-const types = await pgRest.generateTypes({ name: "DatabasePgRest" });
-writeFileSync(new URL("./db.generated.ts", import.meta.url), types);
+const generated = await generateTypes(restOptions, { name: "DatabasePgRest" });
+writeFileSync(new URL("./db.generated.ts", import.meta.url), generated);
 ```
 
-The types come from the catalog the instance already read to answer requests, so they describe exactly what it accepts.
-No CLI and no second connection: you already have a driver. This script builds its own *untyped* instance -- a generator
-cannot be typed by the file it is about to write, which is also why it imports `db.ts` and not `client.ts`.
+It reads the catalog itself, so there is no CLI, no second connection and no chance of generating for a schema the
+instance does not expose. It imports `db.ts` and not `client.ts`, which needs the file this script is about to write.
 
 **`client.ts`** -- the instance your application code imports, created once and typed by `db.generated.ts`:
 
 ```ts
-export const pgRest = await createQuery<DatabasePgRest>(options);
+export const rest = createQuery<DatabasePgRest>(restOptions);
 ```
+
+The options are the whole of it: `schemas: ["api"]` is the Postgres schema to expose and nothing more, and the instance
+reads the catalog itself, once, on its first query. `generateModule` (instead of `generateTypes` above) also writes a
+`schema` **descriptor** of that catalog; hand that to `createQuery` and it reads nothing at runtime, ever -- which is how
+[`with-transactions`](../with-transactions) does it. Either way the queries are typed by `DatabasePgRest` alone.
 
 **`main.ts`** -- the queries. That one type argument is what makes everything inside follow:
 
 ```ts
-const pgRest = await createQuery<DatabasePgRest>(options);
+import { rest } from "./client.ts";
 
-const { data: todos, error } = await pgRest.select({
+const { data: todos, error } = await rest.select({
   table: "todos", //                                  only a relation of the exposed schema
   columns: ["id", "title", "priority", { tags: ["label"] }], //  real columns, real relationship
   where: { done: false }, //                          its own columns, with the right value type
@@ -72,7 +77,7 @@ Array<{ id: number; title: string; priority: "low" | "normal" | "high"; tags: Ar
 
 ## What the generated file looks like
 
-83 lines for this schema, with no imports. The enum became a union, the composite type a named object type, `id` is
+84 lines for this schema, with no imports. The enum became a union, the composite type a named object type, `id` is
 absent from `insert` because `GENERATED ALWAYS AS IDENTITY` refuses a value, `title` is required and the columns with a
 default are optional:
 
@@ -117,16 +122,16 @@ the relationships you may embed are the ones a foreign key actually leads to.
 
 ```ts
 // @ts-expect-error "urgent" is not one of the enum's labels
-void pgRest.select({ table: "todos", where: { priority: "urgent" } });
+void rest.select({ table: "todos", where: { priority: "urgent" } });
 
 // @ts-expect-error `id` is generated: it cannot be written
-void pgRest.insert({ table: "todos", rows: { id: 42, title: "nope" } });
+void rest.insert({ table: "todos", rows: { id: 42, title: "nope" } });
 
 // @ts-expect-error `floor` is an int -- the fields of a composite type are checked like any other value
-void pgRest.select({ table: "todos", where: { at: { floor: "2" } } });
+void rest.select({ table: "todos", where: { at: { floor: "2" } } });
 
 // @ts-expect-error a misspelled field would be dropped in silence at runtime
-void pgRest.select({ table: "todos", columns: ["id"], limitt: 10 });
+void rest.select({ table: "todos", columns: ["id"], limitt: 10 });
 ```
 
 Not everything can be described: casts (`total::text`), JSON paths (`meta->>tier`) and aggregates (`total.sum()`) change

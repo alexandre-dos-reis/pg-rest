@@ -20,18 +20,25 @@ against it at runtime, which keeps the operations fast.
 ```ts
 // scripts/gen-types.ts — run it again after a migration
 import { writeFileSync } from "node:fs";
-import { generateModule, introspect } from "@tspg/query/types";
+import { generateModule } from "@tspg/query/types";
 
-const cache = await introspect(nodePostgresAdapter(pool), ["api"]);
-writeFileSync("src/db.generated.ts", generateModule(cache, { name: "Database" }));
+writeFileSync("src/db.generated.ts", await generateModule(options, { name: "Database" }));
 ```
 
 The file exports the type `Database` and the descriptor `schema`, and `createQuery<Database>({ db, schema })` takes both.
 No CLI and no second database connection: you already have a driver. This is build-time code, which a server that only
 serves queries never loads.
 
-`generateTypes(cache)` gives the types alone and `generateSchema(cache)` the descriptor alone, for when they go in
-different files.
+Each generator takes the options `createQuery` takes and reads the catalog itself, so a script has one call to make and
+no chance of generating for schemas the instance does not expose. `generateTypes(options)` gives the types alone and
+`generateSchema(options)` the descriptor alone, for when they go in different files; `introspect(options)` gives the
+cache, which the three also accept in place of the options when one script writes several modules from one read.
+
+The descriptor is optional — `createQuery<Database>({ db, schemas: ["api"] })` reads the catalog itself, once, on its
+first query. The queries are typed exactly the same, since `Database` is a type argument and types never reach runtime;
+what you give up is the guarantee that nothing is read at runtime and that the types and the library cannot disagree.
+With `generateTypes` alone, that is the whole setup: one generated type, no descriptor to pass. See
+[`options.md`](options.md).
 
 | option | |
 | --- | --- |
@@ -123,6 +130,8 @@ Only the composite types the module actually mentions are declared, so a `noUnus
 
 ```ts
 const pgRest = createQuery<Database>({ db: nodePostgresAdapter(pool), schema });
+// without a generated descriptor, naming the schemas to expose instead:
+const live = createQuery<Database>({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 ```
 
 From there, `table` and `rpc` are the ones that exist, `columns`, `where` and `order` only name real columns and

@@ -5,10 +5,10 @@
 // running application never reads the catalog. It imports db.ts and not client.ts, which needs the
 // file this one is about to write.
 import { writeFileSync } from "node:fs";
-import { generateModule, introspect } from "@tspg/query/types";
-import { pgRestOptions, pglite, schemas } from "./db.ts";
+import { generateModule } from "@tspg/query/types";
+import { pgRestOptions, pglite } from "./db.ts";
 
-const generated = generateModule(await introspect(pgRestOptions.db, schemas), { name: "DatabasePgRest" });
+const generated = await generateModule(pgRestOptions, { name: "DatabasePgRest" });
 
 writeFileSync(new URL("./db.generated.ts", import.meta.url), generated);
 console.log(`db.generated.ts: ${generated.split("\n").length} lines`);

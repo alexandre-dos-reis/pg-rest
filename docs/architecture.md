@@ -45,7 +45,7 @@ What each side hands the core, and what it takes back:
 
 | | `@tspg/rest` | `@tspg/query` |
 | --- | --- | --- |
-| **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))`: never reads the catalog; the descriptor is generated at build time |
+| **Engine** | `createEngine(options)`: reads the catalog at startup; `reloadSchema()` reads it again | `createStaticEngine(options, fromDescriptor(schema))` with a generated descriptor: never reads the catalog. Without one, `createLazyEngine(options)`: the catalog is read on the first operation, so creating the instance stays synchronous |
 | **Input** | the URL's `[key, value][]`, headers and body, parsed by `parseQuery` (`rest/src/parse`, where PostgREST's grammars and the parser combinators live) into a `ParsedQuery` | an object, built into the same `ParsedQuery` by `toParsed` (`query.ts`): no query string is made or read, and no grammar is in the package. `packages/query/tests/query-direct.test.ts` pins that it gives what `rest`'s parser reads from the equivalent string |
 | **Output format** | `Negotiated` (`json`, `object`, `csv`, `geojson`, `handler`, `openapi`, `plan`) from `Accept`, turned by `toEngineFormat` into the core's `json` / `object` / `rendered { sql }`; the CSV, GeoJSON and handler SQL is `rest`'s (`render.ts`) | `json`, or `object` with `single` |
 | **SqlCall** | `{ settings, before }`, built in `rest/src/http.ts`: the `request.*` settings (`requestSettings`) and `preRequest`, which is told the `Request` | `{ before }` only, built in `query.ts` from `preRequest`, which is told the role, claims, method and path: there is no request, so no `request.*` setting |
@@ -138,7 +138,7 @@ unparsed tokens are `rest`'s `Prefer`), and no response: `Outcome`, `appliedHead
 | `packages/query/src/query.ts` | the object API: `QueryInput` → `ParsedQuery`, the `SqlCall` (`preRequest`), prepared queries, `QueryError`, and the transaction scope |
 | `packages/query/src/kinds.ts` | the error kinds (`invalid_query`, `conflict`, `no_context`, `rolled_back`…) a `QueryError` carries, and how an engine or database error becomes one |
 | `packages/query/src/typed.ts` | types only: the typed input and the result inference over a generated database type |
-| `packages/query/src/types.ts` | build-time: `introspect`, `generateTypes`, `generateSchema`, `generateModule`, published as `@tspg/query/types` |
+| `packages/query/src/types.ts` | build-time: `introspect` and the generators (`generateTypes`, `generateSchema`, `generateModule`), each taking `createQuery`'s own options, published as `@tspg/query/types` |
 | `packages/core/src/core.ts` | planning, the transaction (`execute`, which takes a `SqlCall` and returns a `SqlResult`), the identity (`identityOf`), the count: what both entry points run |
 | `packages/core/src/parse/sql-options.ts` | the types of a call, whatever carried it: `SqlOperation`, `SqlPreferences`, `SqlOutputFormat` (JSON, or a body rendered by SQL the caller supplies) |
 | `packages/core/src/engine.ts` | the options both share, the adapter wrapper and the first schema read |
@@ -156,9 +156,10 @@ with no build of its own; `tsdown` bundles it into each published package, which
 
 ## The schema cache
 
-`createRest` introspects `pg_catalog` at startup, so a connection or catalog problem surfaces there. `createQuery` does not:
-it runs on a **schema descriptor**, the same cache as plain data, written at build time by `generateModule()` and read
-back by `fromDescriptor()` without any check — the compiler is what holds a query to it. The cache holds
+`createRest` introspects `pg_catalog` at startup, so a connection or catalog problem surfaces there. `createQuery` given a
+`schema` does not: it runs on a **schema descriptor**, the same cache as plain data, written at build time by
+`generateModule()` and read back by `fromDescriptor()` without any check — the compiler is what holds a query to it.
+Given `schemas` and no descriptor it introspects like `createRest`, but lazily: on the first operation, or on `ready()`. The cache holds
 relations with their columns (types, nullability, defaults, identity, enum labels, the table column a view column is
 read from), primary keys and unique constraints, what each relation accepts (`pg_relation_is_updatable`), foreign keys —
 **including the ones that travel through views** — functions with their arguments and return shapes, and the custom

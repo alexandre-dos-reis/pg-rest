@@ -45,7 +45,9 @@ The same trade reversed: because it runs inside your process, it can do things a
   request — no loopback call, and no second copy of the logic for your server components, jobs and
   webhooks. → [`query.md`](query.md)
 - **Types from your own catalog.** `generateModule()` reads `pg_catalog` once, at build time, and writes the types and
-  the schema `createQuery` runs on: the types describe exactly what it accepts, and a running server never reads the catalog. → [`types.md`](types.md)
+  the schema `createQuery` runs on: the types describe exactly what it accepts, and a running server never reads the
+  catalog. Give it the schemas instead of that descriptor and it reads the catalog itself, once, on the first
+  query — the queries are typed the same. → [`types.md`](types.md)
 - **Composite values as objects.** `where: { owner: { city: "Paris" } }` compares a
   [composite column](https://www.postgresql.org/docs/current/rowtypes.html) against a row of its own type, where
   PostgREST can only answer `0A000`: the query string has no way to say what type its literal is, and an object does.

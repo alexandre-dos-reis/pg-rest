@@ -44,9 +44,11 @@ followed it and the ledger row never happened — the balances are exactly what 
 Row Level Security policy that lets a member record a transfer only out of their own account.
 
 **`db.ts`** and **`gen-types.ts`** — PGlite, the schema loaded in memory, the options, and the
-generator that writes `db.generated.ts` from the catalog (`bun run gen:types`, again after a migration).
-See [`with-generated-types`](../with-generated-types) for what that file looks like and why it is a
-separate step.
+generator that writes `db.generated.ts` from the catalog (`bun run gen:types`, again after a migration):
+one call, `generateModule(options)`, on the same options the instance is created from. It writes the
+types *and* the `schema` descriptor, which this example hands to `createQuery` so that nothing reads
+the catalog at runtime. See [`with-generated-types`](../with-generated-types) for what that file looks
+like, and for the other way round: no descriptor, and the catalog read once on the first query.
 
 **`client.ts`** — the instance, typed by it: `createQuery<DatabasePgRest>(options)`. That one type
 argument reaches inside the scopes too, which is why nothing below declares a row shape.

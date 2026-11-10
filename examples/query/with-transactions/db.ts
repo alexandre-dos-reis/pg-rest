@@ -10,10 +10,9 @@ import type { QueryOptions } from "@tspg/query";
 export const pglite = new PGlite();
 await pglite.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
 
-// Everything createQuery takes except the schema, which gen-types.ts writes.
+// Everything createQuery takes except the schema descriptor, which gen-types.ts writes.
 export const pgRestOptions: Omit<QueryOptions, "schema"> = {
   db: pgliteAdapter(pglite),
   anonymousRole: "anon",
+  schemas: ["api"],
 };
-
-export const schemas = ["api"];
