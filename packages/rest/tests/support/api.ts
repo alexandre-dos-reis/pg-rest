@@ -36,7 +36,9 @@ export const authed = (sub = "user-1"): RequestContext => ({ role: "authenticate
 
 export const makeApi = async (options: Partial<RestOptions> = {}): Promise<TestApi> => {
   const db = await createTestDb();
-  const api = await createRest({ db: db.adapter, schemas: ["api", "v2"], ...options });
+  // The driver belongs to the harness: `close()` would end it by default, and `db.drop()` is what
+  // closes it here.
+  const api = await createRest({ db: db.adapter, schemas: ["api", "v2"], onClose: () => {}, ...options });
 
   const call = async (method: string, path: string, opts: CallOptions = {}): Promise<Reply> => {
     const headers: Record<string, string> = { ...opts.headers };

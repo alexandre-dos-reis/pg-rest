@@ -3,7 +3,6 @@
 // Everything below goes through `pgQuery.transaction`, which reads who is asking from the
 // AsyncLocalStorage in context.ts -- so not one call here passes a role or a claim.
 import { balances, ledgerCount, pgRest } from "./client.ts";
-import { pglite } from "./db.ts";
 import { asUser } from "./context.ts";
 import { batch, dryRun, report, transfer } from "./transfers.ts";
 
@@ -61,5 +60,5 @@ await asUser("alice", async () => {
 const forgotten = await transfer({ payer: "alice-main", payee: "bob-main", amount: 1 });
 console.log(`7 no context ${forgotten.error?.kind}`);
 
+// closing the instance closes PGlite with it: the adapter it was given is the one it ends
 await pgRest.close();
-await pglite.close();

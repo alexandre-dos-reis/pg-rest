@@ -23,6 +23,8 @@ try {
   const options = {
     db: nodePostgresAdapter(pool as never),
     schemas: ["api"],
+    // two instances over one pool, and the script ends it itself in `finally`
+    onClose: () => {},
     resolveContext: (req: Request) => {
       const sub = req.headers.get("x-user");
       return sub ? { role: "authenticated", claims: { sub } } : undefined;

@@ -22,7 +22,6 @@ console.log(`pg-rest (postgres.js) listening on http://localhost:${port}`);
 
 process.on("SIGINT", async () => {
   server.close();
-  await pgRest.close();
-  await sql.end();
+  await pgRest.close(); // closes the driver too (sql.end()): `onClose: () => {}` keeps it open
   process.exit(0);
 });

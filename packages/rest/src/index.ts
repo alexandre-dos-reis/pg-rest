@@ -67,7 +67,12 @@ export interface RestInstance {
   reloadSchema(): Promise<void>;
   /** The current introspected schema. */
   schemaCache(): Promise<SchemaCache>;
-  /** Stop the handler. The database adapter is left open: close it yourself. */
+  /**
+   * Stop the handler and close the database adapter -- `pool.end()`, `sql.end()`, `pglite.close()`,
+   * whichever the adapter has. Pass `onClose` to {@link createRest} to take that over: a driver
+   * shared with another instance, or one whose lifecycle is the application's, wants
+   * `onClose: () => {}`. Calling it twice closes once.
+   */
   close(): Promise<void>;
 }
 
@@ -78,7 +83,7 @@ export interface RestInstance {
  * `query()` API is `@tspg/query`.
  */
 export const createRest = async (options: RestOptions): Promise<RestInstance> => {
-  const { adapter, config: shared, store } = await createEngine(options);
+  const { adapter, config: shared, store, close } = await createEngine(options);
   const config: HttpConfig = {
     ...shared,
     preRequest: options.preRequest,
@@ -107,6 +112,6 @@ export const createRest = async (options: RestOptions): Promise<RestInstance> =>
     handle,
     reloadSchema: async () => void (await store.reload()),
     schemaCache: async () => store.current(),
-    close: async () => {},
+    close,
   };
 };

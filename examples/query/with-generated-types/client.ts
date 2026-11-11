@@ -6,12 +6,13 @@
 // catalog itself, once, on its first operation. Hand it the `schema` descriptor `generateModule`
 // writes instead (see ../with-transactions) and it reads nothing, ever.
 import { createQuery } from "@tspg/query";
-import { pglite, restOptions } from "./db.ts";
+import { restOptions } from "./db.ts";
 import type { DatabasePgRest } from "./db.generated.ts";
 
 export const rest = createQuery<DatabasePgRest>(restOptions);
 
+// `rest.close()` closes the adapter it was given, so PGlite goes down with it. An instance that
+// must leave the driver alone -- one of two over the same pool -- takes `onClose: () => {}`.
 export const close = async (): Promise<void> => {
   await rest.close();
-  await pglite.close();
 };

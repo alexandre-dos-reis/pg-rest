@@ -16,7 +16,10 @@ reference lives in `docs/`.
 - **Parity belongs to `@tspg/rest`.** Anything that is not PostgREST -- the `$` filters, the computed `set`, the typed layer --
   is `@tspg/query` only, and must not change what `handle()` does (`packages/rest/tests/compare` pins that against a real PostgREST).
   HTTP-only settings (`basePath`, `allowTxOverride`, `planEnabled`, `openApi`, `serverUrl`) are `HttpConfig`, in `rest`.
-- Each package keeps its own schema cache: an app that uses both creates both. **Neither package's tests name the other**:
+- Each package keeps its own schema cache: an app that uses both creates both. **`close()` closes the adapter it was
+  given** (the default is the adapter's own `close()`, called once, a driver already closed being no error), so two
+  instances over one driver means `onClose: () => {}` on all but one of them -- which is what both test harnesses
+  (`packages/*/tests/support/api.ts`) pass, the throwaway database being theirs to drop. **Neither package's tests name the other**:
   `packages/rest/tests` has its own harness over `createRest`, `packages/query/tests` one over `createQuery`, and the
   guarantee that the two answer the same thing is pinned where they meet instead -- `ParsedQuery`, which `@tspg/core`
   owns. `packages/core/tests/parsed.fixtures.json` holds, per case, the query string and the `ParsedQuery` both must

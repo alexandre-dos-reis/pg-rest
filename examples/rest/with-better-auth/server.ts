@@ -23,6 +23,9 @@ const auth = betterAuth({
 const pgRest = await createRest({
   basePath: "/api/rest",
   db: nodePostgresAdapter(pool),
+  // The pool is Better Auth's as well as pg-rest's, so closing the handler must not end it:
+  // without this, `pgRest.close()` would call pool.end() and the auth routes would stop working.
+  onClose: () => {},
   schemas: ["api"],
   anonymousRole: "anon",
   // The session cookie -> who is calling. `sub` is what the RLS policies in 2-api.sql read.
