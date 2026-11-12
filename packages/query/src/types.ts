@@ -51,13 +51,6 @@ const cacheOf = async (source: GenerateSource): Promise<SchemaCache> => ("db" in
 export interface GenerateTypesOptions {
   /** Name of the exported type. Default `"Database"`. */
   readonly name?: string;
-  /**
-   * Nullability of view columns. The catalog reports every one of them as nullable, which is the
-   * truth as far as it knows: a `NOT NULL` source column says nothing about a `LEFT JOIN` in the
-   * view's own query. `"like-source"` follows `Column.source` instead -- shorter types, at the risk
-   * of claiming non-null where an outer join can produce one.
-   */
-  readonly views?: "nullable" | "like-source";
   /** Banner comment. `false` leaves it out. */
   readonly header?: string | false;
 }
@@ -143,15 +136,6 @@ export const columnType = (
   return wrapped + "[]".repeat(dims);
 };
 
-const nullableFor = (cache: SchemaCache, col: Column, views: "nullable" | "like-source"): boolean => {
-  if (!col.nullable) return false;
-  if (views === "nullable" || !col.source) return true;
-  // the catalog says nullable because it is a view column; ask the column it is read from instead
-  const source = cache.relations.get(relKey(col.source.schema, col.source.table));
-  const base = source?.columns.find((c) => c.name === col.source!.column);
-  return base ? base.nullable : true;
-};
-
 interface Lines {
   readonly push: (depth: number, text: string) => void;
 }
@@ -164,7 +148,6 @@ const writer = (): { lines: string[]; push: Lines["push"] } => {
 /** `row`, `insert` and `update` of one relation. */
 const shapes = (
   rel: Relation,
-  sourceNullable: (col: Column) => boolean,
   push: Lines["push"],
   depth: number,
   composite: CompositeNamer,
@@ -174,7 +157,7 @@ const shapes = (
   const value = (c: Column) => {
     const t = columnType(c, composite);
     // `unknown | null` is just `unknown`: do not pretend the null is news
-    return t === "unknown" || !sourceNullable(c) ? t : `${t} | null`;
+    return t === "unknown" || !c.nullable ? t : `${t} | null`;
   };
   // a composite value on the way in may leave its fields out; coming back, they are all there
   const written = (c: Column) => input(value(c));
@@ -189,7 +172,7 @@ const shapes = (
   push(depth, rel.insertable ? "insert: {" : "insert: never;");
   if (rel.insertable) {
     for (const c of writable) {
-      const optional = c.hasDefault || sourceNullable(c) ? "?" : "";
+      const optional = c.hasDefault || c.nullable ? "?" : "";
       push(depth + 1, `${key(c.name)}${optional}: ${written(c)};`);
     }
     push(depth, "};");
@@ -303,7 +286,6 @@ const compositeShape = (
 /** Generate the module text. Deterministic: same catalog, same bytes. */
 const typesOf = (cache: SchemaCache, options: GenerateTypesOptions): string => {
   const name = options.name ?? "Database";
-  const views = options.views ?? "nullable";
   const { lines, push } = writer();
 
   // Composite types are named once and referred to; which ones end up in the module depends on what
@@ -336,9 +318,8 @@ const typesOf = (cache: SchemaCache, options: GenerateTypesOptions): string => {
 
     push(0, `type ${relationsType} = {`);
     for (const rel of relations) {
-      const sourceNullable = (c: Column) => nullableFor(cache, c, views);
       push(1, `${key(rel.name)}: {`);
-      shapes(rel, sourceNullable, push, 2, compositeName, input);
+      shapes(rel, push, 2, compositeName, input);
       push(2, `pk: [${rel.pk.map((c) => JSON.stringify(c)).join(", ")}];`);
       push(2, `insertable: ${rel.insertable};`);
       push(2, `updatable: ${rel.updatable};`);

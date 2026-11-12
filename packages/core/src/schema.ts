@@ -41,8 +41,13 @@ export interface Column {
   readonly composite?: CompositeRef | undefined;
   /**
    * For a view column read straight from a table column, that column -- followed through
-   * view-over-view chains. `nullable` still reports what the catalog says of the *view*, which is
-   * always true: a `NOT NULL` source says nothing about a `LEFT JOIN` in the view's own query.
+   * view-over-view chains. `nullable`, `hasDefault`, `defaultExpr`, `generated` and `identity` are
+   * then the source column's, not the view's: the catalog holds no constraint for a view, so its
+   * own answer is always "nullable, no default" and says nothing true.
+   *
+   * The exception is a view whose query has a `LEFT`, `RIGHT` or `FULL` join, where a `NOT NULL`
+   * source column still comes out null for an unmatched row. Those views keep the catalog's answer,
+   * so a `source` here does not by itself mean the two agree.
    */
   readonly source?: { readonly schema: string; readonly table: string; readonly column: string } | undefined;
   readonly nullable: boolean;
@@ -243,6 +248,22 @@ const run = async <T>(db: DbSession, sql: string): Promise<T[]> => {
   return JSON.parse(typeof j === "string" ? j : "[]") as T[];
 };
 
+/**
+ * The tables the views of `schemas` read from, as `(schema, name)` -- including the ones outside
+ * `schemas`, which is the usual arrangement: views in `api` over tables in `core`. A view borrows
+ * its nullability and its primary key from there, so both have to be legible even when the schema
+ * holding them is not exposed.
+ */
+const sourceRelationsSql = (S: string): string =>
+  `SELECT DISTINCT tn.nspname AS schema, tc.relname AS name
+     FROM pg_rewrite rw
+     JOIN pg_class vc ON vc.oid = rw.ev_class AND vc.relkind IN ('v','m')
+     JOIN pg_namespace vn ON vn.oid = vc.relnamespace
+     CROSS JOIN LATERAL regexp_matches(rw.ev_action::text, ':resorigtbl (\\d+)', 'g') AS m(x)
+     JOIN pg_class tc ON tc.oid = m.x[1]::oid
+     JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+    WHERE vn.nspname = ANY(${S}) AND rw.rulename = '_RETURN' AND m.x[1]::oid <> 0`;
+
 interface ViewColumn {
   readonly vschema: string;
   readonly vname: string;
@@ -410,7 +431,8 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        LEFT JOIN pg_namespace fns ON fns.oid = frel.relnamespace
       WHERE con.contype IN ('p','u','f')
         AND con.conparentid = 0
-        AND (ns.nspname = ANY(${S}) OR fns.nspname = ANY(${S}))`,
+        AND (ns.nspname = ANY(${S}) OR fns.nspname = ANY(${S})
+             OR (ns.nspname, rel.relname) IN (${sourceRelationsSql(S)}))`,
   );
 
   // Plain columns of views (and materialized views) and the table column each one is read from,
@@ -439,6 +461,43 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
        JOIN pg_attribute ta ON ta.attrelid = tc.oid AND ta.attnum = m.x[3]::int
       WHERE vn.nspname = ANY(${S}) AND rw.rulename = '_RETURN' AND m.x[2]::oid <> 0
       ORDER BY vc.oid, m.x[1]::int, m.ord DESC`,
+  );
+
+  // Views whose own query has an outer join, and whose columns therefore cannot inherit the source
+  // column's `NOT NULL`: the preserved side of a `LEFT`, `RIGHT` or `FULL` join produces nulls for
+  // columns the catalog calls `NOT NULL`. `resorigtbl` names the column either way, so provenance
+  // alone cannot tell the two apart -- this is what tells them apart.
+  //
+  // Read off the rewrite rule's node tree, where a `JoinExpr` spells its kind as `:jointype N`:
+  // 0 inner, 1 left, 2 full, 3 right, and 4/5 semi/anti (from `EXISTS`/`IN`, which null nothing).
+  // The whole tree is scanned, so a view is excluded by a join anywhere in it, including one in a
+  // subquery that cannot reach the columns at issue. That is the safe direction to be wrong in:
+  // the column keeps the `| null` it has today.
+  const outerJoinRows = await run<{ schema: string; name: string }>(
+    db,
+    `SELECT n.nspname AS schema, c.relname AS name
+       FROM pg_rewrite rw
+       JOIN pg_class c ON c.oid = rw.ev_class AND c.relkind IN ('v','m')
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ANY(${S}) AND rw.rulename = '_RETURN'
+        AND rw.ev_action::text ~ ':jointype [1-3]'`,
+  );
+  const outerJoinViews = new Set(outerJoinRows.map((r) => relKey(r.schema, r.name)));
+
+  // `attnotnull` of the columns those views read, which are not themselves exposed: a view in `api`
+  // over a table in `core` is the usual shape, and `schemas: ["api"]` is the usual way to expose it.
+  // Without this the source column would be invisible and every view column would stay nullable --
+  // exactly the case the inheritance is for. Nullability only: nothing here becomes a relation.
+  const sourceNullRows = await run<{ schema: string; table: string; name: string; nullable: boolean }>(
+    db,
+    `SELECT DISTINCT n.nspname AS schema, c.relname AS "table", a.attname AS name,
+            NOT a.attnotnull AS nullable
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE NOT (n.nspname = ANY(${S}))
+        AND a.attnum > 0 AND NOT a.attisdropped
+        AND (n.nspname, c.relname) IN (${sourceRelationsSql(S)})`,
   );
 
   const fnRows = await run<{
@@ -628,18 +687,37 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     }
   }
 
+  // Every column by `schema.table.column`, so a view column can be read against the table column it
+  // comes from. Built before the loop below: a view may be introspected before the table it reads.
+  const nullableByCol = new Map<string, boolean>();
+  for (const r of sourceNullRows) nullableByCol.set(`${relKey(r.schema, r.table)}.${r.name}`, r.nullable);
+  for (const c of colRows) nullableByCol.set(`${relKey(c.schema, c.table)}.${c.name}`, c.nullable);
+
   const colsByRel = new Map<string, Column[]>();
   for (const c of colRows) {
     const key = relKey(c.schema, c.table);
     const list = colsByRel.get(key) ?? [];
     const source = viewSource.get(`${key}.${c.name}`);
+    // `attnotnull` is always false on a view column -- a view carries no constraint of its own -- so
+    // what the catalog says there is not an answer. When the column is read straight from a table
+    // column and no outer join can null it, the table's answer is the true one.
+    //
+    // Only `nullable` is taken this way. A default is deliberately not: `pg_attrdef` being empty for
+    // the view *is* the truth, because `SET col = DEFAULT` through a view that has no default of
+    // its own writes a null rather than the table's default. Omitting the column on an insert does
+    // reach that default, but that is insert optionality, which the generator works out from
+    // `source` instead -- see `packages/query/src/types.ts`.
+    const inherited =
+      source && !outerJoinViews.has(key)
+        ? nullableByCol.get(`${relKey(source.schema, source.table)}.${source.column}`)
+        : undefined;
     list.push({
       name: c.name,
       type: c.type,
       ...(c.enum_labels ? { enumLabels: c.enum_labels } : {}),
       ...(c.composite ? { composite: c.composite } : {}),
       ...(source ? { source } : {}),
-      nullable: c.nullable,
+      nullable: inherited ?? c.nullable,
       hasDefault: c.has_default,
       defaultExpr: c.default_expr,
       generated: c.generated,
@@ -654,6 +732,27 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
     colsByRel.set(key, list);
   }
 
+  // The primary key of a view: the one of the table behind it, named in the view's own columns, when
+  // the view exposes every column of that key. A view has no `pg_constraint` row of its own, so
+  // without this it has no key at all -- and a key is what tells a single row from a set of one.
+  // Same exclusion as for nullability: an outer join can leave a key column null.
+  const viewPk = (key: string): string[] | undefined => {
+    if (outerJoinViews.has(key)) return undefined;
+    // base table column -> the view column reading it, for this view only
+    const exposed = new Map<string, string>();
+    for (const col of colsByRel.get(key) ?? []) {
+      const src = col.source;
+      if (src) exposed.set(`${relKey(src.schema, src.table)}.${src.column}`, col.name);
+    }
+    for (const tableKey of new Set([...exposed.keys()].map((k) => k.slice(0, k.lastIndexOf("."))))) {
+      const cols = pk.get(tableKey);
+      if (!cols?.length) continue;
+      const names = cols.map((c) => exposed.get(`${tableKey}.${c}`));
+      if (names.every((n) => n !== undefined)) return names as string[];
+    }
+    return undefined;
+  };
+
   const relations = new Map<string, Relation>();
   for (const r of relRows) {
     const key = relKey(r.schema, r.name);
@@ -662,7 +761,7 @@ export const introspect = async (db: DbSession, schemas: ReadonlyArray<string>):
       name: r.name,
       kind: kindOf(r.kind),
       columns: colsByRel.get(key) ?? [],
-      pk: pk.get(key) ?? [],
+      pk: pk.get(key) ?? viewPk(key) ?? [],
       uniques: uniques.get(key) ?? [],
       insertable: (r.bits & 8) === 8,
       updatable: (r.bits & 4) === 4,

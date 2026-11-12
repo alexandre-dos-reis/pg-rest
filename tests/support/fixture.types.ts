@@ -23,42 +23,44 @@ type DatabasePgRestCompositeInput<T> = T extends ReadonlyArray<infer E>
 type DatabasePgRestApiRelations = {
   big_orders: {
     row: {
-      id: number | null;
-      client_id: number | null;
-      status: string | null;
-      total: number | null;
+      id: number;
+      client_id: number;
+      status: string;
+      total: number;
       placed_at: string | null;
     };
     insert: {
-      id?: number | null;
-      client_id?: number | null;
-      status?: string | null;
-      total?: number | null;
+      id: number;
+      client_id: number;
+      status: string;
+      total: number;
       placed_at?: string | null;
     };
     update: {
-      id?: number | null;
-      client_id?: number | null;
-      status?: string | null;
-      total?: number | null;
+      id?: number;
+      client_id?: number;
+      status?: string;
+      total?: number;
       placed_at?: string | null;
     };
     defaults: never;
-    pk: [];
+    pk: ["id"];
     insertable: true;
     updatable: true;
     deletable: true;
     rel: {
       client_id: { rel: "clients"; to: "one" };
       clients: { rel: "clients"; to: "one" };
+      huge_orders: { rel: "huge_orders"; to: "many" };
       order_items: { rel: "order_items"; to: "many" };
       orders: { rel: "orders"; to: "many" };
+      orders_with_client: { rel: "orders_with_client"; to: "many" };
       products: { rel: "products"; to: "many" };
     };
   };
   client_totals: {
     row: {
-      client_id: number | null;
+      client_id: number;
       revenue: number | null;
     };
     insert: never;
@@ -137,6 +139,32 @@ type DatabasePgRestApiRelations = {
       manager_id: { rel: "employees"; to: "one" };
     };
   };
+  huge_orders: {
+    row: {
+      id: number;
+      total: number;
+    };
+    insert: {
+      id: number;
+      total: number;
+    };
+    update: {
+      id?: number;
+      total?: number;
+    };
+    defaults: never;
+    pk: ["id"];
+    insertable: true;
+    updatable: true;
+    deletable: true;
+    rel: {
+      big_orders: { rel: "big_orders"; to: "many" };
+      order_items: { rel: "order_items"; to: "many" };
+      orders: { rel: "orders"; to: "many" };
+      orders_with_client: { rel: "orders_with_client"; to: "many" };
+      products: { rel: "products"; to: "many" };
+    };
+  };
   moods: {
     row: {
       id: number;
@@ -207,8 +235,10 @@ type DatabasePgRestApiRelations = {
     deletable: true;
     rel: {
       big_orders: { rel: "big_orders"; to: "one" };
-      order_id: { rel: "orders"; to: "one"; ambiguous: true; hints: ["order_items_order_id_fkey", "order_items_order_id_fkey"] };
+      huge_orders: { rel: "huge_orders"; to: "one" };
+      order_id: { rel: "orders"; to: "one"; ambiguous: true; hints: ["order_items_order_id_fkey", "order_items_order_id_fkey", "order_items_order_id_fkey", "order_items_order_id_fkey"] };
       orders: { rel: "orders"; to: "one" };
+      orders_with_client: { rel: "orders_with_client"; to: "one" };
       product_id: { rel: "products"; to: "one" };
       products: { rel: "products"; to: "one" };
     };
@@ -244,26 +274,49 @@ type DatabasePgRestApiRelations = {
       big_orders: { rel: "big_orders"; to: "many" };
       client_id: { rel: "clients"; to: "one" };
       clients: { rel: "clients"; to: "one" };
+      huge_orders: { rel: "huge_orders"; to: "many" };
       order_client: { rel: "clients"; to: "one" };
       order_items: { rel: "order_items"; to: "many" };
+      orders_with_client: { rel: "orders_with_client"; to: "many" };
+      products: { rel: "products"; to: "many" };
+    };
+  };
+  orders_with_client: {
+    row: {
+      id: number | null;
+      total: number | null;
+      client_name: string | null;
+    };
+    insert: never;
+    update: never;
+    defaults: never;
+    pk: [];
+    insertable: false;
+    updatable: false;
+    deletable: false;
+    rel: {
+      big_orders: { rel: "big_orders"; to: "many" };
+      huge_orders: { rel: "huge_orders"; to: "many" };
+      order_items: { rel: "order_items"; to: "many" };
+      orders: { rel: "orders"; to: "many" };
       products: { rel: "products"; to: "many" };
     };
   };
   place_names: {
     row: {
-      id: number | null;
+      id: number;
       name: string | null;
     };
     insert: {
-      id?: number | null;
+      id: number;
       name?: string | null;
     };
     update: {
-      id?: number | null;
+      id?: number;
       name?: string | null;
     };
     defaults: never;
-    pk: [];
+    pk: ["id"];
     insertable: true;
     updatable: true;
     deletable: true;
@@ -318,8 +371,10 @@ type DatabasePgRestApiRelations = {
     deletable: true;
     rel: {
       big_orders: { rel: "big_orders"; to: "many" };
+      huge_orders: { rel: "huge_orders"; to: "many" };
       order_items: { rel: "order_items"; to: "many" };
       orders: { rel: "orders"; to: "many" };
+      orders_with_client: { rel: "orders_with_client"; to: "many" };
     };
   };
   profiles: {
@@ -368,6 +423,29 @@ type DatabasePgRestApiRelations = {
       meta?: unknown;
     };
     defaults: "id";
+    pk: ["id"];
+    insertable: true;
+    updatable: true;
+    deletable: true;
+    rel: {};
+  };
+  widgets: {
+    row: {
+      id: number;
+      label: string;
+      note: string | null;
+    };
+    insert: {
+      id: number;
+      label: string;
+      note?: string | null;
+    };
+    update: {
+      id?: number;
+      label?: string;
+      note?: string | null;
+    };
+    defaults: never;
     pk: ["id"];
     insertable: true;
     updatable: true;
