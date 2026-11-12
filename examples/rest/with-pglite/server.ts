@@ -25,7 +25,6 @@ console.log(`pg-rest (PGlite) listening on http://localhost:${port}`);
 
 process.on("SIGINT", async () => {
   server.close();
-  await pgRest.close();
-  await db.close();
+  await pgRest.close(); // closes PGlite too: `onClose: () => {}` is how to keep it open
   process.exit(0);
 });

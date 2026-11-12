@@ -34,7 +34,19 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const rest = await createRest({ db: nodePostgresAdapter(pool), schemas: ["api"] });
 ```
 
-The libraries never close your driver: `rest.close()` stops the handler, the pool is yours to end.
+`rest.close()` stops the handler and ends the pool — `close()` calls the adapter's own `close()` (`pool.end()`,
+`sql.end()`, `pglite.close()`; nothing, for an adapter that has none), and does it once however often it is called. The
+`onClose` option takes that over, the adapter handed back as `db`:
+
+```ts
+const db = nodePostgresAdapter(pool);
+// the pool outlives the handler: the application ends it
+const rest = await createRest({ db, schemas: ["api"], onClose: () => {} });
+```
+
+That is what a driver shared between instances needs — an app that uses both packages creates two instances over one
+adapter, and whichever closes first would otherwise end the pool under the other. Give `onClose: () => {}` to all but
+one of them, or to all of them and end the driver yourself.
 
 ## Writing one
 

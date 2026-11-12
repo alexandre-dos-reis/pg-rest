@@ -39,7 +39,10 @@ export const makeApi = async (options: MakeOptions = {}): Promise<TestQuery> => 
   const db = await createTestDb();
   const { schemas = ["api", "v2"], ...rest } = options;
   const read = () => introspect(db.adapter, schemas);
-  const build = async () => createQuery({ db: db.adapter, ...rest, schema: toDescriptor(await read()) });
+  // The driver belongs to the harness, not to an instance: `close()` would end it by default, and
+  // `reloadSchema()` builds a second instance over the same adapter. `db.drop()` closes it.
+  const build = async () =>
+    createQuery({ db: db.adapter, onClose: () => {}, ...rest, schema: toDescriptor(await read()) });
 
   const t: TestQuery = {
     db,
@@ -65,6 +68,7 @@ export const makeTypedApi = async <Db extends AnyDatabase>(
   const { schemas = ["api", "v2"], ...rest } = options;
   const api = createQuery<Db>({
     db: db.adapter,
+    onClose: () => {},
     ...rest,
     schema: toDescriptor(await introspect(db.adapter, schemas)),
   });

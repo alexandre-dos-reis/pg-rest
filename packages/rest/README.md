@@ -24,7 +24,7 @@ import { nodePostgresAdapter } from "@tspg/rest/adapters/node-postgres";
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
 const rest = await createRest({
-  db: nodePostgresAdapter(pool), // you create and close the driver
+  db: nodePostgresAdapter(pool), // you create the driver; close() closes it (onClose: () => {} to keep it open)
   schemas: ["api"], //             the first one is the default schema
   anonymousRole: "anon",
   resolveContext: async (req) => {

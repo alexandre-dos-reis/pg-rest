@@ -19,7 +19,8 @@ const server = Bun.serve({ port: Number(process.env.PORT ?? 3000), fetch: (req) 
 console.log(`pg-rest (Bun.sql) listening on ${server.url}`);
 
 process.on("SIGINT", async () => {
+  // close() closes the adapter too (here: sql.close()). Pass `onClose: () => {}` to createRest to
+  // keep the driver open -- when it is shared with another instance, or with the rest of the app.
   await pgRest.close();
-  await sql.close();
   process.exit(0);
 });
