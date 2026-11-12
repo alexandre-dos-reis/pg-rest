@@ -1,6 +1,6 @@
 {
   "name": "@tspg/rest",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "PostgREST as a library using web-standard `Request` and `Response`",
   "license": "MIT",
   "author": "Alexandre Dos Reis",
