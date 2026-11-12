@@ -66,6 +66,25 @@ CREATE POLICY notes_owner ON api.notes
 CREATE VIEW api.big_orders AS SELECT * FROM api.orders WHERE total > 100;
 -- An aggregate view is not auto-updatable.
 CREATE VIEW api.client_totals AS SELECT client_id, sum(total) AS revenue FROM api.orders GROUP BY client_id;
+-- The usual arrangement of a PostgREST schema: the table lives in a schema that is *not* exposed,
+-- and only the view over it is. `core` is never passed to `introspect`, so everything the view
+-- borrows -- nullability, primary key -- has to be read without its schema being exposed.
+CREATE SCHEMA core;
+CREATE TABLE core.widgets (
+  id serial PRIMARY KEY,
+  label text NOT NULL,
+  note text
+);
+CREATE VIEW api.widgets WITH (security_invoker = true) AS SELECT id, label, note FROM core.widgets;
+
+-- A view over a view: provenance is followed down the chain, so these columns answer like the
+-- table's two levels down.
+CREATE VIEW api.huge_orders AS SELECT id, total FROM api.big_orders WHERE total > 1000;
+-- A view over an outer join: `clients.name` is NOT NULL in the table, but an order with no match
+-- yields null here. Its columns must therefore keep the catalog's "nullable", unlike a projection.
+CREATE VIEW api.orders_with_client AS
+  SELECT o.id, o.total, c.name AS client_name
+    FROM api.orders o LEFT JOIN api.clients c ON c.id = o.client_id;
 
 -- An enum, and an array of it: introspected as labels (see Column.enumLabels).
 CREATE TYPE api.mood AS ENUM ('sad', 'ok', 'happy');

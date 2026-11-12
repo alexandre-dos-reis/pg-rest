@@ -113,17 +113,16 @@ describe("generateTypes", () => {
     expect(out).toContain("insertable: false;");
   });
 
-  test("view columns: nullable by default, like the source on request", async () => {
+  test("view columns are typed from the cache, which has already resolved them", async () => {
+    // `introspect` is what follows `source` back to the table column (and what refuses to, for a
+    // view with an outer join); by the time the generator sees a column, `nullable` is the answer.
     const view = relation(
       "v",
-      [column("total", "numeric", { nullable: true, source: { schema: "api", table: "t", column: "total" } })],
-      {
-        kind: "view",
-      },
+      [column("total", "numeric", { nullable: false, source: { schema: "api", table: "t", column: "total" } })],
+      { kind: "view" },
     );
     const cache = cacheOf([relation("t", [column("total", "numeric")]), view]);
-    expect(await generateTypes(cache)).toContain("total: number | null;");
-    expect(await generateTypes(cache, { views: "like-source" })).toContain("total: number;");
+    expect(await generateTypes(cache)).toContain("total: number;");
   });
 
   test("names that are not identifiers are quoted", async () => {

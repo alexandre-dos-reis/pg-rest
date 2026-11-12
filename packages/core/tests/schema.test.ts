@@ -54,13 +54,60 @@ describe.skipIf(!hasDb)("schema introspection", () => {
   test("a view column knows the table column it is read from", () => {
     const total = getRelation(cache, "api", "big_orders").columns.find((c) => c.name === "total")!;
     expect(total.source).toEqual({ schema: "api", table: "orders", column: "total" });
-    // the catalog always reports a view column as nullable, whatever the source says
-    expect(total.nullable).toBe(true);
     // an aggregate is not read from a column, so it has no source
     expect(
       getRelation(cache, "api", "client_totals").columns.find((c) => c.name === "revenue")!.source,
     ).toBeUndefined();
     expect(getRelation(cache, "api", "orders").columns[0]!.source).toBeUndefined();
+  });
+
+  test("a view column takes its nullability from the column it reads", () => {
+    const col = (rel: string, n: string) => getRelation(cache, "api", rel).columns.find((c) => c.name === n)!;
+    // the catalog reports every view column as nullable with no default; the table's answer wins
+    expect(col("big_orders", "total").nullable).toBe(false);
+    expect(col("big_orders", "placed_at").nullable).toBe(true);
+    // the default is not inherited: through a view, `SET col = DEFAULT` writes a null, not the
+    // table's default, so the catalog's empty answer is the true one
+    expect(col("orders", "total").hasDefault).toBe(true);
+    expect(col("big_orders", "total").hasDefault).toBe(false);
+    expect(col("big_orders", "total").defaultExpr).toBeNull();
+    // through a view over a view
+    expect(col("huge_orders", "total").nullable).toBe(false);
+    expect(col("huge_orders", "total").source).toEqual({ schema: "api", table: "orders", column: "total" });
+    // an aggregate has no source, so nothing to inherit: it stays what the catalog says
+    expect(col("client_totals", "revenue").nullable).toBe(true);
+  });
+
+  test("an outer join in the view keeps the catalog's nullability", () => {
+    const col = (n: string) => getRelation(cache, "api", "orders_with_client").columns.find((c) => c.name === n)!;
+    // clients.name is NOT NULL, but an order with no matching client yields null here
+    expect(getRelation(cache, "api", "clients").columns.find((c) => c.name === "name")!.nullable).toBe(false);
+    expect(col("client_name").source).toEqual({ schema: "api", table: "clients", column: "name" });
+    expect(col("client_name").nullable).toBe(true);
+    // the exclusion is per view, not per column: the preserved side keeps the catalog's answer too
+    expect(col("id").nullable).toBe(true);
+    // and no primary key is borrowed either
+    expect(getRelation(cache, "api", "orders_with_client").pk).toEqual([]);
+  });
+
+  test("a view borrows from a table whose schema is not exposed", () => {
+    // `core` is not in the introspected schemas, so core.widgets is not a relation here at all --
+    // only api.widgets is. What it reads still has to be legible, or nothing could be inherited.
+    expect(cache.relations.has("core.widgets")).toBe(false);
+    const widgets = getRelation(cache, "api", "widgets");
+    const col = (n: string) => widgets.columns.find((c) => c.name === n)!;
+    expect(col("label").source).toEqual({ schema: "core", table: "widgets", column: "label" });
+    expect(col("label").nullable).toBe(false);
+    expect(col("note").nullable).toBe(true);
+    expect(widgets.pk).toEqual(["id"]);
+  });
+
+  test("a view borrows the primary key of the table behind it", () => {
+    expect(getRelation(cache, "api", "big_orders").pk).toEqual(["id"]);
+    // down a view-over-view chain
+    expect(getRelation(cache, "api", "huge_orders").pk).toEqual(["id"]);
+    // an aggregate exposes no key column, so the view has none
+    expect(getRelation(cache, "api", "client_totals").pk).toEqual([]);
   });
 
   test("loads columns with types and defaults", () => {
